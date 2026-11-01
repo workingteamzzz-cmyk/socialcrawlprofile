@@ -142,8 +142,8 @@ class Job:
         def record(acc, res: Result):
             for p in res.posts:
                 links.append({"order": order[acc.platform], "platform_label": PLATFORM_LABEL[acc.platform],
-                              "handle": acc.handle, "url": p.url, "time": p.time_utc})
-            statuses.append({"platform_label": PLATFORM_LABEL[acc.platform], "handle": acc.handle,
+                              "handle": acc.handle, "label": acc.label, "url": p.url, "time": p.time_utc})
+            statuses.append({"platform_label": PLATFORM_LABEL[acc.platform], "handle": acc.handle, "label": acc.label,
                              "url": acc.url, "status": res.status, "count": len(res.posts), "note": res.note})
             self.links_count = len(links)
 
@@ -197,7 +197,7 @@ class Job:
             done_keys = {(s["platform_label"], s["handle"]) for s in statuses}
             for acc in accounts:
                 if (PLATFORM_LABEL[acc.platform], acc.handle) not in done_keys:
-                    statuses.append({"platform_label": PLATFORM_LABEL[acc.platform], "handle": acc.handle,
+                    statuses.append({"platform_label": PLATFORM_LABEL[acc.platform], "handle": acc.handle, "label": acc.label,
                                      "url": acc.url, "status": "skipped", "count": 0, "note": ""})
             save()
             for closer in (ctx, pw):

@@ -45,24 +45,35 @@ hasilnya hanya daftar link beserta tanggal unggahnya.
 Tersimpan di folder `outputs/`, dan bisa juga diunduh dari halaman:
 
 - `link_unggahan_<periode>_<waktu>.xlsx`
-  - **Link Unggahan**: No, Platform, Akun, Tanggal, Jam, Link (link bisa diklik)
+  - **Link Unggahan**: No, Platform, Unit, Akun, Tanggal, Jam, Link (link bisa diklik)
   - **Status Akun**: status tiap akun, yaitu OK / Tidak ditemukan / Perlu login / Username tidak valid / Error, plus jumlah link
   - **Info**: periode dan waktu pembuatan
 - File `.csv` berisi data yang sama.
 
 File disimpan ulang setelah tiap akun selesai, jadi kalau proses terputus hasil sejauh itu tetap ada.
 
-## Catatan penting soal daftar akun
+## Base data akun (`data/akun_resmi.csv`)
 
-Sebagian URL di daftar **tidak mungkin valid** karena melanggar aturan username platformnya. Akun seperti itu
-otomatis dilewati dan ditandai *Username tidak valid* di sheet Status Akun:
+`data/akun_resmi.csv` adalah daftar induk akun resmi 51 unit Ditjen SDA di 6 platform. Kolomnya: Unit, Platform, Akun, URL,
+Status, Sumber, Catatan. Daftar ini dicek ulang (November 2026) lewat pencarian web, dari profil yang muncul di hasil pencarian
+dan dari tautan resmi di situs/kanal balai. Arti kolom **Status**:
 
-- **X:** maksimal 15 karakter dan tanpa titik. Contoh yang tidak valid: `pu_sda_sumatera1`, `setwan.dsdan`.
-- **Facebook:** tidak boleh ada underscore (`_`), jadi semua `facebook.com/pu_sda_...` tidak valid.
-  Halaman Facebook balai kemungkinan memakai alamat lain; cari alamat aslinya dari situs atau bio Instagram masing-masing.
-- **TikTok:** maksimal 24 karakter. Contoh yang tidak valid: `pu_sda_pompenganjeneberang`, `pu_sda_balaiteknikirigasi`.
+| Status | Arti |
+| --- | --- |
+| **Terverifikasi** | Profil akun itu sendiri, atau situs/kanal resmi balai yang menautkannya, terlihat di hasil pencarian |
+| **Kemungkinan** | Bukti kuat tapi tidak langsung (misalnya ditautkan dari kanal YouTube balai); ada juga akun yang tampak sudah tidak aktif |
+| **Belum terverifikasi** | Handle dari daftar awal yang valid secara format tapi tidak terlihat di hasil pencarian. Tetap ikut dicek oleh alat: lihat sheet *Status Akun* setelah dijalankan; kalau "Tidak ditemukan", hapus atau ganti |
+| **Tidak ditemukan** | Handle daftar awal mustahil ada di platform itu (misalnya Facebook dengan `_`, X lebih dari 15 karakter) dan akun aslinya tidak ketemu. Tidak dimasukkan ke `daftar_akun.txt` |
 
-Ganti URL tersebut dengan alamat yang benar di `daftar_akun.txt`, lalu jalankan lagi.
+Perubahan penting dibanding daftar awal:
+- `pupr_sda` dan `pu_sda` ternyata unit yang sama (Ditjen SDA pusat). `pu_sda_nusatenggara2` dan `pupr_sda_bwsnt2` juga sama (BBWS NT II).
+- Banyak akun X dan Facebook ternyata memakai nama lain, misalnya X `pu_sda_so` (Serayu Opak), `bbwss8` (Sumatera VIII),
+  dan Facebook `pu.sda.citarum`, `bwsmaluku`. Sebagian halaman Facebook hanya punya ID angka (`profile.php?id=…`).
+- Kanal YouTube yang tidak punya @handle ditulis dengan ID kanal (`youtube.com/channel/UC…`).
+
+Cara mengubah base: edit `data/akun_resmi.csv` (bisa dengan Excel, simpan sebagai CSV UTF-8), lalu jalankan
+`python tools/buat_daftar.py` untuk membuat ulang `daftar_akun.txt`. Di `daftar_akun.txt`, tiap baris berformat
+`URL | Nama unit`; nama unit ikut muncul di kolom **Unit** pada Excel hasil.
 
 ## Batasan
 
@@ -82,5 +93,7 @@ Ganti URL tersebut dengan alamat yang benar di `daftar_akun.txt`, lalu jalankan 
 | `crawler/job.py` | Proses login & pengambilan di background, simpan hasil |
 | `crawler/output.py` | Menulis Excel/CSV |
 | `crawler/server.py`, `crawler/static/index.html` | Tampilan web lokal (hanya bisa diakses dari laptop ini) |
-| `daftar_akun.txt` | Daftar akun default |
+| `data/akun_resmi.csv` | Base data akun resmi + status verifikasi |
+| `tools/buat_daftar.py` | Membuat `daftar_akun.txt` dari base data |
+| `daftar_akun.txt` | Daftar akun yang dipakai aplikasi |
 | `tests/` | Tes (`python -m pytest tests`) |

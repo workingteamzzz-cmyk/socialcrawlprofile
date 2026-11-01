@@ -32,9 +32,9 @@ def _autosize(ws, widths):
 def link_rows(links, tz_hours: int):
     tz = timezone(timedelta(hours=tz_hours))
     rows = []
-    for item in sorted(links, key=lambda r: (r["order"], r["handle"].lower(), r["time"] or 0)):
+    for item in sorted(links, key=lambda r: (r["order"], (r.get("label") or r["handle"]).lower(), r["handle"].lower(), r["time"] or 0)):
         t = item["time"].astimezone(tz) if item["time"] else None
-        rows.append([item["platform_label"], item["handle"],
+        rows.append([item["platform_label"], item.get("label", ""), item["handle"],
                      t.strftime("%Y-%m-%d") if t else "", t.strftime("%H:%M") if t else "", item["url"]])
     return rows
 
@@ -47,20 +47,20 @@ def write_outputs(path_xlsx: str, path_csv: str, links, statuses, meta: dict):
     wb = Workbook()
     ws = wb.active
     ws.title = "Link Unggahan"
-    ws.append(["No", "Platform", "Akun", f"Tanggal ({tz_name})", f"Jam ({tz_name})", "Link Unggahan"])
+    ws.append(["No", "Platform", "Unit", "Akun", f"Tanggal ({tz_name})", f"Jam ({tz_name})", "Link Unggahan"])
     for i, r in enumerate(rows, 1):
         ws.append([i] + r)
-        cell = ws.cell(row=i + 1, column=6)
-        cell.hyperlink = r[4]
+        cell = ws.cell(row=i + 1, column=7)
+        cell.hyperlink = r[5]
         cell.font = Font(color="0563C1", underline="single")
-    _autosize(ws, [6, 11, 30, 16, 10, 70])
+    _autosize(ws, [6, 11, 34, 26, 16, 10, 70])
 
     ws2 = wb.create_sheet("Status Akun")
-    ws2.append(["Platform", "Akun", "URL Profil", "Status", "Jumlah Link", "Keterangan"])
+    ws2.append(["Platform", "Unit", "Akun", "URL Profil", "Status", "Jumlah Link", "Keterangan"])
     for s in statuses:
-        ws2.append([s["platform_label"], s["handle"], s["url"], STATUS_LABEL.get(s["status"], s["status"]),
-                    s["count"], s["note"]])
-    _autosize(ws2, [11, 30, 50, 20, 12, 70])
+        ws2.append([s["platform_label"], s.get("label", ""), s["handle"], s["url"],
+                    STATUS_LABEL.get(s["status"], s["status"]), s["count"], s["note"]])
+    _autosize(ws2, [11, 34, 26, 50, 20, 12, 70])
 
     ws3 = wb.create_sheet("Info")
     for k, v in [("Periode", f"{meta['start']} s/d {meta['end']} ({tz_name})"),
@@ -73,5 +73,5 @@ def write_outputs(path_xlsx: str, path_csv: str, links, statuses, meta: dict):
 
     with open(path_csv, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
-        w.writerow(["Platform", "Akun", f"Tanggal ({tz_name})", f"Jam ({tz_name})", "Link Unggahan"])
+        w.writerow(["Platform", "Unit", "Akun", f"Tanggal ({tz_name})", f"Jam ({tz_name})", "Link Unggahan"])
         w.writerows(rows)

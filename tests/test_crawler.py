@@ -149,3 +149,21 @@ def test_browser_crawl_with_fake_pages(tmp_path):
             assert {p.time_utc.date() for p in res.posts} == want, (plat, [p.url for p in res.posts])
             assert len(res.posts) == 3
         ctx.close()
+
+
+def test_label_and_facebook_id_urls():
+    from crawler.accounts import parse_line
+    a = parse_line("https://www.facebook.com/p/PUPRSDABrantas-100083072663557/ | BBWS Brantas")
+    assert (a.platform, a.handle, a.label, a.problem) == ("facebook", "100083072663557", "BBWS Brantas", "")
+    assert a.url == "https://www.facebook.com/profile.php?id=100083072663557"
+    y = parse_line("https://www.youtube.com/channel/UCk0AIb2JDyz8VSPkaNq0OWQ | BBWS Brantas")
+    assert y.url == "https://www.youtube.com/channel/UCk0AIb2JDyz8VSPkaNq0OWQ"
+
+
+def test_default_list_has_no_invalid_handles():
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(root, "daftar_akun.txt"), encoding="utf-8") as f:
+        accs, bad = parse_accounts(f.read())
+    assert not bad
+    assert [a.url for a in accs if a.problem] == []
+    assert all(a.label for a in accs)

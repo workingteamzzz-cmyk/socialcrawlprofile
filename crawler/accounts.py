@@ -51,6 +51,7 @@ class Account:
     handle: str
     url: str
     problem: str = ""          # non-empty => handle cannot exist on this platform
+    label: str = ""            # optional unit name ("URL | Nama unit")
     extra: dict = field(default_factory=dict)
 
     @property
@@ -81,6 +82,16 @@ def parse_line(line: str) -> Account | None:
     line = line.strip()
     if not line or line.startswith("#"):
         return None
+    label = ""
+    if "|" in line:  # "URL | Nama unit"
+        line, label = (x.strip() for x in line.split("|", 1))
+    acc = _parse_url(line)
+    if acc:
+        acc.label = label
+    return acc
+
+
+def _parse_url(line: str) -> Account | None:
     if "://" not in line:
         line = "https://" + line
     u = urlparse(line)
@@ -97,6 +108,12 @@ def parse_line(line: str) -> Account | None:
         if m:
             acc = Account(plat, m.group(1), f"https://www.facebook.com/profile.php?id={m.group(1)}")
             return acc
+        return None
+    if plat == "facebook" and parts[0] in ("p", "people") and len(parts) > 1:
+        # facebook.com/p/Name-1000123..., facebook.com/people/Name/1000123...
+        m = re.search(r"(\d{6,})$", parts[-1])
+        if m:
+            return Account(plat, m.group(1), f"https://www.facebook.com/profile.php?id={m.group(1)}")
         return None
     if plat == "youtube" and parts[0] in ("channel", "c", "user") and len(parts) > 1:
         acc = Account(plat, parts[1], f"https://www.youtube.com/{parts[0]}/{parts[1]}")

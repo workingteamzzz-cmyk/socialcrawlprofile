@@ -13,8 +13,14 @@ if __name__ == "__main__":
     url = f"http://127.0.0.1:{PORT}"
     print(f"App running at {url}  (keep this window open; close it to stop)")
     if "--no-browser" not in sys.argv:
-        threading.Timer(1.2, lambda: webbrowser.open(url)).start()
+        threading.Timer(1.5, lambda: webbrowser.open(url)).start()
     try:
         serve(PORT)
+    except OSError as e:
+        print(f"\nCould not start on port {PORT}: {e}\n"
+              "The app is probably already running — open the address above in your browser, "
+              "or close the other window first.")
+        if sys.stdin and sys.stdin.isatty():
+            input("Press Enter to close...")
     except KeyboardInterrupt:
         pass

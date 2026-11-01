@@ -13,7 +13,7 @@ import traceback
 from datetime import datetime, timedelta, timezone
 
 from .accounts import PLATFORM_LABEL, PLATFORMS, parse_accounts
-from .browser import LOGIN_PAGES, BrowserCrawler, Result, Stopped, launch_context
+from .browser import BROWSER_CLOSED, LOGIN_PAGES, BrowserCrawler, Result, Stopped, launch_context
 from .output import write_keyword_outputs, write_outputs
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -56,11 +56,15 @@ class Job:
         self.logs: list[str] = []
         self.done = self.total = 0
         self.current = ""
+        self.error = ""
 
     # ---------- shared ----------
     def log(self, msg: str):
         line = f"[{datetime.now().strftime('%H:%M:%S')}] {msg}"
-        print(line, flush=True)
+        try:
+            print(line, flush=True)
+        except Exception:  # noqa: BLE001  (e.g. a console that cannot show emoji)
+            pass
         with self.lock:
             self.logs.append(line)
             if len(self.logs) > 3000:
@@ -69,7 +73,8 @@ class Job:
     def state(self, since: int = 0) -> dict:
         with self.lock:
             return {"kind": self.kind, "running": self.running, "done": self.done, "total": self.total,
-                    "current": self.current, "logs": self.logs[since:], "log_count": len(self.logs),
+                    "current": self.current, "error": self.error,
+                    "logs": self.logs[since:], "log_count": len(self.logs),
                     "modes": {m: {"count": len(b["links"]), "files": list(b["files"]), "period": b["period"],
                                   "version": b["version"]} for m, b in self.data.items()}}
 
@@ -82,7 +87,7 @@ class Job:
         if self.running:
             return "A job is already running. Wait for it to finish or click Stop."
         self.kind = kind
-        self.logs, self.done, self.total, self.current = [], 0, 0, ""
+        self.logs, self.done, self.total, self.current, self.error = [], 0, 0, "", ""
         if kind in MODES:
             self.data[kind] = _bucket()
         self.stop_flag.clear()
@@ -92,7 +97,9 @@ class Job:
             try:
                 target(*args)
             except Exception as e:  # noqa: BLE001
-                self.log(f"❌ Error: {e}")
+                first = str(e).splitlines()[0] if str(e) else e.__class__.__name__
+                self.error = first[:300]
+                self.log(f"❌ Error: {first}")
                 traceback.print_exc()
             finally:
                 self.running = False
@@ -233,6 +240,12 @@ class Job:
                     record(acc, Result("stopped", [], "Stopped before finishing"))
                     break
                 except Exception as e:  # noqa: BLE001
+                    if BROWSER_CLOSED in str(e):
+                        stopped = True
+                        self.error = "The browser window was closed, so the collection stopped. Results so far are saved."
+                        self.log("⏹ " + self.error)
+                        record(acc, Result("stopped", [], "Browser window was closed"))
+                        break
                     res = Result("error", [], str(e).splitlines()[0][:200])
                 record(acc, res)
                 self.log(f"   {'✅' if res.status == 'ok' else '⚠'} {len(res.posts)} links" + (f" — {res.note}" if res.note else ""))
@@ -346,6 +359,12 @@ class Job:
                     record(kw, plat, Result("stopped", [], "Stopped before finishing"))
                     break
                 except Exception as e:  # noqa: BLE001
+                    if BROWSER_CLOSED in str(e):
+                        stopped = True
+                        self.error = "The browser window was closed, so the search stopped. Results so far are saved."
+                        self.log("⏹ " + self.error)
+                        record(kw, plat, Result("stopped", [], "Browser window was closed"))
+                        break
                     res = Result("error", [], str(e).splitlines()[0][:200])
                 record(kw, plat, res)
                 self.log(f"   {'✅' if res.status == 'ok' else '⚠'} {len(res.posts)} links" + (f" — {res.note}" if res.note else ""))

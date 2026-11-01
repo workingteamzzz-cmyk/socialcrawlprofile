@@ -892,8 +892,9 @@ async function poll(){
     $('downloads').innerHTML = dl((mp.profiles || {}).files); $('kwDownloads').innerHTML = dl((mp.keywords || {}).files);
     if (mp.profiles && mp.profiles.version !== versions.profiles){ versions.profiles = mp.profiles.version; await refreshResults(); }
     if (mp.keywords && mp.keywords.version !== versions.keywords){ versions.keywords = mp.keywords.version; await refreshKw(); }
+    if (was && !running && s.error){ (isKw ? kwAlert : alertMsg)(s.error); if (s.kind === 'login') toast(s.error); }
     if (was && !running){ refreshResults(); refreshKw(); loadExports();
-      toast(s.kind === 'login' ? 'Login sessions saved' : isKw ? 'Keyword search finished — results saved' : 'Collection finished — results saved'); }
+      if (!s.error) toast(s.kind === 'login' ? 'Login sessions saved' : isKw ? 'Keyword search finished — results saved' : 'Collection finished — results saved'); }
   } catch(e){}
   setTimeout(poll, running ? 1200 : 2500);
 }

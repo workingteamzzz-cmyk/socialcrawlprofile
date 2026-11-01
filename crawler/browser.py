@@ -58,8 +58,20 @@ class Stopped(Exception):
     pass
 
 
+BROWSER_CLOSED = "has been closed"   # Playwright error text when the user closes the browser window
+
+
 def launch_context(pw, profile_dir: str, headless: bool = False):
     os.makedirs(profile_dir, exist_ok=True)
+    # Stale Chrome lock files left by a crash would make the profile look "in use". Only this app uses this folder,
+    # and only one job runs at a time, so it is safe to clear them.
+    for name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+        path = os.path.join(profile_dir, name)
+        if os.path.lexists(path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
     opts = dict(
         user_data_dir=profile_dir,
         headless=headless,
@@ -188,9 +200,13 @@ class BrowserCrawler:
             if state == "not_found":
                 return Result("not_found", [], "Account not found / unavailable")
             return Result("ok", [], "No posts could be read from the profile")
+        notes = []
         undated = sum(1 for p in posts if p.time_utc is None)
-        note = f"{undated} links without a date were skipped" if undated else ""
-        return Result("ok", self._in_range(posts), note)
+        if undated:
+            notes.append(f"{undated} links without a date were skipped")
+        if any(m in self.page.url.lower() for m in login_markers):
+            notes.append("a login wall appeared — results may be incomplete; use 'Log in to platforms'")
+        return Result("ok", self._in_range(posts), "; ".join(notes))
 
     # ---------- platforms ----------
     def instagram(self, acc: Account) -> Result:

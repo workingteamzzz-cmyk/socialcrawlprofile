@@ -1,12 +1,14 @@
 @echo off
 cd /d "%~dp0"
-where python >nul 2>nul || (echo Python belum terpasang. Install dari https://www.python.org/downloads/ dan centang "Add Python to PATH". & pause & exit /b 1)
-if not exist .venv (echo Menyiapkan lingkungan Python, sekali saja... & python -m venv .venv)
+set PYTHONIOENCODING=utf-8
+title Post Link Collector
+where python >nul 2>nul || (echo Python is not installed. Install it from https://www.python.org/downloads/ and tick "Add Python to PATH". & pause & exit /b 1)
+if not exist .venv (echo Setting up Python environment, first run only... & python -m venv .venv || (pause & exit /b 1))
 call .venv\Scripts\activate.bat
 if not exist .setup_done (
   python -m pip install --upgrade pip
-  pip install -r requirements.txt || (pause & exit /b 1)
-  python -m playwright install chromium
+  pip install -r requirements.txt || (echo Package install failed - check your internet connection and run this file again. & pause & exit /b 1)
+  python -m playwright install chromium || echo Note: Chromium download failed - the app will use Google Chrome or Edge if installed.
   echo done> .setup_done
 )
 pip install -q --upgrade yt-dlp >nul 2>nul

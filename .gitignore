@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+browser_profile/
+outputs/
+.setup_done
+.pytest_cache/

@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pengambil Link Unggahan</title>
+<style>
+  :root { --bg:#f5f7fa; --card:#fff; --text:#1d2433; --muted:#5f6b7a; --line:#dde3ea; --accent:#1f4e78; --ok:#1a7f37; --warn:#b54708; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background:var(--bg); color:var(--text); }
+  main { max-width: 980px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  p.sub { color: var(--muted); margin: 0 0 20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:18px; margin-bottom:16px; }
+  .card h2 { font-size: 15px; margin: 0 0 12px; }
+  .step { display:inline-block; background:var(--accent); color:#fff; border-radius:50%; width:22px; height:22px; text-align:center; line-height:22px; font-size:12px; margin-right:6px; }
+  textarea { width:100%; height:200px; font-family: ui-monospace, Consolas, monospace; font-size:12px; border:1px solid var(--line); border-radius:6px; padding:8px; }
+  .row { display:flex; flex-wrap:wrap; gap:14px; align-items:end; }
+  label { font-size: 13px; color: var(--muted); display:flex; flex-direction:column; gap:4px; }
+  input[type=date], select { padding:7px 8px; border:1px solid var(--line); border-radius:6px; font-size:14px; }
+  .plats label { flex-direction:row; align-items:center; gap:6px; color:var(--text); font-size:14px; }
+  button { border:0; border-radius:6px; padding:10px 16px; font-size:14px; cursor:pointer; background:var(--accent); color:#fff; }
+  button.secondary { background:#e8eef5; color:var(--accent); }
+  button.danger { background:#c0392b; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .muted { color: var(--muted); font-size: 13px; }
+  #log { background:#0f1720; color:#d6e2ee; font-family: ui-monospace, Consolas, monospace; font-size:12px; height:300px; overflow:auto; padding:10px; border-radius:6px; white-space:pre-wrap; }
+  .bar { height:8px; background:#e8eef5; border-radius:4px; overflow:hidden; margin:10px 0; }
+  .bar > div { height:100%; width:0; background:var(--accent); transition: width .3s; }
+  #files a { display:inline-block; margin-right:12px; font-weight:600; color:var(--accent); }
+  #msg { color: var(--warn); font-size: 13px; margin-top: 8px; min-height: 1em; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Pengambil Link Unggahan</h1>
+  <p class="sub">Instagram · X · TikTok · YouTube · Threads · Facebook — tanpa API, hanya link unggahan per periode.</p>
+
+  <div class="card">
+    <h2><span class="step">1</span>Login (sekali saja)</h2>
+    <p class="muted">Browser akan terbuka dengan halaman login tiap platform. Login di setiap tab, lalu <b>tutup jendela browser</b>. Sesi tersimpan di laptop ini. YouTube tidak perlu login.</p>
+    <button class="secondary" id="btnLogin">Buka browser untuk login</button>
+  </div>
+
+  <div class="card">
+    <h2><span class="step">2</span>Daftar akun</h2>
+    <p class="muted">Tempel URL profil, satu per baris (semua platform boleh dicampur). Duplikat otomatis dibuang; username yang mustahil ada di platformnya ditandai di sheet "Status Akun".</p>
+    <textarea id="accounts" spellcheck="false"></textarea>
+    <div style="margin-top:8px"><button class="secondary" id="btnSave">Simpan daftar</button> <span class="muted" id="count"></span></div>
+  </div>
+
+  <div class="card">
+    <h2><span class="step">3</span>Periode & platform</h2>
+    <div class="row">
+      <label>Dari tanggal <input type="date" id="start"></label>
+      <label>Sampai tanggal <input type="date" id="end"></label>
+      <label>Zona waktu
+        <select id="tz"><option>WIB</option><option>WITA</option><option>WIT</option><option>UTC</option></select>
+      </label>
+    </div>
+    <div class="row plats" style="margin-top:14px" id="plats">
+      <label><input type="checkbox" value="instagram" checked> Instagram</label>
+      <label><input type="checkbox" value="x" checked> X</label>
+      <label><input type="checkbox" value="tiktok" checked> TikTok</label>
+      <label><input type="checkbox" value="youtube" checked> YouTube</label>
+      <label><input type="checkbox" value="threads" checked> Threads</label>
+      <label><input type="checkbox" value="facebook" checked> Facebook</label>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="step">4</span>Jalankan</h2>
+    <button id="btnStart">Mulai ambil link</button>
+    <button class="danger" id="btnStop" disabled>Stop</button>
+    <div id="msg"></div>
+    <div class="bar"><div id="barfill"></div></div>
+    <div class="muted" id="progress">Belum berjalan.</div>
+    <div id="files" style="margin:10px 0"></div>
+    <div id="log"></div>
+    <p class="muted">Biarkan jendela browser yang dibuka alat ini tetap terbuka (boleh di belakang). Jika muncul captcha, selesaikan di jendela itu. Hasil juga tersimpan otomatis di folder <code>outputs</code>.</p>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+let logCount = 0;
+
+(function initDates(){
+  const now = new Date();
+  const first = new Date(now.getFullYear(), now.getMonth()-1, 1);
+  const last = new Date(now.getFullYear(), now.getMonth(), 0);
+  const f = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  $('start').value = f(first); $('end').value = f(last);
+})();
+
+function countLines(){
+  const n = $('accounts').value.split('\n').filter(l => l.trim() && !l.trim().startsWith('#')).length;
+  $('count').textContent = n + ' baris';
+}
+$('accounts').addEventListener('input', countLines);
+
+async function post(url, body){
+  const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body||{})});
+  return r.json();
+}
+
+fetch('/api/default-accounts').then(r=>r.json()).then(d => { $('accounts').value = d.text || ''; countLines(); });
+
+$('btnSave').onclick = async () => { await post('/api/save-accounts', {text: $('accounts').value}); $('msg').textContent = 'Daftar disimpan.'; };
+$('btnLogin').onclick = async () => { const r = await post('/api/login'); $('msg').textContent = r.error || ''; };
+$('btnStop').onclick = () => post('/api/stop');
+$('btnStart').onclick = async () => {
+  const platforms = [...document.querySelectorAll('#plats input:checked')].map(i => i.value);
+  const r = await post('/api/start', {text: $('accounts').value, start: $('start').value, end: $('end').value, tz: $('tz').value, platforms});
+  $('msg').textContent = r.error || '';
+  if (r.ok) { $('log').textContent = ''; logCount = 0; $('files').innerHTML = ''; }
+};
+
+async function poll(){
+  try {
+    const s = await (await fetch('/api/status?since=' + logCount)).json();
+    if (s.log_count < logCount) { $('log').textContent = ''; logCount = 0; }
+    if (s.logs.length){
+      const box = $('log'); const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 20;
+      box.textContent += s.logs.join('\n') + '\n'; logCount = s.log_count;
+      if (atBottom) box.scrollTop = box.scrollHeight;
+    }
+    $('btnStart').disabled = $('btnLogin').disabled = s.running;
+    $('btnStop').disabled = !s.running;
+    if (s.kind === 'crawl'){
+      const pct = s.total ? Math.round(100*s.done/s.total) : 0;
+      $('barfill').style.width = pct + '%';
+      $('progress').textContent = `${s.done}/${s.total} akun · ${s.links} link` + (s.running ? ' · berjalan…' : '');
+    } else if (s.kind === 'login') {
+      $('progress').textContent = s.running ? 'Browser login terbuka — tutup jendelanya setelah selesai login.' : 'Login selesai.';
+    }
+    $('files').innerHTML = s.files.map(f => `<a href="/download/${encodeURIComponent(f)}">⬇ ${f}</a>`).join('');
+  } catch(e) {}
+  setTimeout(poll, 1500);
+}
+poll();
+</script>
+</body>
+</html>

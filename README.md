@@ -6,7 +6,7 @@ no engagement data — just the post links with their dates.
 
 ## Download
 
-- **Latest release (v1.0.0):** https://github.com/workingteamzzz-cmyk/socialcrawlprofile/archive/refs/tags/v1.0.0.zip
+- **Latest version (ZIP):** https://github.com/workingteamzzz-cmyk/socialcrawlprofile/archive/HEAD.zip
 - Extract the ZIP and follow *Install & run* below.
 
 ## How it works

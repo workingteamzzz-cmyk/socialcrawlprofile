@@ -57,7 +57,7 @@ def crawl_youtube(acc: Account, start: datetime, end: datetime, log: Callable[[s
                     continue
                 if "404" in msg or "does not exist" in msg or "not found" in msg:
                     if not any_tab:
-                        return Result("not_found", [], "Channel tidak ditemukan")
+                        return Result("not_found", [], "Channel not found")
                     continue
                 log(f"   ⚠ tab {tab}: {str(e).splitlines()[0][:150]}")
                 continue
@@ -88,5 +88,5 @@ def crawl_youtube(acc: Account, start: datetime, end: datetime, log: Callable[[s
                         else f"https://www.youtube.com/watch?v={vid}"
                     posts.append(Post(url, t))
     if not any_tab:
-        return Result("error", [], "Channel tidak bisa dibaca")
+        return Result("error", [], "Channel could not be read")
     return Result("ok", posts)

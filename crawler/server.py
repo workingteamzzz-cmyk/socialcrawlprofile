@@ -6,10 +6,10 @@ import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
-from .job import JOB, OUTPUT_DIR, ROOT
+from . import store
+from .job import JOB, OUTPUT_DIR
 
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-DEFAULT_LIST = os.path.join(ROOT, "daftar_akun.txt")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -37,17 +37,23 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/status":
             since = int(parse_qs(u.query).get("since", ["0"])[0] or 0)
             return self._json(JOB.state(since))
-        if u.path == "/api/default-accounts":
-            text = ""
-            if os.path.exists(DEFAULT_LIST):
-                with open(DEFAULT_LIST, encoding="utf-8") as f:
-                    text = f.read()
-            return self._json({"text": text})
+        if u.path == "/api/accounts":
+            return self._json({"accounts": store.load_all()})
+        if u.path == "/api/results":
+            return self._json(JOB.results_view())
+        if u.path == "/api/outputs":
+            files = []
+            if os.path.isdir(OUTPUT_DIR):
+                for name in sorted(os.listdir(OUTPUT_DIR), reverse=True):
+                    if name.endswith(".xlsx") and name.startswith("post_links_"):
+                        st = os.stat(os.path.join(OUTPUT_DIR, name))
+                        files.append({"name": name, "size": st.st_size, "mtime": int(st.st_mtime)})
+            return self._json({"files": files[:30]})
         if u.path.startswith("/download/"):
             name = os.path.basename(unquote(u.path[len("/download/"):]))
             path = os.path.join(OUTPUT_DIR, name)
             if not name or not os.path.isfile(path):
-                return self._json({"error": "file tidak ada"}, 404)
+                return self._json({"error": "file not found"}, 404)
             with open(path, "rb") as f:
                 data = f.read()
             ctype = "text/csv" if name.endswith(".csv") else \
@@ -69,14 +75,15 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/login":
             err = JOB.start_login()
         elif u.path == "/api/start":
-            err = JOB.start_crawl(data.get("text", ""), data.get("start", ""), data.get("end", ""),
+            text = store.lines_for(data["ids"]) if data.get("ids") else data.get("text", "")
+            err = JOB.start_crawl(text, data.get("start", ""), data.get("end", ""),
                                   data.get("tz", "WIB"), data.get("platforms") or [])
+        elif u.path == "/api/accounts/add":
+            return self._json(store.add(data.get("text", ""), data.get("unit", "")))
+        elif u.path == "/api/accounts/remove":
+            return self._json({"removed": store.remove(data.get("ids") or [])})
         elif u.path == "/api/stop":
             JOB.stop()
-            err = None
-        elif u.path == "/api/save-accounts":
-            with open(DEFAULT_LIST, "w", encoding="utf-8") as f:
-                f.write(data.get("text", ""))
             err = None
         else:
             return self._json({"error": "not found"}, 404)

@@ -31,17 +31,17 @@ _HOSTS = {
 # Username rules of each platform. A handle that breaks them cannot exist there.
 _RULES = {
     "instagram": (re.compile(r"^[A-Za-z0-9._]{1,30}$"),
-                  "username Instagram hanya boleh huruf, angka, titik, underscore (maks 30)"),
+                  "Instagram usernames allow only letters, numbers, dots and underscores (max 30)"),
     "threads": (re.compile(r"^[A-Za-z0-9._]{1,30}$"),
-                "username Threads hanya boleh huruf, angka, titik, underscore (maks 30)"),
+                "Threads usernames allow only letters, numbers, dots and underscores (max 30)"),
     "x": (re.compile(r"^[A-Za-z0-9_]{1,15}$"),
-          "username X maks 15 karakter, hanya huruf, angka, underscore (tanpa titik)"),
+          "X usernames are max 15 characters: letters, numbers and underscores only (no dots)"),
     "tiktok": (re.compile(r"^[A-Za-z0-9._]{2,24}$"),
-               "username TikTok hanya boleh huruf, angka, titik, underscore (maks 24)"),
+               "TikTok usernames allow only letters, numbers, dots and underscores (max 24)"),
     "youtube": (re.compile(r"^[A-Za-z0-9._-]{3,30}$"),
-                "handle YouTube 3-30 karakter: huruf, angka, titik, underscore, strip"),
+                "YouTube handles are 3-30 characters: letters, numbers, dots, underscores, hyphens"),
     "facebook": (re.compile(r"^[A-Za-z0-9.]{5,50}$"),
-                 "username Facebook hanya boleh huruf, angka, titik (tanpa underscore, min 5)"),
+                 "Facebook usernames allow only letters, numbers and dots (no underscores, min 5)"),
 }
 
 
@@ -51,7 +51,7 @@ class Account:
     handle: str
     url: str
     problem: str = ""          # non-empty => handle cannot exist on this platform
-    label: str = ""            # optional unit name ("URL | Nama unit")
+    label: str = ""            # optional unit name ("URL | Unit name")
     extra: dict = field(default_factory=dict)
 
     @property
@@ -83,7 +83,7 @@ def parse_line(line: str) -> Account | None:
     if not line or line.startswith("#"):
         return None
     label = ""
-    if "|" in line:  # "URL | Nama unit"
+    if "|" in line:  # "URL | Unit name"
         line, label = (x.strip() for x in line.split("|", 1))
     acc = _parse_url(line)
     if acc:

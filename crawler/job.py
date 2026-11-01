@@ -24,6 +24,9 @@ class Job:
         self.lock = threading.Lock()
         self.thread: threading.Thread | None = None
         self.stop_flag = threading.Event()
+        self.results: list[dict] = []
+        self.account_status: list[dict] = []
+        self.period = None
         self.reset("idle")
 
     def reset(self, kind):
@@ -32,8 +35,11 @@ class Job:
         self.logs: list[str] = []
         self.done = 0
         self.total = 0
-        self.files: list[str] = []
-        self.links_count = 0
+        self.current = ""
+        if kind in ("crawl", "idle"):
+            self.files: list[str] = []
+            self.links_count = 0
+            self.results, self.account_status, self.period = [], [], None
 
     def log(self, msg: str):
         line = f"[{datetime.now().strftime('%H:%M:%S')}] {msg}"
@@ -46,12 +52,17 @@ class Job:
     def state(self, since: int = 0) -> dict:
         with self.lock:
             return {"kind": self.kind, "running": self.running, "done": self.done, "total": self.total,
-                    "links": self.links_count, "files": list(self.files),
+                    "links": self.links_count, "files": list(self.files), "current": self.current,
+                    "period": self.period, "results_count": len(self.results) + 100000 * len(self.account_status),
                     "logs": self.logs[since:], "log_count": len(self.logs)}
+
+    def results_view(self) -> dict:
+        with self.lock:
+            return {"links": list(self.results), "accounts": list(self.account_status), "period": self.period}
 
     def _start(self, kind, target, *args) -> str | None:
         if self.running:
-            return "Masih ada proses berjalan. Tunggu selesai atau klik Stop."
+            return "A job is already running. Wait for it to finish or click Stop."
         self.reset(kind)
         self.stop_flag.clear()
         self.running = True
@@ -77,8 +88,8 @@ class Job:
 
     def _login(self):
         from playwright.sync_api import sync_playwright
-        self.log("Membuka browser. Login ke tiap tab (Instagram, X, TikTok, Threads, Facebook).")
-        self.log("Selesai login? TUTUP jendela browser — sesi login tersimpan untuk proses berikutnya.")
+        self.log("Opening the browser. Sign in on each tab (Instagram, X, TikTok, Threads, Facebook).")
+        self.log("Done signing in? CLOSE the browser window — the sessions are saved for later runs.")
         with sync_playwright() as pw:
             ctx = launch_context(pw, PROFILE_DIR)
             first = ctx.pages[0] if ctx.pages else ctx.new_page()
@@ -99,7 +110,7 @@ class Job:
                 ctx.close()
             except Exception:  # noqa: BLE001
                 pass
-        self.log("✅ Browser ditutup. Sesi login tersimpan.")
+        self.log("✅ Browser closed. Login sessions saved.")
 
     # ---------------- crawl ----------------
     def start_crawl(self, text: str, start: str, end: str, tz_name: str, platforms: list[str]):
@@ -107,13 +118,13 @@ class Job:
             d_start = datetime.strptime(start, "%Y-%m-%d")
             d_end = datetime.strptime(end, "%Y-%m-%d")
         except ValueError:
-            return "Tanggal tidak valid."
+            return "Invalid date."
         if d_end < d_start:
-            return "Tanggal akhir lebih awal dari tanggal mulai."
+            return "The end date is before the start date."
         platforms = [p for p in platforms if p in PLATFORMS] or PLATFORMS
         accounts, bad = parse_accounts(text, platforms)
         if not accounts:
-            return "Tidak ada akun yang dikenali di daftar."
+            return "No recognised accounts selected."
         return self._start("crawl", self._crawl, accounts, bad, d_start, d_end, tz_name)
 
     def _crawl(self, accounts, bad, d_start, d_end, tz_name):
@@ -125,12 +136,13 @@ class Job:
         order = {p: i for i, p in enumerate(PLATFORMS)}
         accounts.sort(key=lambda a: order[a.platform])
         self.total = len(accounts)
+        self.period = {"start": f"{d_start:%Y-%m-%d}", "end": f"{d_end:%Y-%m-%d}", "tz": tz_name}
         for line in bad:
-            self.log(f"⚠ Baris tidak dikenali, dilewati: {line}")
+            self.log(f"⚠ Unrecognised line skipped: {line}")
 
         os.makedirs(OUTPUT_DIR, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        base = f"link_unggahan_{d_start:%Y%m%d}-{d_end:%Y%m%d}_{stamp}"
+        base = f"post_links_{d_start:%Y%m%d}-{d_end:%Y%m%d}_{stamp}"
         xlsx = os.path.join(OUTPUT_DIR, base + ".xlsx")
         csvp = os.path.join(OUTPUT_DIR, base + ".csv")
         meta = {"tz_hours": tz_hours, "tz_name": tz_name, "start": f"{d_start:%Y-%m-%d}",
@@ -140,6 +152,16 @@ class Job:
         statuses: list[dict] = []
 
         def record(acc, res: Result):
+            with self.lock:
+                for p in res.posts:
+                    t = p.time_utc.astimezone(tz) if p.time_utc else None
+                    self.results.append({"platform": acc.platform, "unit": acc.label or acc.handle,
+                                         "handle": acc.handle, "url": p.url,
+                                         "date": t.strftime("%Y-%m-%d") if t else "",
+                                         "time": t.strftime("%H:%M") if t else ""})
+                self.account_status.append({"platform": acc.platform, "unit": acc.label or acc.handle,
+                                            "handle": acc.handle, "url": acc.url, "status": res.status,
+                                            "count": len(res.posts), "note": res.note})
             for p in res.posts:
                 links.append({"order": order[acc.platform], "platform_label": PLATFORM_LABEL[acc.platform],
                               "handle": acc.handle, "label": acc.label, "url": p.url, "time": p.time_utc})
@@ -150,7 +172,7 @@ class Job:
         def save():
             write_outputs(xlsx, csvp, links, statuses, meta)
 
-        self.log(f"Periode {d_start:%Y-%m-%d} s/d {d_end:%Y-%m-%d} ({tz_name}) — {len(accounts)} akun")
+        self.log(f"Period {d_start:%Y-%m-%d} to {d_end:%Y-%m-%d} ({tz_name}) — {len(accounts)} accounts")
         need_browser = any(a.platform != "youtube" and not a.problem for a in accounts)
         pw = ctx = crawler = None
         stopped = False
@@ -166,11 +188,12 @@ class Job:
                     break
                 label = f"{PLATFORM_LABEL[acc.platform]} @{acc.handle}"
                 if acc.problem:
-                    self.log(f"({i + 1}/{len(accounts)}) {label} — dilewati: {acc.problem}")
+                    self.log(f"({i + 1}/{len(accounts)}) {label} — skipped: {acc.problem}")
                     record(acc, Result("invalid", [], acc.problem))
                     self.done = i + 1
                     continue
                 self.log(f"({i + 1}/{len(accounts)}) {label} ...")
+                self.current = f"{label}" + (f" — {acc.label}" if acc.label else "")
                 try:
                     if acc.platform == "youtube":
                         from .youtube import crawl_youtube
@@ -179,14 +202,14 @@ class Job:
                         res = getattr(crawler, acc.platform)(acc)
                 except Stopped:
                     stopped = True
-                    record(acc, Result("stopped", [], "Dihentikan sebelum selesai"))
+                    record(acc, Result("stopped", [], "Stopped before finishing"))
                     break
                 except Exception as e:  # noqa: BLE001
                     res = Result("error", [], str(e).splitlines()[0][:200])
                 record(acc, res)
                 extra = f" — {res.note}" if res.note else ""
                 icon = "✅" if res.status == "ok" else "⚠"
-                self.log(f"   {icon} {len(res.posts)} link{extra}")
+                self.log(f"   {icon} {len(res.posts)} links{extra}")
                 self.done = i + 1
                 save()
                 if acc.platform != "youtube" and i + 1 < len(accounts):
@@ -208,8 +231,9 @@ class Job:
                         pw.stop()
                 except Exception:  # noqa: BLE001
                     pass
+        self.current = ""
         self.files = [os.path.basename(xlsx), os.path.basename(csvp)]
-        self.log(("⏹ Dihentikan. " if stopped else "✅ Selesai. ") + f"Total {len(links)} link → {os.path.basename(xlsx)}")
+        self.log(("⏹ Stopped. " if stopped else "✅ Done. ") + f"Total {len(links)} links → {os.path.basename(xlsx)}")
 
 
 JOB = Job()

@@ -1,99 +1,94 @@
-# Pengambil Link Unggahan (tanpa API)
+# Post Link Collector (no API)
 
-Aplikasi lokal untuk mengambil **link unggahan** dari banyak akun **Instagram, X, TikTok, YouTube, Threads, dan Facebook**
-dalam **periode tanggal tertentu**. Tidak memakai API berbayar, tidak memakai AI, dan tidak menarik data engagement:
-hasilnya hanya daftar link beserta tanggal unggahnya.
+A local app that collects **post links** from many **Instagram, X, TikTok, YouTube, Threads and Facebook** accounts
+for a **chosen date range**. No paid APIs, no AI, no engagement data — just the list of post links with their dates.
 
-## Cara kerja singkat
+## How it works
 
-- Alat membuka **browser sungguhan di laptop kamu** (Chrome/Edge, atau Chromium kalau tidak ada) memakai sesi login kamu sendiri,
-  membuka profil, scroll, lalu membaca link unggahan yang tampil.
-- **Tanggal dibaca dari ID unggahan**, jadi tiap unggahan tidak perlu dibuka satu per satu:
-  - Instagram & Threads: shortcode `/p/…`, `/reel/…`, `/post/…`
-  - X: ID status (snowflake), plus pencarian `from:akun since:… until:…` agar langsung terfilter periodenya
-  - TikTok: ID video/foto
-  - YouTube: dibaca dengan `yt-dlp` (tab Videos, Shorts, dan Live). Tidak perlu login.
-  - Facebook: dibaca dari data yang dimuat halaman saat scroll. Paling rapuh; anggap *best effort*.
-- Scroll berhenti otomatis setelah melewati tanggal mulai. Unggahan yang di-pin (biasanya lama) tidak membuat proses berhenti terlalu cepat.
+- The app drives a **real browser on your computer** (Chrome/Edge, or Chromium if neither is installed) with your own
+  logins, opens each profile, scrolls, and reads the post links on the page.
+- **Dates are decoded from the post ID**, so posts never have to be opened one by one:
+  - Instagram & Threads: the `/p/…`, `/reel/…`, `/post/…` shortcode
+  - X: the status ID (snowflake), plus X search `from:user since:… until:…` to narrow to the period
+  - TikTok: the video/photo ID
+  - YouTube: read with `yt-dlp` (Videos, Shorts and Live tabs). No login needed.
+  - Facebook: read from the data the page loads while scrolling. The most fragile platform — best effort.
+- Scrolling stops on its own once it passes the start date; pinned (old) posts don't stop it early.
 
-## Instalasi & menjalankan
+## Install & run
 
-1. Install **Python 3.10+**. Di Windows: https://www.python.org/downloads/ (centang **Add Python to PATH**).
-   Di Mac: pakai installer .pkg dari python.org.
-2. Download ZIP repo ini, lalu ekstrak.
-3. Jalankan:
-   - **Windows:** klik dua kali `start-windows.bat`
-   - **Mac:** klik dua kali `start-mac.command` (pertama kali: klik kanan → Open → Open)
+1. Install **Python 3.10+**. Windows: https://www.python.org/downloads/ (tick **Add Python to PATH**).
+   Mac: use the .pkg installer from python.org.
+2. Download this repository as ZIP and extract it.
+3. Run:
+   - **Windows:** double-click `start-windows.bat`
+   - **Mac:** double-click `start-mac.command` (first time: right-click → Open → Open)
    - **Linux:** `./start-mac-linux.sh`
-4. Saat pertama kali dijalankan, paket dan browser Chromium dipasang otomatis (beberapa menit). Setelah itu halaman
-   http://127.0.0.1:8770 terbuka di browser. Jendela hitam (server) harus tetap terbuka selama dipakai.
+4. The first start installs the packages and a Chromium browser (a few minutes). Then http://127.0.0.1:8770 opens.
+   Keep the black server window open while you use the app.
 
-## Pemakaian
+## Using the dashboard
 
-1. **Login (sekali saja):** klik *Buka browser untuk login*. Login di tiap tab (Instagram, X, TikTok, Threads, Facebook),
-   lalu **tutup jendela browser**. Sesi tersimpan di folder `browser_profile/` di laptop ini dan tidak ikut ke GitHub.
-   Saran: pakai akun biasa, bukan akun utama kantor.
-2. **Daftar akun:** sudah terisi dari `daftar_akun.txt`. Kamu boleh mengubahnya lalu klik *Simpan daftar*.
-   Satu URL per baris, semua platform boleh dicampur, dan duplikat dibuang otomatis.
-3. **Periode:** pilih tanggal mulai dan akhir, zona waktu (WIB/WITA/WIT), dan platform yang mau diambil.
-4. Klik **Mulai ambil link**. Biarkan jendela browser yang dibuka alat tetap terbuka (boleh di belakang).
-   Kalau muncul **captcha** (sering di TikTok), selesaikan di jendela itu; proses menunggu.
-   Tombol **Stop** tetap menyimpan hasil yang sudah terkumpul.
-
-## Hasil
-
-Tersimpan di folder `outputs/`, dan bisa juga diunduh dari halaman:
-
-- `link_unggahan_<periode>_<waktu>.xlsx`
-  - **Link Unggahan**: No, Platform, Unit, Akun, Tanggal, Jam, Link (link bisa diklik)
-  - **Status Akun**: status tiap akun, yaitu OK / Tidak ditemukan / Perlu login / Username tidak valid / Error, plus jumlah link
-  - **Info**: periode dan waktu pembuatan
-- File `.csv` berisi data yang sama.
-
-File disimpan ulang setelah tiap akun selesai, jadi kalau proses terputus hasil sejauh itu tetap ada.
-
-## Base data akun (`data/akun_resmi.csv`)
-
-`data/akun_resmi.csv` adalah daftar induk akun resmi 51 unit Ditjen SDA di 6 platform. Kolomnya: Unit, Platform, Akun, URL,
-Status, Sumber, Catatan. Daftar ini dicek ulang (November 2026) lewat pencarian web, dari profil yang muncul di hasil pencarian
-dan dari tautan resmi di situs/kanal balai. Arti kolom **Status**:
-
-| Status | Arti |
+| Page | What it does |
 | --- | --- |
-| **Terverifikasi** | Profil akun itu sendiri, atau situs/kanal resmi balai yang menautkannya, terlihat di hasil pencarian |
-| **Kemungkinan** | Bukti kuat tapi tidak langsung (misalnya ditautkan dari kanal YouTube balai); ada juga akun yang tampak sudah tidak aktif |
-| **Belum terverifikasi** | Handle dari daftar awal yang valid secara format tapi tidak terlihat di hasil pencarian. Tetap ikut dicek oleh alat: lihat sheet *Status Akun* setelah dijalankan; kalau "Tidak ditemukan", hapus atau ganti |
-| **Tidak ditemukan** | Handle daftar awal mustahil ada di platform itu (misalnya Facebook dengan `_`, X lebih dari 15 karakter) dan akun aslinya tidak ketemu. Tidak dimasukkan ke `daftar_akun.txt` |
+| **Collect** | Pick the period (presets or any dates, WIB/WITA/WIT), toggle platforms, start/stop, live progress |
+| **Accounts** | All accounts grouped by unit: search, filter, select/deselect per account or unit, **Add profiles** for any other account (any platform), remove added ones |
+| **Post Links** | Every link found, filterable by platform/search, plus Excel/CSV download |
+| **Account Status** | Accounts that were not found, need login, errored, or had no posts in the period |
+| **Exports** | Excel files from earlier runs |
+| **Activity Log** | Live log of the current job |
 
-Perubahan penting dibanding daftar awal:
-- `pupr_sda` dan `pu_sda` ternyata unit yang sama (Ditjen SDA pusat). `pu_sda_nusatenggara2` dan `pupr_sda_bwsnt2` juga sama (BBWS NT II).
-- Banyak akun X dan Facebook ternyata memakai nama lain, misalnya X `pu_sda_so` (Serayu Opak), `bbwss8` (Sumatera VIII),
-  dan Facebook `pu.sda.citarum`, `bwsmaluku`. Sebagian halaman Facebook hanya punya ID angka (`profile.php?id=…`).
-- Kanal YouTube yang tidak punya @handle ditulis dengan ID kanal (`youtube.com/channel/UC…`).
+First time: click **Log in to platforms** (bottom left), sign in on each tab (Instagram, X, TikTok, Threads, Facebook),
+then close that browser window. Sessions are stored in `browser_profile/` on your computer (never committed).
+Use a regular account rather than a main office account.
 
-Cara mengubah base: edit `data/akun_resmi.csv` (bisa dengan Excel, simpan sebagai CSV UTF-8), lalu jalankan
-`python tools/buat_daftar.py` untuk membuat ulang `daftar_akun.txt`. Di `daftar_akun.txt`, tiap baris berformat
-`URL | Nama unit`; nama unit ikut muncul di kolom **Unit** pada Excel hasil.
+During a run, keep the browser window the app opens (it can stay in the background) and solve any captcha there
+(TikTok shows them most). **Stop** keeps everything collected so far.
 
-## Batasan
+## Output
 
-- Platform bisa mengubah tampilan halamannya kapan saja; kalau sebuah platform tiba-tiba menghasilkan 0 link untuk semua akun,
-  kemungkinan tampilannya berubah.
-- Jeda acak antar-scroll dan antar-akun sengaja dibuat agar akun login tidak dibatasi. Jangan dijalankan berkali-kali beruntun.
-- Unggahan *collab* yang dibuat akun lain, story, dan unggahan yang sudah dihapus tidak ikut.
+Saved to `outputs/` after every account, and downloadable from the dashboard:
 
-## Struktur
+- `post_links_<period>_<time>.xlsx`
+  - **Post Links**: No, Platform, Unit, Handle, Date, Time, Post Link (clickable)
+  - **Account Status**: per-account status (OK / Not found / Login required / Invalid username / Error) and link count
+  - **Info**: period and creation time
+- a `.csv` with the same links.
 
-| File | Isi |
+## Account base list
+
+- `data/accounts.csv` is the base list: official accounts of 51 Ditjen SDA units on six platforms, with columns
+  Unit, Platform, Handle, URL, Status, Source, Notes. It was checked through web search in November 2026:
+
+  | Status | Meaning |
+  | --- | --- |
+  | **Verified** | The profile itself, or an official balai site/channel linking it, appeared in search results |
+  | **Likely** | Strong but indirect evidence (e.g. linked from the balai's YouTube channel), or the account looks inactive |
+  | **Unverified** | Handle from the original list with a valid format, not seen in search. Still collected — check **Account Status** after a run and remove it if "Not found" |
+  | **Not found** | The original handle cannot exist on that platform and the real account wasn't found. Kept in the CSV for reference; not collected |
+
+- Profiles added from the dashboard go to `data/custom_accounts.csv`.
+- You can edit either CSV in Excel (save as CSV UTF-8). The dashboard picks up changes on reload.
+
+## Limitations
+
+- Platforms can change their pages at any time; if one platform suddenly returns 0 links for every account, its page
+  layout probably changed.
+- Random pauses between scrolls and accounts are deliberate so the logged-in accounts aren't rate-limited. Avoid
+  back-to-back runs.
+- Collab posts created by other accounts, stories and deleted posts are not included.
+
+## Project layout
+
+| File | Purpose |
 | --- | --- |
-| `crawler/accounts.py` | Membaca daftar URL, deteksi platform, validasi username |
-| `crawler/idtime.py` | Membaca tanggal dari ID unggahan (IG/Threads/X/TikTok) |
-| `crawler/browser.py` | Membuka profil di browser, scroll, dan mengumpulkan link per platform |
+| `crawler/accounts.py` | Parses profile URLs, detects the platform, validates usernames |
+| `crawler/idtime.py` | Decodes post dates from post IDs (IG/Threads/X/TikTok) |
+| `crawler/browser.py` | Opens profiles in the browser, scrolls and collects links per platform |
 | `crawler/youtube.py` | YouTube via yt-dlp |
-| `crawler/job.py` | Proses login & pengambilan di background, simpan hasil |
-| `crawler/output.py` | Menulis Excel/CSV |
-| `crawler/server.py`, `crawler/static/index.html` | Tampilan web lokal (hanya bisa diakses dari laptop ini) |
-| `data/akun_resmi.csv` | Base data akun resmi + status verifikasi |
-| `tools/buat_daftar.py` | Membuat `daftar_akun.txt` dari base data |
-| `daftar_akun.txt` | Daftar akun yang dipakai aplikasi |
-| `tests/` | Tes (`python -m pytest tests`) |
+| `crawler/store.py` | Base + custom account lists |
+| `crawler/job.py` | Background login/collection jobs, saving results |
+| `crawler/output.py` | Excel/CSV writer |
+| `crawler/server.py`, `crawler/static/index.html` | Local dashboard (reachable only from this computer) |
+| `data/accounts.csv` | Base account list with verification status |
+| `tests/` | Tests (`python -m pytest tests`) |

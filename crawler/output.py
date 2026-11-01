@@ -10,12 +10,12 @@ from openpyxl.utils import get_column_letter
 
 STATUS_LABEL = {
     "ok": "OK",
-    "not_found": "Tidak ditemukan",
-    "login_required": "Perlu login",
-    "invalid": "Username tidak valid",
+    "not_found": "Not found",
+    "login_required": "Login required",
+    "invalid": "Invalid username",
     "error": "Error",
-    "stopped": "Dihentikan",
-    "skipped": "Belum diproses",
+    "stopped": "Stopped",
+    "skipped": "Not processed",
 }
 
 
@@ -46,8 +46,8 @@ def write_outputs(path_xlsx: str, path_csv: str, links, statuses, meta: dict):
 
     wb = Workbook()
     ws = wb.active
-    ws.title = "Link Unggahan"
-    ws.append(["No", "Platform", "Unit", "Akun", f"Tanggal ({tz_name})", f"Jam ({tz_name})", "Link Unggahan"])
+    ws.title = "Post Links"
+    ws.append(["No", "Platform", "Unit", "Handle", f"Date ({tz_name})", f"Time ({tz_name})", "Post Link"])
     for i, r in enumerate(rows, 1):
         ws.append([i] + r)
         cell = ws.cell(row=i + 1, column=7)
@@ -55,17 +55,17 @@ def write_outputs(path_xlsx: str, path_csv: str, links, statuses, meta: dict):
         cell.font = Font(color="0563C1", underline="single")
     _autosize(ws, [6, 11, 34, 26, 16, 10, 70])
 
-    ws2 = wb.create_sheet("Status Akun")
-    ws2.append(["Platform", "Unit", "Akun", "URL Profil", "Status", "Jumlah Link", "Keterangan"])
+    ws2 = wb.create_sheet("Account Status")
+    ws2.append(["Platform", "Unit", "Handle", "Profile URL", "Status", "Links", "Notes"])
     for s in statuses:
         ws2.append([s["platform_label"], s.get("label", ""), s["handle"], s["url"],
                     STATUS_LABEL.get(s["status"], s["status"]), s["count"], s["note"]])
     _autosize(ws2, [11, 34, 26, 50, 20, 12, 70])
 
     ws3 = wb.create_sheet("Info")
-    for k, v in [("Periode", f"{meta['start']} s/d {meta['end']} ({tz_name})"),
-                 ("Dibuat", meta["created"]), ("Total link", len(rows)),
-                 ("Metode", "Browser (tanpa API) — tanggal dibaca dari ID unggahan")]:
+    for k, v in [("Period", f"{meta['start']} to {meta['end']} ({tz_name})"),
+                 ("Created", meta["created"]), ("Total links", len(rows)),
+                 ("Method", "Browser (no API) — dates decoded from post IDs")]:
         ws3.append([k, v])
     ws3.column_dimensions["A"].width = 14
     ws3.column_dimensions["B"].width = 70
@@ -73,5 +73,5 @@ def write_outputs(path_xlsx: str, path_csv: str, links, statuses, meta: dict):
 
     with open(path_csv, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
-        w.writerow(["Platform", "Unit", "Akun", f"Tanggal ({tz_name})", f"Jam ({tz_name})", "Link Unggahan"])
+        w.writerow(["Platform", "Unit", "Handle", f"Date ({tz_name})", f"Time ({tz_name})", "Post Link"])
         w.writerows(rows)

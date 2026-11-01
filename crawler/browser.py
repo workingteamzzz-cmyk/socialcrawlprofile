@@ -79,7 +79,7 @@ def launch_context(pw, profile_dir: str, headless: bool = False):
             return pw.chromium.launch_persistent_context(**opts)
         except Exception as e:  # noqa: BLE001
             errors.append(f"{channel or 'chromium'}: {str(e).splitlines()[0]}")
-    raise RuntimeError("Browser tidak bisa dibuka. " + " | ".join(errors))
+    raise RuntimeError("Could not open a browser. " + " | ".join(errors))
 
 
 class BrowserCrawler:
@@ -123,7 +123,7 @@ class BrowserCrawler:
             if not any(t in txt for t in CAPTCHA_TEXTS):
                 return
             if i == 0:
-                self.log("   ⚠ Captcha/verifikasi muncul — selesaikan di jendela browser, proses menunggu...")
+                self.log("   ⚠ Captcha/verification shown — solve it in the browser window; waiting...")
             self._pause(3, 3)
 
     def _page_state(self, login_markers: tuple[str, ...]) -> str:
@@ -180,12 +180,12 @@ class BrowserCrawler:
         if not posts:
             state = self._page_state(login_markers)
             if state == "login_required":
-                return Result("login_required", [], "Perlu login — klik 'Login dulu' lalu login ke platform ini")
+                return Result("login_required", [], "Login required — click 'Log in to platforms' and sign in to this platform")
             if state == "not_found":
-                return Result("not_found", [], "Akun tidak ditemukan / tidak tersedia")
-            return Result("ok", [], "Tidak ada unggahan yang terbaca di profil")
+                return Result("not_found", [], "Account not found / unavailable")
+            return Result("ok", [], "No posts could be read from the profile")
         undated = sum(1 for p in posts if p.time_utc is None)
-        note = f"{undated} link tanpa tanggal dilewati" if undated else ""
+        note = f"{undated} links without a date were skipped" if undated else ""
         return Result("ok", self._in_range(posts), note)
 
     # ---------- platforms ----------
@@ -278,9 +278,9 @@ class BrowserCrawler:
             self._goto(acc.url)
             state = self._page_state(("/login", "/i/flow/login"))
             if state == "not_found":
-                return Result("not_found", [], "Akun tidak ditemukan / ditangguhkan")
+                return Result("not_found", [], "Account not found / suspended")
             if state == "login_required":
-                return Result("login_required", [], "Perlu login ke X")
+                return Result("login_required", [], "Login to X required")
             return Result("ok", [], "")
         return self._finish(posts, ("/login", "/i/flow/login"))
 

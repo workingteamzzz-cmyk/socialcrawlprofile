@@ -11,7 +11,7 @@ PORT = int(os.environ.get("PORT", "8770"))
 
 if __name__ == "__main__":
     url = f"http://127.0.0.1:{PORT}"
-    print(f"Aplikasi berjalan di {url}  (biarkan jendela ini terbuka; tutup untuk berhenti)")
+    print(f"App running at {url}  (keep this window open; close it to stop)")
     if "--no-browser" not in sys.argv:
         threading.Timer(1.2, lambda: webbrowser.open(url)).start()
     try:

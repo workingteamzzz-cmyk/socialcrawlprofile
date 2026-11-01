@@ -160,10 +160,22 @@ def test_label_and_facebook_id_urls():
     assert y.url == "https://www.youtube.com/channel/UCk0AIb2JDyz8VSPkaNq0OWQ"
 
 
-def test_default_list_has_no_invalid_handles():
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    with open(os.path.join(root, "daftar_akun.txt"), encoding="utf-8") as f:
-        accs, bad = parse_accounts(f.read())
-    assert not bad
-    assert [a.url for a in accs if a.problem] == []
-    assert all(a.label for a in accs)
+def test_base_accounts_csv_is_clean():
+    from crawler import store
+    accs = store.load_all()
+    assert len(accs) > 250
+    assert [a["url"] for a in accs if a["problem"]] == []
+    assert all(a["unit"] and a["status"] in ("Verified", "Likely", "Unverified") for a in accs)
+
+
+def test_custom_accounts_add_and_remove(tmp_path, monkeypatch):
+    from crawler import store
+    monkeypatch.setattr(store, "CUSTOM_CSV", str(tmp_path / "custom.csv"))
+    r = store.add("https://x.com/akun_contoh\nhttps://www.facebook.com/salah_satu\nhttps://x.com/pupr_sda", "Benchmark")
+    assert r["added"] == ["https://x.com/akun_contoh"]
+    assert len(r["errors"]) == 2   # invalid FB username + already in base list
+    added = [a for a in store.load_all() if a["source"] == "custom"]
+    assert added[0]["unit"] == "Benchmark" and added[0]["status"] == "Added"
+    assert "https://x.com/akun_contoh | Benchmark" in store.lines_for([added[0]["id"]])
+    assert store.remove([added[0]["id"]]) == 1
+    assert not [a for a in store.load_all() if a["source"] == "custom"]

@@ -179,3 +179,84 @@ def test_custom_accounts_add_and_remove(tmp_path, monkeypatch):
     assert "https://x.com/akun_contoh | Benchmark" in store.lines_for([added[0]["id"]])
     assert store.remove([added[0]["id"]]) == 1
     assert not [a for a in store.load_all() if a["source"] == "custom"]
+
+
+# ---------------- keyword search ----------------
+
+def test_query_builders():
+    from crawler.keywords import SearchOptions, x_query, youtube_query
+    o = SearchOptions.from_dict({"exact": True, "exclude": "giveaway, -promo", "x_lang": "id", "cap": "100"})
+    assert o.exclude == ["giveaway", "promo"] and o.cap == 100
+    assert x_query("pemadaman listrik", o, "2026-10-01", "2026-11-01") == \
+        '"pemadaman listrik" -giveaway -promo lang:id -filter:replies -filter:nativeretweets since:2026-10-01 until:2026-11-01'
+    s, e = datetime(2026, 10, 1, tzinfo=UTC), datetime(2026, 10, 31, tzinfo=UTC)
+    assert youtube_query("listrik", SearchOptions(), s, e) == "listrik after:2026-09-30 before:2026-11-01"
+
+
+def test_keyword_output_files(tmp_path):
+    import openpyxl
+    from crawler.keywords import SearchOptions
+    from crawler.output import write_keyword_outputs
+    rows = [{"keyword": "listrik, PLN", "keywords": ["listrik", "PLN"], "platform": "x", "author": "a",
+             "url": "https://x.com/a/status/1", "date": "2026-10-02", "time": "10:00", "ts": 1}]
+    st = [{"keyword": "listrik", "platform": "x", "status": "ok", "count": 1, "note": ""}]
+    meta = {"tz_name": "WIB", "tz_hours": 7, "start": "2026-10-01", "end": "2026-10-31", "created": "now",
+            "keywords": ["listrik", "PLN"], "options": SearchOptions()}
+    write_keyword_outputs(str(tmp_path / "k.xlsx"), str(tmp_path / "k.csv"), rows, st, meta)
+    wb = openpyxl.load_workbook(tmp_path / "k.xlsx")
+    assert wb.sheetnames == ["Post Links", "Search Status", "Info"]
+    assert list(wb["Post Links"].values)[1][1:4] == ("listrik, PLN", "X", "a")
+
+
+@pytest.mark.skipif(_browser_path() is None, reason="no local Chromium")
+def test_keyword_search_with_fake_pages(tmp_path):
+    from playwright.sync_api import sync_playwright
+
+    from crawler.browser import launch_context
+    from crawler.keywords import KeywordCrawler, SearchOptions
+
+    start = datetime(2026, 10, 1, tzinfo=UTC)
+    end = datetime(2026, 10, 31, 23, 59, 59, tzinfo=UTC)
+    inr = [datetime(2026, 10, d, 9, tzinfo=UTC) for d in (30, 20, 10, 5)]
+    old = [datetime(2026, 9, 20, tzinfo=UTC), datetime(2025, 5, 1, tzinfo=UTC)]
+    mixed = [inr[0], old[1], inr[1], inr[2], old[0], inr[3]]   # "top" feeds are not in date order
+
+    def x_page():
+        arts = "".join(f'<article><a href="/user{i}/status/{x_id(d)}"><time>t</time></a>'
+                       f'<div><a href="/quoted/status/{x_id(old[1])}">quoted</a></div></article>'
+                       for i, d in enumerate(inr))
+        return f"<html><body>{arts}</body></html>"
+
+    pages = {
+        "x.com/search": x_page(),
+        "threads.com/search": _fake_feed_html([[f"/@u{i}/post/{ig_code(d)}", d.isoformat()] for i, d in enumerate(inr + old)]),
+        "instagram.com/explore/tags/listrik": _fake_feed_html([[f"/p/{ig_code(d)}/", ""] for d in mixed[:3]]),
+        "instagram.com/explore/search/keyword": _fake_feed_html([[f"/someone/reel/{ig_code(d)}/", ""] for d in mixed]),
+        "tiktok.com/search/video": _fake_feed_html([[f"https://www.tiktok.com/@v{i}/video/{tt_id(d)}", ""] for i, d in enumerate(mixed)]),
+    }
+
+    def route(r):
+        body = next((v for k, v in pages.items() if k in r.request.url), "<html><body></body></html>")
+        r.fulfill(status=200, content_type="text/html", body=body)
+
+    os.environ["CRAWLER_BROWSER_PATH"] = _browser_path()
+    with sync_playwright() as pw:
+        ctx = launch_context(pw, str(tmp_path / "profile"), headless=True)
+        ctx.route("**/*", route)
+        c = KeywordCrawler(ctx, lambda m: None, threading.Event(), start, end)
+        c._pause = lambda lo=0, hi=0: c.page.wait_for_timeout(250)
+        opt = SearchOptions()
+        want = {d.date() for d in inr}
+
+        res = c.search_x("listrik", opt)
+        assert {p.time_utc.date() for p in res.posts} == want and len(res.posts) == 4   # quoted tweet ignored
+        assert {p.author for p in res.posts} == {"user0", "user1", "user2", "user3"}
+        res = c.search_threads("listrik", opt)
+        assert {p.time_utc.date() for p in res.posts} == want and res.posts[0].author.startswith("u")
+        res = c.search_instagram("listrik", opt)          # hashtag (3) + keyword search (6) merged, in-period only
+        assert {p.time_utc.date() for p in res.posts} == want
+        res = c.search_tiktok("listrik", opt)
+        assert {p.time_utc.date() for p in res.posts} == want and len(res.posts) == 4
+        res = c.search_tiktok("listrik", SearchOptions(cap=2))
+        assert len(res.posts) == 2 and res.posts[0].time_utc == inr[0]
+        ctx.close()

@@ -182,6 +182,33 @@ svg.i{width:18px;height:18px;flex:none;stroke:currentColor;fill:none;stroke-widt
 .acc .h small{color:var(--muted);font-size:12px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);cursor:pointer;margin:0}
 
+/* keyword page */
+.kwbox{display:flex;flex-wrap:wrap;gap:8px;align-items:center;border:1px solid var(--line);border-radius:12px;padding:8px;min-height:48px;cursor:text}
+.kwbox:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.kwbox input{border:0;outline:0;flex:1;min-width:160px;padding:6px 4px;background:transparent}
+.kw{display:inline-flex;align-items:center;gap:6px;background:var(--accent-soft);color:#1e40af;border-radius:99px;padding:5px 6px 5px 12px;font-weight:600;font-size:13px}
+.kw button{all:unset;cursor:pointer;width:18px;height:18px;border-radius:50%;display:grid;place-items:center;color:#1e40af}
+.kw button:hover{background:#dbe5fd}
+.opt-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-top:1px solid #f3f4f6}
+.opt-row:first-child{border-top:0;padding-top:4px}
+.opt-row .t{flex:1;min-width:0}
+.opt-row .t b{display:block;font-weight:600;font-size:13.5px}
+.opt-row .t small{color:var(--muted);font-size:12px}
+.opt-row select,.opt-row input[type=text]{border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--panel);max-width:220px}
+.opt-group{font-size:11.5px;letter-spacing:.5px;text-transform:uppercase;color:var(--faint);font-weight:600;margin:14px 0 2px;display:flex;align-items:center;gap:8px}
+.switch{position:relative;width:38px;height:22px;flex:none}
+.switch input{opacity:0;width:0;height:0;position:absolute}
+.switch span{position:absolute;inset:0;background:#d6dae1;border-radius:99px;transition:.15s;cursor:pointer}
+.switch span::after{content:"";position:absolute;width:16px;height:16px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.15s;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.switch input:checked+span{background:var(--accent)}
+.switch input:checked+span::after{transform:translateX(16px)}
+.switch input:focus-visible+span{outline:2px solid var(--accent);outline-offset:2px}
+.cov{font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:99px;margin-top:3px;display:inline-block}
+.cov.good{background:var(--ok-soft);color:var(--ok)}
+.cov.mid{background:var(--accent-soft);color:var(--accent)}
+.cov.low{background:var(--warn-soft);color:var(--warn)}
+.qprev{margin-top:12px;background:var(--soft);border:1px dashed #d6dae1;border-radius:10px;padding:10px 12px;font:12.5px/1.5 ui-monospace,Consolas,monospace;color:#374151;word-break:break-word}
+.qprev small{display:block;font-family:Inter,system-ui,sans-serif;color:var(--muted);font-size:11.5px;margin-bottom:4px}
 #log{background:#0f172a;color:#cbd5e1;font:12.5px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;height:calc(100vh - 150px);min-height:360px;overflow:auto;padding:16px 18px;border-radius:var(--radius);white-space:pre-wrap;margin:0}
 
 .modal{position:fixed;inset:0;background:rgba(17,24,39,.4);display:none;place-items:center;z-index:50;padding:16px}
@@ -236,6 +263,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);cursor:po
   <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
   <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></symbol>
   <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
   <symbol id="i-tick" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
 </svg>
 
@@ -243,10 +271,14 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);cursor:po
   <aside class="sidebar">
     <div class="ws"><div class="avatar">LC</div><div><b>Link Collector</b><small>Ditjen SDA accounts</small></div></div>
     <nav class="nav" id="nav">
+      <div class="sep" style="padding-top:6px">Profiles</div>
       <button class="on" data-p="collect"><svg class="i"><use href="#i-play"/></svg>Collect</button>
       <button data-p="accounts"><svg class="i"><use href="#i-users"/></svg>Accounts<span class="count" id="navAcc">0</span></button>
       <button data-p="results"><svg class="i"><use href="#i-link"/></svg>Post Links<span class="count" id="navRes">0</span></button>
       <button data-p="status"><svg class="i"><use href="#i-check"/></svg>Account Status</button>
+      <div class="sep">Keywords</div>
+      <button data-p="kwsearch"><svg class="i"><use href="#i-search"/></svg>Keyword Search</button>
+      <button data-p="kwlinks"><svg class="i"><use href="#i-link"/></svg>Keyword Links<span class="count" id="navKw">0</span></button>
       <div class="sep">System</div>
       <button data-p="exports"><svg class="i"><use href="#i-file"/></svg>Exports</button>
       <button data-p="log"><svg class="i"><use href="#i-term"/></svg>Activity Log</button>
@@ -358,6 +390,96 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);cursor:po
       </div>
     </section>
 
+    <!-- KEYWORD SEARCH -->
+    <section class="page" id="p-kwsearch">
+      <div class="pagehead"><div><h1>Keyword Search</h1><p>Collect post links that each platform's own search shows for your keywords, limited to the period. No API.</p></div></div>
+      <div class="collect">
+        <div style="display:flex;flex-direction:column;gap:16px">
+          <div class="card"><div class="card-hd"><h3>Keywords</h3><div class="tools"><button class="btn sm" id="kwClear">Clear</button></div></div>
+            <div class="card-bd">
+              <div class="kwbox" id="kwBox"><input id="kwInput" placeholder="Type a keyword and press Enter — e.g. listrik, #listrik, PLN" autocomplete="off" aria-label="Add keyword"></div>
+              <p class="hint" style="margin-top:8px">Each keyword is searched separately. Paste several lines or comma-separated words at once. <code>#hashtag</code> works on Instagram, X, TikTok and Threads.</p>
+            </div></div>
+          <div class="card"><div class="card-hd"><h3>Period</h3><div class="tools"><span class="tag likely" id="kPeriodTag"></span></div></div>
+            <div class="card-bd">
+              <div class="presets" id="kPresets">
+                <button class="chip" data-p="today">Today</button><button class="chip" data-p="yesterday">Yesterday</button>
+                <button class="chip" data-p="7d">Last 7 days</button><button class="chip" data-p="30d">Last 30 days</button>
+                <button class="chip" data-p="thismonth">This month</button><button class="chip" data-p="lastmonth">Last month</button>
+                <button class="chip" data-p="thisyear">This year</button>
+              </div>
+              <div class="fields">
+                <div class="field"><label for="kStart">From</label><input type="date" id="kStart"></div>
+                <div class="field"><label for="kEnd">To</label><input type="date" id="kEnd"></div>
+                <div class="field"><label for="kTz">Time zone</label><select id="kTz"><option value="WIB">WIB (UTC+7)</option><option value="WITA">WITA (UTC+8)</option><option value="WIT">WIT (UTC+9)</option><option value="UTC">UTC</option></select></div>
+              </div>
+            </div></div>
+          <div class="card"><div class="card-hd"><h3>Platforms</h3><div class="tools"><button class="btn sm" id="kPlatAll">All</button><button class="btn sm" id="kPlatNone">None</button></div></div>
+            <div class="card-bd"><div class="plats" id="kPlats"></div>
+              <p class="hint">Coverage depends on each platform's search. <b>Full</b>: searchable by date, scrolls to the end of the period. <b>Partial</b>: newest first but limited depth. <b>Top only</b>: the platform shows popular results, not every post.</p></div></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:16px">
+          <div class="card"><div class="card-hd"><h3>Run</h3></div>
+            <div class="card-bd">
+              <div class="stats">
+                <div class="stat"><b id="kS1">0</b><small>keywords</small></div>
+                <div class="stat"><b id="kS2">0</b><small>platforms</small></div>
+                <div class="stat"><b id="kS3">0</b><small>searches</small></div>
+              </div>
+              <button class="btn primary lg" id="kBtnStart"><svg class="i"><use href="#i-search"/></svg>Start keyword search</button>
+              <button class="btn danger lg" id="kBtnStop" style="display:none"><svg class="i"><use href="#i-stop"/></svg>Stop (keeps what was collected)</button>
+              <div class="alert" id="kMsg"></div>
+              <div class="prog" id="kProg">
+                <div class="track"><div class="fill" id="kProgFill"></div></div>
+                <div class="meta"><span id="kProgText">0 / 0 searches</span><span id="kProgLinks">0 links</span></div>
+                <div class="now" id="kProgNow">Preparing…</div>
+              </div>
+            </div></div>
+          <div class="card"><div class="card-hd"><h3>Advanced options</h3></div>
+            <div class="card-bd">
+              <div class="opt-row"><div class="t"><b>Max links per keyword per platform</b><small>Keeps runs short and protects your logged-in accounts</small></div>
+                <select id="oCap"><option value="50">50</option><option value="100">100</option><option value="300" selected>300</option><option value="1000">1,000</option><option value="0">No limit</option></select></div>
+              <div class="opt-row"><div class="t"><b>Exact phrase</b><small>Multi-word keywords are searched as one phrase (X, YouTube, Facebook)</small></div>
+                <label class="switch"><input type="checkbox" id="oExact"><span></span></label></div>
+              <div class="opt-row"><div class="t"><b>Exclude words</b><small>Comma-separated, e.g. <i>giveaway, promo</i> (X, YouTube)</small></div>
+                <input type="text" id="oExclude" placeholder="word, word"></div>
+              <div class="opt-group">X / Twitter</div>
+              <div class="opt-row"><div class="t"><b>Language</b><small>Only posts X detects in this language</small></div>
+                <select id="oLang"><option value="">Any language</option><option value="id">Indonesian</option><option value="en">English</option></select></div>
+              <div class="opt-row"><div class="t"><b>Exclude replies</b></div><label class="switch"><input type="checkbox" id="oNoReplies" checked><span></span></label></div>
+              <div class="opt-row"><div class="t"><b>Exclude reposts</b></div><label class="switch"><input type="checkbox" id="oNoReposts" checked><span></span></label></div>
+              <div class="opt-group">Instagram</div>
+              <div class="opt-row"><div class="t"><b>Hashtag page</b><small>#keyword top posts (single-word keywords)</small></div><label class="switch"><input type="checkbox" id="oIgTag" checked><span></span></label></div>
+              <div class="opt-row"><div class="t"><b>Keyword search</b><small>Instagram's keyword results page</small></div><label class="switch"><input type="checkbox" id="oIgKw" checked><span></span></label></div>
+              <div class="qprev" id="qPrev"><small>X query preview</small>—</div>
+            </div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- KEYWORD LINKS -->
+    <section class="page" id="p-kwlinks">
+      <div class="pagehead"><div><h1>Keyword Links</h1><p id="kwPeriod">Links found by the last keyword search.</p></div>
+        <div class="actions" id="kwDownloads"></div></div>
+      <div class="card" style="margin-bottom:16px">
+        <div class="toolbar">
+          <input class="search" id="kq" placeholder="Search author or link…" autocomplete="off">
+          <select class="select" id="kFilterKw"><option value="">All keywords</option></select>
+          <select class="select" id="kFilterPlat"><option value="">All platforms</option></select>
+          <span class="tag gray" id="kCount">0 links</span>
+        </div>
+        <div class="tblwrap"><table class="tbl">
+          <thead><tr><th>Date</th><th>Time</th><th>Platform</th><th>Keyword</th><th>Author</th><th>Post link</th></tr></thead>
+          <tbody id="kwBody"></tbody></table></div>
+      </div>
+      <div class="card">
+        <div class="card-hd"><h3>Search status</h3><span class="info" title="Outcome of each keyword × platform search"><svg class="i" style="width:15px;height:15px"><use href="#i-info"/></svg></span></div>
+        <div class="tblwrap" style="margin-top:10px"><table class="tbl">
+          <thead><tr><th>Keyword</th><th>Platform</th><th>Status</th><th class="num">Links</th><th>Notes</th></tr></thead>
+          <tbody id="kwStBody"></tbody></table></div>
+      </div>
+    </section>
+
     <!-- EXPORTS -->
     <section class="page" id="p-exports">
       <div class="pagehead"><div><h1>Exports</h1><p>Excel files from earlier collections (folder <b>outputs</b>).</p></div></div>
@@ -418,8 +540,10 @@ let selected = new Set(ls.get('selected', []));
 let firstLoad = ls.get('selected', null) === null;
 let platOn = new Set(ls.get('plats', PLATS.map(p => p.k)));
 let openUnits = new Set();
-let results = {links: [], accounts: [], period: null};
-let lastResCount = -1, logCount = 0, running = false;
+let results = {links: [], statuses: [], period: null};
+let kwResults = {links: [], statuses: [], period: null, meta: {}};
+const versions = {profiles: -1, keywords: -1};
+let logCount = 0, running = false;
 
 function toast(t){ const el = $('toast'); el.textContent = t; el.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('show'), 2200); }
 async function api(url, body){
@@ -437,10 +561,10 @@ function go(p){
 document.querySelectorAll('#nav button').forEach(b => b.onclick = () => go(b.dataset.p));
 document.addEventListener('click', e => { const g = e.target.closest('[data-go]'); if (g){ e.preventDefault(); go(g.dataset.go); } });
 
-/* ---------- period ---------- */
+/* ---------- period (one widget per page) ---------- */
 const ymd = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const nice = v => v ? new Date(v + 'T00:00').toLocaleDateString('en-GB', {day:'numeric', month:'short', year:'numeric'}) : '?';
-function preset(p){
+function presetRange(p){
   const t = new Date(); t.setHours(0,0,0,0); let a = new Date(t), b = new Date(t);
   if (p === 'yesterday'){ a.setDate(t.getDate()-1); b = new Date(a); }
   if (p === '7d') a.setDate(t.getDate()-6);
@@ -448,21 +572,32 @@ function preset(p){
   if (p === 'thismonth') a = new Date(t.getFullYear(), t.getMonth(), 1);
   if (p === 'lastmonth'){ a = new Date(t.getFullYear(), t.getMonth()-1, 1); b = new Date(t.getFullYear(), t.getMonth(), 0); }
   if (p === 'thisyear') a = new Date(t.getFullYear(), 0, 1);
-  $('start').value = ymd(a); $('end').value = ymd(b); ls.set('preset', p); updatePeriod();
+  return [ymd(a), ymd(b)];
 }
-function updatePeriod(){
-  const s = $('start').value, e = $('end').value, p = ls.get('preset', '');
-  document.querySelectorAll('#presets .chip').forEach(c => c.classList.toggle('on', c.dataset.p === p));
-  const days = s && e ? Math.round((new Date(e) - new Date(s)) / 864e5) + 1 : 0;
-  $('sDays').textContent = days > 0 ? days : '–';
-  $('periodTag').textContent = s && e ? `${nice(s)} – ${nice(e)}` : '';
-  ls.set('dates', {s, e}); ls.set('tz', $('tz').value);
+function periodWidget(o){   // o: {key, start, end, tz, presets, tag, onChange}
+  const W = {
+    get start(){ return $(o.start).value; }, get end(){ return $(o.end).value; }, get tz(){ return $(o.tz).value; },
+    days(){ const s = W.start, e = W.end; return s && e ? Math.round((new Date(e) - new Date(s)) / 864e5) + 1 : 0; },
+    preset(p){ const [a, b] = presetRange(p); $(o.start).value = a; $(o.end).value = b; ls.set(o.key + 'preset', p); W.update(); },
+    update(){
+      const p = ls.get(o.key + 'preset', '');
+      document.querySelectorAll('#' + o.presets + ' .chip').forEach(c => c.classList.toggle('on', c.dataset.p === p));
+      $(o.tag).textContent = W.start && W.end ? `${nice(W.start)} – ${nice(W.end)}` : '';
+      ls.set(o.key + 'dates', {s: W.start, e: W.end}); ls.set(o.key + 'tz', W.tz); o.onChange && o.onChange();
+    },
+  };
+  document.querySelectorAll('#' + o.presets + ' .chip').forEach(c => c.onclick = () => W.preset(c.dataset.p));
+  [o.start, o.end].forEach(id => $(id).addEventListener('change', () => { ls.set(o.key + 'preset', ''); W.update(); }));
+  $(o.tz).addEventListener('change', W.update);
+  $(o.tz).value = ls.get(o.key + 'tz', 'WIB');
+  const p = ls.get(o.key + 'preset', 'lastmonth'), d = ls.get(o.key + 'dates', null);
+  if (p) W.preset(p); else if (d && d.s){ $(o.start).value = d.s; $(o.end).value = d.e; W.update(); } else W.preset('lastmonth');
+  return W;
 }
-document.querySelectorAll('#presets .chip').forEach(c => c.onclick = () => preset(c.dataset.p));
-['start','end'].forEach(id => $(id).addEventListener('change', () => { ls.set('preset', ''); updatePeriod(); }));
-$('tz').addEventListener('change', updatePeriod);
-(function(){ $('tz').value = ls.get('tz', 'WIB'); const p = ls.get('preset', 'lastmonth'), d = ls.get('dates', null);
-  if (p) preset(p); else if (d && d.s){ $('start').value = d.s; $('end').value = d.e; updatePeriod(); } else preset('lastmonth'); })();
+let P1 = null;
+P1 = periodWidget({key:'', start:'start', end:'end', tz:'tz', presets:'presets', tag:'periodTag',
+  onChange: () => { const d = P1 ? P1.days() : 0; $('sDays').textContent = d > 0 ? d : '–'; }});
+$('sDays').textContent = P1.days() || '–';
 
 /* ---------- platforms ---------- */
 function renderPlats(){
@@ -576,12 +711,13 @@ function alertMsg(text, kind){ const m = $('runMsg'); m.textContent = text || ''
 $('btnStart').onclick = async () => {
   const ids = runnable().map(a => a.id);
   if (!ids.length){ alertMsg('No accounts selected on the active platforms.'); return; }
-  if (!$('start').value || !$('end').value){ alertMsg('Choose a start and end date.'); return; }
-  const r = await api('/api/start', {ids, start: $('start').value, end: $('end').value, tz: $('tz').value, platforms: [...platOn]});
+  if (!P1.start || !P1.end){ alertMsg('Choose a start and end date.'); return; }
+  const r = await api('/api/start', {ids, start: P1.start, end: P1.end, tz: P1.tz, platforms: [...platOn]});
   if (r.error){ alertMsg(r.error); return; }
-  alertMsg(''); $('log').textContent = ''; logCount = 0; lastResCount = -1; toast('Collection started');
+  alertMsg(''); $('log').textContent = ''; logCount = 0; toast('Collection started');
 };
 $('btnStop').onclick = () => api('/api/stop', {});
+$('kBtnStop').onclick = () => api('/api/stop', {});
 $('btnLogin').onclick = async () => {
   const r = await api('/api/login', {});
   if (r.error) toast(r.error); else { toast('Browser opened — sign in, then close it'); go('log'); }
@@ -602,7 +738,7 @@ function renderResults(){
       <td class="url"><a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.url.replace(/^https?:\/\/(www\.)?/, ''))}</a></td></tr>`).join('')
     : `<tr><td colspan="6">${emptyBox(L.length ? 'Nothing matches the filters.' : (running ? 'Waiting for the first links…' : 'No links yet. Start a collection on the Collect page.'), 'i-link')}</td></tr>`;
 
-  const A = results.accounts, sf = $('sFilter').value;
+  const A = results.statuses, sf = $('sFilter').value;
   const st = A.filter(a => sf === 'all' || (sf === 'zero' ? a.status === 'ok' && a.count === 0 : ['not_found','login_required','error','invalid','stopped'].includes(a.status)));
   $('sCount').textContent = `${st.length} account${st.length === 1 ? '' : 's'}`;
   $('stBody').innerHTML = st.length ? st.map(a => `<tr><td>${pi(a.platform, true)}</td><td>${esc(a.unit)}</td>
@@ -613,17 +749,116 @@ function renderResults(){
 }
 ['rq'].forEach(id => $(id).addEventListener('input', renderResults));
 ['rPlat','sFilter'].forEach(id => $(id).addEventListener('change', renderResults));
-async function refreshResults(){ results = await api('/api/results'); renderResults(); }
+async function refreshResults(){ results = await api('/api/results?mode=profiles'); renderResults(); }
 
 async function loadExports(){
   const d = await api('/api/outputs');
   $('exports').innerHTML = d.files.length ? d.files.map(f => {
-    const m = f.name.match(/post_links_(\d{8})-(\d{8})_/); const fd = s => nice(`${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`);
+    const m = f.name.match(/(post|keyword)_links_(\d{8})-(\d{8})_/); const fd = s => nice(`${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`);
     return `<a href="/download/${encodeURIComponent(f.name)}"><span class="pin">${icon('i-file', 'width:16px;height:16px')}</span>
-      <span style="flex:1;min-width:0"><b>${m ? fd(m[1]) + ' – ' + fd(m[2]) : esc(f.name)}</b><small>${esc(f.name)} · ${(f.size / 1024).toFixed(0)} KB</small></span>
+      <span style="flex:1;min-width:0"><b>${m ? (m[1] === 'keyword' ? 'Keyword search · ' : 'Profiles · ') + fd(m[2]) + ' – ' + fd(m[3]) : esc(f.name)}</b><small>${esc(f.name)} · ${(f.size / 1024).toFixed(0)} KB</small></span>
       <small>${new Date(f.mtime * 1000).toLocaleString('en-GB', {day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'})}</small>${icon('i-dl')}</a>`;
   }).join('') : emptyBox('No exports yet.', 'i-file');
 }
+
+/* ---------- keyword search ---------- */
+const KW_PLATS = [
+  {k:'x', cov:'good', c:'Full'}, {k:'youtube', cov:'good', c:'Full'}, {k:'threads', cov:'mid', c:'Partial'},
+  {k:'facebook', cov:'mid', c:'Partial'}, {k:'instagram', cov:'low', c:'Top only'}, {k:'tiktok', cov:'low', c:'Top only'},
+];
+let keywords = ls.get('kw_list', []);
+let kwPlatOn = new Set(ls.get('kw_plats', ['x', 'youtube', 'threads', 'instagram', 'tiktok', 'facebook']));
+let P2 = null;
+P2 = periodWidget({key:'kw_', start:'kStart', end:'kEnd', tz:'kTz', presets:'kPresets', tag:'kPeriodTag', onChange: () => { if (P2) kwRender(); }});
+
+function kwAdd(text){
+  text.split(/[\n,;]+/).map(w => w.replace(/\s+/g, ' ').trim()).filter(Boolean).forEach(w => {
+    if (!keywords.some(k => k.toLowerCase() === w.toLowerCase()) && keywords.length < 50) keywords.push(w.slice(0, 100));
+  });
+  ls.set('kw_list', keywords); kwRender();
+}
+function kwRender(){
+  $('kwBox').querySelectorAll('.kw').forEach(e => e.remove());
+  const inp = $('kwInput');
+  keywords.forEach((k, i) => { const el = document.createElement('span'); el.className = 'kw';
+    el.innerHTML = `${esc(k)}<button data-i="${i}" aria-label="Remove ${esc(k)}">${icon('i-x', 'width:12px;height:12px;stroke-width:2.6')}</button>`;
+    $('kwBox').insertBefore(el, inp); });
+  $('kPlats').innerHTML = KW_PLATS.map(p => { const on = kwPlatOn.has(p.k);
+    return `<div class="plat ${on ? 'on' : ''}" data-k="${p.k}" role="switch" aria-checked="${on}" tabindex="0">
+      ${pi(p.k)}<div><span class="nm">${PL[p.k].n}</span><small><span class="cov ${p.cov}">${p.c}</span></small></div>
+      <span class="ck">${on ? `<svg class="i" style="width:12px;height:12px;stroke-width:3"><use href="#i-tick"/></svg>` : ''}</span></div>`; }).join('');
+  $('kS1').textContent = keywords.length; $('kS2').textContent = kwPlatOn.size; $('kS3').textContent = keywords.length * kwPlatOn.size;
+  const o = kwOptions(), kw = keywords[0] || 'keyword';
+  const parts = [o.exact && kw.includes(' ') ? `"${kw}"` : kw, ...o.exclude.map(w => '-' + w)];
+  if (o.x_lang) parts.push('lang:' + o.x_lang);
+  if (o.x_no_replies) parts.push('-filter:replies');
+  if (o.x_no_reposts) parts.push('-filter:nativeretweets');
+  const until = P2.end ? ymd(new Date(new Date(P2.end + 'T00:00').getTime() + 864e5)) : '';
+  parts.push('since:' + (P2.start || '…'), 'until:' + (until || '…'));
+  $('qPrev').innerHTML = `<small>X query preview${keywords.length > 1 ? ' (first keyword)' : ''}</small>${esc(parts.join(' '))}`;
+}
+function kwOptions(){
+  return { cap: +$('oCap').value, exact: $('oExact').checked,
+    exclude: $('oExclude').value.split(',').map(w => w.trim().replace(/^-/, '')).filter(Boolean),
+    x_lang: $('oLang').value, x_no_replies: $('oNoReplies').checked, x_no_reposts: $('oNoReposts').checked,
+    ig_hashtag: $('oIgTag').checked, ig_keyword: $('oIgKw').checked };
+}
+(function(){ const o = ls.get('kw_opts', null); if (o){ $('oCap').value = o.cap; $('oExact').checked = o.exact; $('oExclude').value = (o.exclude || []).join(', ');
+  $('oLang').value = o.x_lang || ''; $('oNoReplies').checked = o.x_no_replies; $('oNoReposts').checked = o.x_no_reposts;
+  $('oIgTag').checked = o.ig_hashtag; $('oIgKw').checked = o.ig_keyword; } })();
+['oCap','oExact','oExclude','oLang','oNoReplies','oNoReposts','oIgTag','oIgKw'].forEach(id =>
+  $(id).addEventListener(id === 'oExclude' ? 'input' : 'change', () => { ls.set('kw_opts', kwOptions()); kwRender(); }));
+$('kwInput').addEventListener('keydown', e => {
+  if ((e.key === 'Enter' || e.key === ',') && $('kwInput').value.trim()){ e.preventDefault(); kwAdd($('kwInput').value); $('kwInput').value = ''; }
+  else if (e.key === 'Backspace' && !$('kwInput').value && keywords.length){ keywords.pop(); ls.set('kw_list', keywords); kwRender(); }
+});
+$('kwInput').addEventListener('paste', e => { const t = (e.clipboardData || window.clipboardData).getData('text');
+  if (/[\n,;]/.test(t)){ e.preventDefault(); kwAdd(t); } });
+$('kwInput').addEventListener('blur', () => { if ($('kwInput').value.trim()){ kwAdd($('kwInput').value); $('kwInput').value = ''; } });
+$('kwBox').addEventListener('click', e => { const b = e.target.closest('button[data-i]');
+  if (b){ keywords.splice(+b.dataset.i, 1); ls.set('kw_list', keywords); kwRender(); } else $('kwInput').focus(); });
+$('kwClear').onclick = () => { keywords = []; ls.set('kw_list', keywords); kwRender(); };
+function kwTogglePlat(k){ kwPlatOn.has(k) ? kwPlatOn.delete(k) : kwPlatOn.add(k); ls.set('kw_plats', [...kwPlatOn]); kwRender(); }
+$('kPlats').addEventListener('click', e => { const el = e.target.closest('.plat'); if (el) kwTogglePlat(el.dataset.k); });
+$('kPlats').addEventListener('keydown', e => { const el = e.target.closest('.plat'); if (el && (e.key === ' ' || e.key === 'Enter')){ e.preventDefault(); kwTogglePlat(el.dataset.k); } });
+$('kPlatAll').onclick = () => { kwPlatOn = new Set(KW_PLATS.map(p => p.k)); ls.set('kw_plats', [...kwPlatOn]); kwRender(); };
+$('kPlatNone').onclick = () => { kwPlatOn.clear(); ls.set('kw_plats', []); kwRender(); };
+function kwAlert(text, kind){ const m = $('kMsg'); m.textContent = text || ''; m.className = 'alert' + (text ? ' show ' + (kind || 'err') : ''); }
+$('kBtnStart').onclick = async () => {
+  if ($('kwInput').value.trim()){ kwAdd($('kwInput').value); $('kwInput').value = ''; }
+  if (!keywords.length){ kwAlert('Add at least one keyword.'); $('kwInput').focus(); return; }
+  if (!kwPlatOn.size){ kwAlert('Choose at least one platform.'); return; }
+  if (!P2.start || !P2.end){ kwAlert('Choose a start and end date.'); return; }
+  const r = await api('/api/keywords/start', {keywords, start: P2.start, end: P2.end, tz: P2.tz,
+    platforms: KW_PLATS.map(p => p.k).filter(k => kwPlatOn.has(k)), options: kwOptions()});
+  if (r.error){ kwAlert(r.error); return; }
+  kwAlert(''); $('log').textContent = ''; logCount = 0; toast('Keyword search started');
+};
+
+$('kFilterPlat').innerHTML += PLATS.map(p => `<option value="${p.k}">${p.n}</option>`).join('');
+function renderKw(){
+  const L = kwResults.links, per = kwResults.period, S = kwResults.statuses;
+  $('navKw').textContent = fmt(L.length);
+  $('kwPeriod').textContent = per ? `Period ${nice(per.start)} – ${nice(per.end)} (${per.tz}) · keywords: ${(kwResults.meta.keywords || []).join(', ')}` : 'Links found by the last keyword search.';
+  const kws = kwResults.meta.keywords || [], cur = $('kFilterKw').value;
+  $('kFilterKw').innerHTML = '<option value="">All keywords</option>' + kws.map(k => `<option${k === cur ? ' selected' : ''}>${esc(k)}</option>`).join('');
+  const q = $('kq').value.trim().toLowerCase(), fk = $('kFilterKw').value, fp = $('kFilterPlat').value;
+  const rows = L.filter(l => (!fp || l.platform === fp) && (!fk || (l.keywords || [l.keyword]).includes(fk)) &&
+      (!q || (l.author + ' ' + l.url).toLowerCase().includes(q))).sort((a, b) => b.ts - a.ts);
+  $('kCount').textContent = `${fmt(rows.length)} link${rows.length === 1 ? '' : 's'}`;
+  $('kwBody').innerHTML = rows.length ? rows.slice(0, 5000).map(l => `<tr><td>${esc(l.date)}</td><td>${esc(l.time)}</td>
+      <td>${pi(l.platform, true)}</td><td>${(l.keywords || [l.keyword]).map(k => `<span class="tag likely" style="margin:1px">${esc(k)}</span>`).join('')}</td>
+      <td>${l.author ? '@' + esc(l.author) : '<span style="color:var(--faint)">—</span>'}</td>
+      <td class="url"><a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.url.replace(/^https?:\/\/(www\.)?/, ''))}</a></td></tr>`).join('')
+    : `<tr><td colspan="6">${emptyBox(L.length ? 'Nothing matches the filters.' : (running ? 'Waiting for the first links…' : 'No links yet. Start a search on the Keyword Search page.'), 'i-search')}</td></tr>`;
+  $('kwStBody').innerHTML = S.length ? S.map(st => `<tr><td>${esc(st.keyword)}</td><td>${pi(st.platform, true)}</td>
+      <td><span class="tag ${st.status === 'ok' ? 'ok' : st.status === 'login_required' ? 'unv' : 'bad'}">${st.status === 'ok' ? 'OK' : esc(ISSUE[st.status] || st.status)}</span></td>
+      <td class="num">${st.count}</td><td style="max-width:520px">${esc(st.note)}</td></tr>`).join('')
+    : `<tr><td colspan="5">${emptyBox('No searches yet.', 'i-check')}</td></tr>`;
+}
+['kq'].forEach(id => $(id).addEventListener('input', renderKw));
+['kFilterKw','kFilterPlat'].forEach(id => $(id).addEventListener('change', renderKw));
+async function refreshKw(){ kwResults = await api('/api/results?mode=keywords'); renderKw(); }
 
 /* ---------- polling ---------- */
 async function poll(){
@@ -633,27 +868,38 @@ async function poll(){
     if (s.logs.length){ const box = $('log'), bottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
       box.textContent += s.logs.join('\n') + '\n'; logCount = s.log_count; if (bottom) box.scrollTop = box.scrollHeight; }
     const was = running; running = s.running;
-    $('btnStart').style.display = running ? 'none' : ''; $('btnStop').style.display = running && s.kind === 'crawl' ? '' : 'none';
+    const isProf = s.kind === 'profiles', isKw = s.kind === 'keywords';
+    $('btnStart').style.display = $('kBtnStart').style.display = running ? 'none' : '';
+    $('btnStop').style.display = running && isProf ? '' : 'none';
+    $('kBtnStop').style.display = running && isKw ? '' : 'none';
     $('btnLogin').disabled = running;
     $('stDot').classList.toggle('run', running);
-    $('stTitle').textContent = running ? (s.kind === 'login' ? 'Login mode' : 'Collecting') : 'Ready';
-    $('stSub').textContent = running ? (s.kind === 'login' ? 'Close the browser when done' : `${s.done}/${s.total} accounts · ${s.links} links`) : 'No job running';
-    const show = s.kind === 'crawl' && (running || s.total > 0);
-    $('prog').classList.toggle('show', show);
-    if (show){
-      $('progFill').style.width = (s.total ? 100 * s.done / s.total : 0) + '%';
-      $('progText').textContent = `${s.done} / ${s.total} accounts`; $('progLinks').textContent = `${s.links} links`;
-      $('progNow').textContent = running ? (s.current ? 'Now: ' + s.current : 'Starting the browser…') : 'Finished ✓';
-    }
-    $('downloads').innerHTML = (s.files || []).map(f => `<a class="btn" href="/download/${encodeURIComponent(f)}">${icon('i-dl')}${f.endsWith('.csv') ? 'CSV' : 'Excel'}</a>`).join('');
-    if (s.kind === 'crawl' && (s.results_count !== lastResCount || (was && !running))){ lastResCount = s.results_count; await refreshResults(); }
-    if (was && !running){ loadExports(); toast(s.kind === 'login' ? 'Login sessions saved' : 'Collection finished — results saved'); }
+    const mp = s.modes || {};
+    $('stTitle').textContent = running ? (s.kind === 'login' ? 'Login mode' : isKw ? 'Keyword search' : 'Collecting') : 'Ready';
+    $('stSub').textContent = running ? (s.kind === 'login' ? 'Close the browser when done'
+      : `${s.done}/${s.total} ${isKw ? 'searches' : 'accounts'} · ${fmt((mp[s.kind] || {}).count || 0)} links`) : 'No job running';
+    const progFor = (pref, mine, unit, count) => {
+      const show = mine && (running || s.total > 0);
+      $(pref + 'rog').classList.toggle('show', show);
+      if (!show) return;
+      $(pref + 'rogFill').style.width = (s.total ? 100 * s.done / s.total : 0) + '%';
+      $(pref + 'rogText').textContent = `${s.done} / ${s.total} ${unit}`; $(pref + 'rogLinks').textContent = `${fmt(count)} links`;
+      $(pref + 'rogNow').textContent = running ? (s.current ? 'Now: ' + s.current : 'Starting the browser…') : 'Finished ✓';
+    };
+    progFor('p', isProf, 'accounts', (mp.profiles || {}).count || 0);
+    progFor('kP', isKw, 'searches', (mp.keywords || {}).count || 0);
+    const dl = files => (files || []).map(f => `<a class="btn" href="/download/${encodeURIComponent(f)}">${icon('i-dl')}${f.endsWith('.csv') ? 'CSV' : 'Excel'}</a>`).join('');
+    $('downloads').innerHTML = dl((mp.profiles || {}).files); $('kwDownloads').innerHTML = dl((mp.keywords || {}).files);
+    if (mp.profiles && mp.profiles.version !== versions.profiles){ versions.profiles = mp.profiles.version; await refreshResults(); }
+    if (mp.keywords && mp.keywords.version !== versions.keywords){ versions.keywords = mp.keywords.version; await refreshKw(); }
+    if (was && !running){ refreshResults(); refreshKw(); loadExports();
+      toast(s.kind === 'login' ? 'Login sessions saved' : isKw ? 'Keyword search finished — results saved' : 'Collection finished — results saved'); }
   } catch(e){}
   setTimeout(poll, running ? 1200 : 2500);
 }
 
 go(document.getElementById('p-' + ls.get('page', 'collect')) ? ls.get('page', 'collect') : 'collect');
-loadAccounts(); renderResults(); poll();
+loadAccounts(); renderResults(); kwRender(); renderKw(); poll();
 </script>
 </body>
 </html>

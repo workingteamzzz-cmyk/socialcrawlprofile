@@ -40,15 +40,17 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/accounts":
             return self._json({"accounts": store.load_all()})
         if u.path == "/api/results":
-            return self._json(JOB.results_view())
+            mode = parse_qs(u.query).get("mode", ["profiles"])[0]
+            return self._json(JOB.results_view(mode))
         if u.path == "/api/outputs":
             files = []
             if os.path.isdir(OUTPUT_DIR):
-                for name in sorted(os.listdir(OUTPUT_DIR), reverse=True):
-                    if name.endswith(".xlsx") and name.startswith("post_links_"):
+                for name in os.listdir(OUTPUT_DIR):
+                    if name.endswith(".xlsx") and name.startswith(("post_links_", "keyword_links_")):
                         st = os.stat(os.path.join(OUTPUT_DIR, name))
                         files.append({"name": name, "size": st.st_size, "mtime": int(st.st_mtime)})
-            return self._json({"files": files[:30]})
+            files.sort(key=lambda f: f["mtime"], reverse=True)
+            return self._json({"files": files[:40]})
         if u.path.startswith("/download/"):
             name = os.path.basename(unquote(u.path[len("/download/"):]))
             path = os.path.join(OUTPUT_DIR, name)
@@ -78,6 +80,9 @@ class Handler(BaseHTTPRequestHandler):
             text = store.lines_for(data["ids"]) if data.get("ids") else data.get("text", "")
             err = JOB.start_crawl(text, data.get("start", ""), data.get("end", ""),
                                   data.get("tz", "WIB"), data.get("platforms") or [])
+        elif u.path == "/api/keywords/start":
+            err = JOB.start_keywords(data.get("keywords") or [], data.get("start", ""), data.get("end", ""),
+                                     data.get("tz", "WIB"), data.get("platforms") or [], data.get("options") or {})
         elif u.path == "/api/accounts/add":
             return self._json(store.add(data.get("text", ""), data.get("unit", "")))
         elif u.path == "/api/accounts/remove":

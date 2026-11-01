@@ -1,7 +1,8 @@
 # Post Link Collector (no API)
 
-A local app that collects **post links** from many **Instagram, X, TikTok, YouTube, Threads and Facebook** accounts
-for a **chosen date range**. No paid APIs, no AI, no engagement data — just the list of post links with their dates.
+A local app that collects **post links** for a **chosen date range** from **Instagram, X, TikTok, YouTube, Threads and
+Facebook** — either from a list of **profiles**, or from each platform's **search for keywords**. No paid APIs, no AI,
+no engagement data — just the post links with their dates.
 
 ## How it works
 
@@ -35,6 +36,8 @@ for a **chosen date range**. No paid APIs, no AI, no engagement data — just th
 | **Accounts** | All accounts grouped by unit: search, filter, select/deselect per account or unit, **Add profiles** for any other account (any platform), remove added ones |
 | **Post Links** | Every link found, filterable by platform/search, plus Excel/CSV download |
 | **Account Status** | Accounts that were not found, need login, errored, or had no posts in the period |
+| **Keyword Search** | Keywords (as many as you like, `#hashtags` too), period, platforms and advanced options; start/stop |
+| **Keyword Links** | Links found per keyword (filter by keyword/platform/author), search status per keyword × platform, Excel/CSV |
 | **Exports** | Excel files from earlier runs |
 | **Activity Log** | Live log of the current job |
 
@@ -45,7 +48,35 @@ Use a regular account rather than a main office account.
 During a run, keep the browser window the app opens (it can stay in the background) and solve any captcha there
 (TikTok shows them most). **Stop** keeps everything collected so far.
 
-## Output
+## Keyword search
+
+Each keyword is searched separately on each chosen platform, using the platform's own search in your logged-in
+browser. Only links inside the period are kept (dates come from the post IDs). How much you get depends on the
+platform's search:
+
+| Platform | Search used | Coverage |
+| --- | --- | --- |
+| X | `keyword since:… until:…` on the *Latest* tab | **Full** — date-filtered, scrolls to the end of the period |
+| YouTube | Search sorted by upload date with `after:`/`before:` (yt-dlp, no login) | **Full** |
+| Threads | Search, *Recent* tab | **Partial** — newest first, limited depth |
+| Facebook | Post search with the *Recent posts* filter | **Partial** — best effort, unstable |
+| Instagram | `#hashtag` page and keyword search page | **Top only** — Instagram shows popular posts, not every post |
+| TikTok | Video search | **Top only** — ranked by relevance, not date |
+
+Advanced options:
+- **Max links per keyword per platform** (50 / 100 / 300 / 1,000 / no limit) — keeps runs short and your accounts safe.
+- **Exact phrase** — multi-word keywords searched as one phrase (X, YouTube, Facebook).
+- **Exclude words** (X, YouTube).
+- **X**: language (any / Indonesian / English), exclude replies, exclude reposts. A live preview shows the exact X query.
+- **Instagram**: use the hashtag page, the keyword search page, or both.
+
+A keyword only matches what the platform's search indexes (captions, hashtags, titles) — not text inside images or
+videos. A link found by several keywords appears once, with all its keywords.
+
+Output: `keyword_links_<period>_<time>.xlsx` with sheets **Post Links** (Keyword, Platform, Author, Date, Time,
+Post Link), **Search Status** and **Info** (the options used), plus a `.csv`.
+
+## Output (profiles)
 
 Saved to `outputs/` after every account, and downloadable from the dashboard:
 
@@ -85,7 +116,8 @@ Saved to `outputs/` after every account, and downloadable from the dashboard:
 | `crawler/accounts.py` | Parses profile URLs, detects the platform, validates usernames |
 | `crawler/idtime.py` | Decodes post dates from post IDs (IG/Threads/X/TikTok) |
 | `crawler/browser.py` | Opens profiles in the browser, scrolls and collects links per platform |
-| `crawler/youtube.py` | YouTube via yt-dlp |
+| `crawler/youtube.py` | YouTube via yt-dlp (channels and search) |
+| `crawler/keywords.py` | Keyword search per platform + query options |
 | `crawler/store.py` | Base + custom account lists |
 | `crawler/job.py` | Background login/collection jobs, saving results |
 | `crawler/output.py` | Excel/CSV writer |

@@ -44,6 +44,7 @@ CAPTCHA_TEXTS = ["drag the slider", "geser penggeser", "verify to continue", "ve
 class Post:
     url: str
     time_utc: datetime | None
+    author: str = ""
 
 
 @dataclass
@@ -152,9 +153,10 @@ class BrowserCrawler:
             pass
 
     def _scroll_collect(self, extract: Callable[[], list[Post]], older_needed: int = 4,
-                        idle_limit: int = 5, max_rounds: int = 400) -> list[Post]:
+                        idle_limit: int = 5, max_rounds: int = 400, cap: int = 0) -> list[Post]:
         """Scroll until enough posts older than the start date are seen (newest-first feeds),
-        or nothing new loads. older_needed > 1 so pinned old posts at the top don't stop it early."""
+        or nothing new loads. older_needed > 1 so pinned old posts at the top don't stop it early;
+        older_needed=0 for feeds that are not in date order. cap>0 stops after that many in-range posts."""
         found: dict[str, Post] = {}
         idle = 0
         for _ in range(max_rounds):
@@ -164,7 +166,9 @@ class BrowserCrawler:
                 if p.url not in found or (found[p.url].time_utc is None and p.time_utc):
                     found[p.url] = p
             older = sum(1 for p in found.values() if p.time_utc and p.time_utc < self.start)
-            if older >= older_needed:
+            if older_needed and older >= older_needed:
+                break
+            if cap and sum(1 for p in found.values() if p.time_utc and self.start <= p.time_utc <= self.end) >= cap:
                 break
             idle = idle + 1 if len(found) == before else 0
             if idle >= idle_limit:
@@ -285,6 +289,11 @@ class BrowserCrawler:
         return self._finish(posts, ("/login", "/i/flow/login"))
 
     def facebook(self, acc: Account) -> Result:
+        posts = self._fb_collect(acc.url, older_needed=3, idle_limit=6)
+        return self._finish(posts, ("/login", "checkpoint"))
+
+    def _fb_collect(self, url: str, older_needed: int, idle_limit: int, max_rounds: int = 400, cap: int = 0):
+        """Open a Facebook page and read posts (url + creation_time) from the data it loads while scrolling."""
         responses = []
 
         def on_response(r):
@@ -293,13 +302,13 @@ class BrowserCrawler:
 
         self.page.on("response", on_response)
         try:
-            self._goto(acc.url)
+            self._goto(url)
             found: dict[str, Post] = {}
 
             def absorb(obj):
-                for url, ts in _fb_walk(obj):
-                    if url not in found:
-                        found[url] = Post(url, datetime.fromtimestamp(ts, tz=timezone.utc))
+                for u, ts in _fb_walk(obj):
+                    if u not in found:
+                        found[u] = Post(u, datetime.fromtimestamp(ts, tz=timezone.utc), _fb_author(u))
 
             # Posts already embedded in the first HTML
             try:
@@ -328,13 +337,21 @@ class BrowserCrawler:
                                 pass
                 return list(found.values())
 
-            posts = self._scroll_collect(extract, older_needed=3, idle_limit=6)
+            return self._scroll_collect(extract, older_needed=older_needed, idle_limit=idle_limit,
+                                        max_rounds=max_rounds, cap=cap)
         finally:
             try:
                 self.page.remove_listener("response", on_response)
             except Exception:  # noqa: BLE001
                 pass
-        return self._finish(posts, ("/login", "checkpoint"))
+
+
+def _fb_author(url: str) -> str:
+    m = re.match(r"https?://[^/]*facebook\.com/([^/?#]+)/(?:posts|videos|photos)/", url)
+    if m and m.group(1) not in ("permalink.php", "story.php", "watch", "reel", "photo"):
+        return m.group(1)
+    m = re.search(r"[?&]id=(\d+)", url)
+    return m.group(1) if m else ""
 
 
 _FB_POST_RX = re.compile(r"facebook\.com/.*(/posts/|/videos/|/reel/|/photos?/|permalink\.php|story\.php|/watch/|fbid=)")

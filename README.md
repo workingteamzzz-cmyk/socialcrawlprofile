@@ -4,6 +4,11 @@ A local app that collects **post links** for a **chosen date range** from **Inst
 Facebook** — either from a list of **profiles**, or from each platform's **search for keywords**. No paid APIs, no AI,
 no engagement data — just the post links with their dates.
 
+## Download
+
+- **Latest release (v1.0.0):** https://github.com/workingteamzzz-cmyk/socialcrawlprofile/archive/refs/tags/v1.0.0.zip
+- Extract the ZIP and follow *Install & run* below.
+
 ## How it works
 
 - The app drives a **real browser on your computer** (Chrome/Edge, or Chromium if neither is installed) with your own
@@ -20,7 +25,7 @@ no engagement data — just the post links with their dates.
 
 1. Install **Python 3.10+**. Windows: https://www.python.org/downloads/ (tick **Add Python to PATH**).
    Mac: use the .pkg installer from python.org.
-2. Download this repository as ZIP and extract it.
+2. Download the ZIP (link above) and extract it.
 3. Run:
    - **Windows:** double-click `start-windows.bat`
    - **Mac:** double-click `start-mac.command` (first time: right-click → Open → Open)
@@ -123,4 +128,4 @@ Saved to `outputs/` after every account, and downloadable from the dashboard:
 | `crawler/output.py` | Excel/CSV writer |
 | `crawler/server.py`, `crawler/static/index.html` | Local dashboard (reachable only from this computer) |
 | `data/accounts.csv` | Base account list with verification status |
-| `tests/` | Tests (`python -m pytest tests`) |
+| `tests/` | Unit tests and end-to-end flow tests with fake platform pages (`python -m pytest tests`) |

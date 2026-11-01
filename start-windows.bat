@@ -8,9 +8,9 @@ call .venv\Scripts\activate.bat
 if not exist .setup_done (
   python -m pip install --upgrade pip
   pip install -r requirements.txt || (echo Package install failed - check your internet connection and run this file again. & pause & exit /b 1)
-  python -m playwright install chromium || echo Note: Chromium download failed - the app will use Google Chrome or Edge if installed.
   echo done> .setup_done
 )
+python -m playwright install chromium >nul 2>nul || echo Note: Chromium could not be downloaded - the app will use Google Chrome or Edge if installed.
 pip install -q --upgrade yt-dlp >nul 2>nul
 python run.py
 pause

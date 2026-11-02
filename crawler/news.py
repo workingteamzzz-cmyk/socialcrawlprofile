@@ -12,9 +12,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, urlparse
 
-from .browser import BrowserCrawler, Result, Stopped, _parse_iso
+from .browser import BROWSER_CLOSED, BrowserCrawler, Result, Stopped, _parse_iso
 
 DETAIL_LEVELS = ("links", "basic", "full")
+SOURCES = ("news", "search", "both")
 _MAX_TEXT = 30000
 
 _MONTHS = {m: i + 1 for i, names in enumerate([
@@ -37,6 +38,8 @@ class NewsOptions:
     exclude: list[str] = field(default_factory=list)
     sites: list[str] = field(default_factory=list)
     detail: str = "basic"          # links | basic (title, media, date) | full (+ article text)
+    source: str = "both"           # news = Google News feed, search = Google Search News tab, both
+    resolve: bool = True           # open Google News links to get each media's own article link
 
     @classmethod
     def from_dict(cls, d: dict) -> "NewsOptions":
@@ -54,7 +57,9 @@ class NewsOptions:
         return cls(cap=max(0, int(cap if cap not in (None, "") else 100)), by_day=bool(d.get("by_day", True)),
                    region="any" if d.get("region") == "any" else "id",
                    exact=bool(d.get("exact")), exclude=[w.lstrip("-") for w in split(d.get("exclude"))],
-                   sites=sites[:20], detail=detail)
+                   sites=sites[:20], detail=detail,
+                   source=d.get("source") if d.get("source") in SOURCES else "both",
+                   resolve=bool(d.get("resolve", True)))
 
 
 def google_query(kw: str, opt: NewsOptions) -> str:
@@ -136,6 +141,37 @@ _RESULTS_JS = r"""() => {
   return {items: out, outside};
 }"""
 
+_FETCH_JS = r"""async (url) => {
+  try { const r = await fetch(url, {credentials: 'include'}); return r.ok ? await r.text() : ''; } catch (e) { return ''; }
+}"""
+
+
+def _parse_rss(xml: str) -> list[dict]:
+    """Items of a Google News RSS feed: link, title (without the ' - Media' suffix), source, publish time."""
+    import xml.etree.ElementTree as ET
+    from email.utils import parsedate_to_datetime
+    try:
+        root = ET.fromstring(xml.encode("utf-8") if isinstance(xml, str) else xml)
+    except ET.ParseError:
+        return []
+    out = []
+    for it in root.iter("item"):
+        link = (it.findtext("link") or "").strip()
+        if not link:
+            continue
+        source = (it.findtext("source") or "").strip()
+        title = (it.findtext("title") or "").strip()
+        if source and title.endswith(" - " + source):
+            title = title[: -len(source) - 3]
+        try:
+            dt = parsedate_to_datetime(it.findtext("pubDate") or "")
+            dt = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError, IndexError):
+            dt = None
+        out.append({"link": link, "title": title, "source": source, "dt": dt})
+    return out
+
+
 _ARTICLE_JS = r"""() => {
   const meta = n => (document.querySelector(`meta[property="${n}"],meta[name="${n}"],meta[itemprop="${n}"]`) || {}).content || '';
   let ld = {};
@@ -200,12 +236,118 @@ class NewsCrawler(BrowserCrawler):
             pass
 
     def search(self, kw: str, opt: NewsOptions, start_local: datetime, end_local: datetime) -> Result:
+        """Collect from the chosen source(s) and merge (one row per article link)."""
+        found: dict[str, dict] = {}
+        notes, statuses = [], []
+        try:
+            for src in (("news", "search") if opt.source == "both" else (opt.source,)):
+                if opt.cap and len(found) >= opt.cap:
+                    break
+                fn = self._search_feed if src == "news" else self._search_google
+                res = fn(kw, opt, start_local, end_local, found)
+                notes.append(("Google News: " if src == "news" else "Google Search: ") + res.note)
+                statuses.append(res.status)
+        except Stopped:
+            raise Stopped(list(found.values())) from None
+        status = "ok" if "ok" in statuses or found else (statuses[0] if statuses else "ok")
+        return Result(status, list(found.values()), " | ".join(notes))
+
+    # ---------- Google News feed ----------
+    def _search_feed(self, kw: str, opt: NewsOptions, start_local: datetime, end_local: datetime, found: dict) -> Result:
+        """Google News RSS: up to 100 newest articles per search, exact publish times. One search per day for
+        longer periods; links are then opened once to get the media's own URL."""
+        days = (end_local.date() - start_local.date()).days + 1
+        windows = [(end_local - timedelta(days=i), end_local - timedelta(days=i)) for i in range(days)] \
+            if opt.by_day and days > 1 else [(start_local, end_local)]
+        loc = {"hl": "id", "gl": "ID", "ceid": "ID:id"} if opt.region == "id" else {"hl": "en-US", "gl": "US", "ceid": "US:en"}
+        self._goto(f"https://news.google.com/?hl={loc['hl']}&gl={loc['gl']}&ceid={loc['ceid']}")
+        self._accept_consent()
+        q = google_query(kw, opt)
+        fresh, read, outside, failed = [], 0, 0, 0
+        for i, (a, b) in enumerate(windows):
+            self._check_stop()
+            if opt.cap and len(found) + len(fresh) >= opt.cap:
+                break
+            if i:
+                self._pause(1.5, 3)
+            qq = f"{q} after:{(a - timedelta(days=1)):%Y-%m-%d} before:{(b + timedelta(days=1)):%Y-%m-%d}"
+            url = (f"https://news.google.com/rss/search?q={quote(qq)}&hl={loc['hl']}&gl={loc['gl']}&ceid={quote(loc['ceid'])}")
+            xml = self.page.evaluate(_FETCH_JS, url) or ""
+            if not xml.lstrip().startswith("<"):
+                failed += 1
+                continue
+            for item in _parse_rss(xml):
+                read += 1
+                dt = item["dt"]
+                if dt and not (self.start <= dt <= self.end):
+                    outside += 1
+                    continue
+                if item["link"] in found or any(f["google_url"] == item["link"] for f in fresh):
+                    continue
+                fresh.append({"url": item["link"], "google_url": item["link"], "title": item["title"], "media": item["source"],
+                              "published": dt.astimezone(self.tz).strftime("%Y-%m-%d") if dt else "",
+                              "ts": dt.timestamp() if dt else 0})
+        fresh.sort(key=lambda r: -r["ts"])
+        if opt.cap:
+            fresh = fresh[:max(0, opt.cap - len(found))]
+        resolved = 0
+        if opt.resolve and opt.detail != "full":        # full mode opens each article anyway
+            for j, r in enumerate(fresh):
+                self._check_stop()
+                real = self._resolve(r["google_url"])
+                if real:
+                    r["url"] = real
+                    resolved += 1
+        for r in fresh:
+            if r["url"] not in found:
+                found[r["url"]] = r
+        note = f"query: {q}; {len(windows)} search{'es' if len(windows) != 1 else ''}; {read} articles read"
+        if outside:
+            note += f"; {outside} outside the period dropped"
+        if opt.resolve and fresh and opt.detail != "full":
+            note += f"; {resolved}/{len(fresh)} media links resolved"
+        if failed:
+            note += f"; {failed} feed request(s) failed"
+        return Result("error" if failed == len(windows) else "ok", [], note)
+
+    def _resolve(self, gnews_url: str) -> str:
+        """Open a news.google.com article link and catch where it sends the browser (the media's own URL),
+        without loading the whole article page."""
+        target = {}
+
+        def handler(route):
+            req = route.request
+            host = (urlparse(req.url).hostname or "").lower()
+            if req.is_navigation_request() and not re.search(r"(^|\.)(google\.[a-z.]+|gstatic\.com|googleusercontent\.com)$", host):
+                target.setdefault("url", req.url)
+                return route.abort()
+            return route.fallback()
+        self.page.route("**/*", handler)
+        try:
+            try:
+                self.page.goto(gnews_url, wait_until="commit", timeout=20000)
+            except Exception as e:  # noqa: BLE001
+                if BROWSER_CLOSED in str(e):
+                    raise
+            for _ in range(40):                       # the Google page redirects with a short delay
+                if "url" in target:
+                    break
+                self._check_stop()
+                self.page.wait_for_timeout(250)
+        finally:
+            try:
+                self.page.unroute("**/*", handler)
+            except Exception:  # noqa: BLE001
+                pass
+        return target.get("url", "")
+
+    # ---------- Google Search, News tab ----------
+    def _search_google(self, kw: str, opt: NewsOptions, start_local: datetime, end_local: datetime, found: dict) -> Result:
         """Google stops at ~300 results per search, so a longer period is searched day by day (newest first)
         when opt.by_day is on; results are merged and capped at opt.cap."""
         days = (end_local.date() - start_local.date()).days + 1
         windows = [(end_local - timedelta(days=i), end_local - timedelta(days=i)) for i in range(days)] \
             if opt.by_day and days > 1 else [(start_local, end_local)]
-        found: dict[str, dict] = {}
         notes, errors, cards = [], [], 0
         q = google_query(kw, opt)
         try:
@@ -226,7 +368,7 @@ class NewsCrawler(BrowserCrawler):
                         break
                 notes.append(res.note)
         except Stopped:
-            raise Stopped(list(found.values())) from None
+            raise
         if len(windows) == 1:
             return Result(("error" if errors else "ok"), list(found.values()), notes[0] if notes else "")
         note = f"query: {q}; searched day by day ({len(windows)} days); {cards} results read"
@@ -314,6 +456,14 @@ class NewsCrawler(BrowserCrawler):
 
     def article(self, url: str) -> dict:
         self._goto(url)
+        if "news.google." in self.page.url:          # Google News link: wait for it to send us on to the media
+            try:
+                self.page.wait_for_url(lambda u: "news.google." not in u and "consent.google." not in u, timeout=20000)
+                self.page.wait_for_load_state("domcontentloaded", timeout=30000)
+                self._pause(1, 2)
+            except Exception as e:  # noqa: BLE001
+                if BROWSER_CLOSED in str(e):
+                    raise
         try:
             a = self.page.evaluate(_ARTICLE_JS) or {}
         except Exception as e:  # noqa: BLE001

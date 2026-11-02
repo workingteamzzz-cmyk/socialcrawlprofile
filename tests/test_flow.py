@@ -24,6 +24,10 @@ PAGES = {
     "instagram.com/p/": '<html><head><meta property="og:description" content="1.234 suka, 56 komentar - pu_sda pada '
                         '5 Oktober 2026: &quot;Caption IG&quot;"></head><body>x</body></html>',
     "google.com/search": GOOGLE_P2,
+    "news.google.com/rss/search": '<?xml version="1.0"?><rss><channel><item><title>Tarif listrik naik - Kompas.com</title>'
+                                  '<link>https://news.google.com/rss/articles/K1</link><pubDate>Mon, 05 Oct 2026 01:30:00 GMT</pubDate>'
+                                  '<source url="https://www.kompas.com">Kompas.com</source></item></channel></rss>',
+    "news.google.com/rss/articles/K1": "<html><script>setTimeout(() => location.replace('https://www.kompas.com/a1'), 200)</script></html>",
     "kompas.com/a1": ARTICLE,
     "instagram.com/pu_sda/": _fake_feed_html([[f"/p/{ig_code(d)}/", ""] for d in IN_RANGE + OLD]),
     "tiktok.com/@pu_sda_citarum": _fake_feed_html([[f"https://www.tiktok.com/@pu_sda_citarum/video/{tt_id(d)}", ""] for d in IN_RANGE + OLD]),
@@ -194,7 +198,7 @@ def test_news_flow(app, detail):
     call, wait_done, _ = app
     assert call("/api/news/start", {"keywords": [], "start": "2026-10-01", "end": "2026-10-31"})["error"]
     r = call("/api/news/start", {"keywords": ["listrik", "PLN"], "start": "2026-10-01", "end": "2026-10-31", "tz": "WIB",
-                                 "options": {"detail": detail, "cap": 100, "by_day": False}})
+                                 "options": {"detail": detail, "cap": 100, "by_day": False, "source": "search"}})
     assert r["ok"], r
     s = wait_done()
     assert s["error"] == "", s
@@ -213,3 +217,18 @@ def test_news_flow(app, detail):
                     "basic": ["No", "Keyword", "Date", "Media", "Title", "Link"],
                     "full": ["No", "Keyword", "Date", "Media", "Title", "Link", "Published (article)", "Author", "Article Text"]}[detail]
     assert any(f["name"].startswith("news_links_") for f in call("/api/outputs")["files"])
+
+
+@pytest.mark.parametrize("detail", ["basic", "full"])
+def test_news_flow_google_news_feed(app, detail):
+    call, wait_done, _ = app
+    r = call("/api/news/start", {"keywords": ["listrik"], "start": "2026-10-01", "end": "2026-10-31", "tz": "WIB",
+                                 "options": {"detail": detail, "source": "news", "by_day": False}})
+    assert r["ok"], r
+    s = wait_done()
+    assert s["error"] == "", s
+    links = call("/api/results?mode=news")["links"]
+    assert [l["url"] for l in links] == ["https://www.kompas.com/a1"]       # the media's own link, not news.google.com
+    assert links[0]["media"] == "Kompas.com" and links[0]["published"] == "2026-10-05"
+    if detail == "full":
+        assert links[0]["author"] == "Budi" and "menaikkan tarif" in links[0]["text"]

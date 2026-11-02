@@ -137,7 +137,7 @@ def test_google_news_search_and_article(browser_ctx):
     from crawler.news import NewsCrawler, NewsOptions
     start, end = datetime(2026, 9, 30, 17, tzinfo=UTC), datetime(2026, 10, 31, 16, 59, tzinfo=UTC)
     c = _fast(NewsCrawler(browser_ctx, lambda m: None, threading.Event(), start, end, tz=WIB))
-    res = c.search("listrik", NewsOptions(by_day=False), datetime(2026, 10, 1), datetime(2026, 10, 31))
+    res = c.search("listrik", NewsOptions(by_day=False, source="search"), datetime(2026, 10, 1), datetime(2026, 10, 31))
     assert res.status == "ok", res
     got = {r["url"]: r for r in res.posts}
     assert set(got) == {"https://www.kompas.com/a1", "https://news.detik.com/a2", "https://www.cnnindonesia.com/a3"}
@@ -145,7 +145,7 @@ def test_google_news_search_and_article(browser_ctx):
     assert got["https://www.kompas.com/a1"]["title"] == "Tarif listrik naik"
     assert got["https://www.cnnindonesia.com/a3"]["published"] == "2026-10-20"
     assert "2 result pages" in res.note
-    res = c.search("listrik", NewsOptions(cap=2, by_day=False), datetime(2026, 10, 1), datetime(2026, 10, 31))
+    res = c.search("listrik", NewsOptions(cap=2, by_day=False, source="search"), datetime(2026, 10, 1), datetime(2026, 10, 31))
     assert len(res.posts) == 2
 
     a = c.article("https://www.kompas.com/a1")
@@ -212,7 +212,7 @@ def test_google_layout_variants(tmp_path, page, expect):
         c = _fast(NewsCrawler(ctx, lambda m: None, threading.Event(), datetime(2026, 9, 30, 17, tzinfo=UTC),
                               datetime(2026, 10, 31, 16, 59, tzinfo=UTC), tz=WIB, debug_dir=str(tmp_path / "debug")))
         c.page.wait_for_selector = lambda *a, **k: None
-        res = c.search("listrik pln", NewsOptions(by_day=False), datetime(2026, 10, 1), datetime(2026, 10, 31))
+        res = c.search("listrik pln", NewsOptions(by_day=False, source="search"), datetime(2026, 10, 1), datetime(2026, 10, 31))
         ctx.close()
     if expect == "ok":
         got = {r["url"]: r for r in res.posts}
@@ -256,10 +256,70 @@ def test_google_news_day_by_day(tmp_path):
         ctx.route("**/*", route)
         c = _fast(NewsCrawler(ctx, lambda m: None, threading.Event(), datetime(2026, 10, 9, 17, tzinfo=UTC),
                               datetime(2026, 10, 12, 16, 59, tzinfo=UTC), tz=WIB))
-        res = c.search("listrik", NewsOptions(cap=0), datetime(2026, 10, 10), datetime(2026, 10, 12))
+        res = c.search("listrik", NewsOptions(cap=0, source="search"), datetime(2026, 10, 10), datetime(2026, 10, 12))
         assert asked == ["10/12/2026", "10/11/2026", "10/10/2026"]          # newest day first
         assert len(res.posts) == 6 and "day by day (3 days)" in res.note
         asked.clear()
-        res = c.search("listrik", NewsOptions(cap=3), datetime(2026, 10, 10), datetime(2026, 10, 12))
+        res = c.search("listrik", NewsOptions(cap=3, source="search"), datetime(2026, 10, 10), datetime(2026, 10, 12))
         assert len(res.posts) == 3 and asked == ["10/12/2026", "10/11/2026"]   # stops once the cap is reached
+        ctx.close()
+
+
+
+def _rss(items):
+    body = "".join(f"<item><title>{t} - {src}</title><link>https://news.google.com/rss/articles/{gid}?oc=5</link>"
+                   f"<pubDate>{pub}</pubDate><source url=\"https://{src.lower()}.example\">{src}</source></item>"
+                   for gid, t, src, pub in items)
+    return f'<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>x</title>{body}</channel></rss>'
+
+
+def test_google_news_feed_with_media_links(tmp_path):
+    if _browser_path() is None:
+        pytest.skip("no local Chromium")
+    from urllib.parse import unquote
+
+    from playwright.sync_api import sync_playwright
+
+    from crawler.browser import launch_context
+    from crawler.news import NewsCrawler, NewsOptions
+    feeds = []
+    items = [("A1", "PLN pulihkan listrik", "Kompas", "Tue, 20 Oct 2026 03:00:00 GMT"),
+             ("A2", "Pemadaman bergilir &amp; jadwal", "Detik", "Wed, 21 Oct 2026 10:30:00 GMT"),
+             ("A3", "Berita lama", "Tempo", "Mon, 01 Jun 2026 01:00:00 GMT"),          # outside the period
+             ("A4", "Tanpa redirect", "Antara", "Thu, 22 Oct 2026 01:00:00 GMT")]
+
+    def route(r):
+        url = unquote(r.request.url)
+        if "news.google.com/rss/search" in url:
+            feeds.append(url)
+            return r.fulfill(status=200, content_type="application/xml", body=_rss(items))
+        m = re.search(r"/rss/articles/(A\d)", url)
+        if m and m.group(1) != "A4":
+            gid = m.group(1)
+            return r.fulfill(status=200, content_type="text/html",
+                             body=f"<html><script>setTimeout(() => location.href = 'https://media.example/{gid}', 300)</script></html>")
+        r.fulfill(status=200, content_type="text/html", body="<html><body>page</body></html>")
+    import re
+    os.environ["CRAWLER_BROWSER_PATH"] = _browser_path()
+    with sync_playwright() as pw:
+        ctx = launch_context(pw, str(tmp_path / "profile"), headless=True)
+        ctx.route("**/*", route)
+        c = _fast(NewsCrawler(ctx, lambda m: None, threading.Event(), datetime(2026, 9, 30, 17, tzinfo=UTC),
+                              datetime(2026, 10, 31, 16, 59, tzinfo=UTC), tz=WIB))
+        res = c.search("listrik", NewsOptions(source="news", by_day=False, exact=True), datetime(2026, 10, 1), datetime(2026, 10, 31))
+        got = {r["title"]: r for r in res.posts}
+        assert set(got) == {"PLN pulihkan listrik", "Pemadaman bergilir & jadwal", "Tanpa redirect"}
+        assert got["PLN pulihkan listrik"]["url"] == "https://media.example/A1" and got["PLN pulihkan listrik"]["media"] == "Kompas"
+        assert got["Pemadaman bergilir & jadwal"]["published"] == "2026-10-21"
+        assert got["Tanpa redirect"]["url"].startswith("https://news.google.com/rss/articles/A4")   # kept when no redirect
+        assert "after:2026-09-30 before:2026-11-01" in feeds[0] and "hl=id" in feeds[0]
+        assert "2/3 media links resolved" in res.note and "1 outside the period dropped" in res.note
+        feeds.clear()
+        res = c.search("listrik", NewsOptions(source="news", cap=0, resolve=False), datetime(2026, 10, 20), datetime(2026, 10, 22))
+        assert len(feeds) == 3 and len(res.posts) == 3                                         # one feed per day, merged
+        assert all(p["url"].startswith("https://news.google.com/") for p in res.posts)          # resolve off
+        feeds.clear()
+        res = c.search("listrik", NewsOptions(source="news", cap=2, resolve=False), datetime(2026, 10, 20), datetime(2026, 10, 22))
+        assert len(feeds) == 1 and len(res.posts) == 2                                         # stops once the cap is met
+        assert [p["published"] for p in res.posts] == ["2026-10-22", "2026-10-21"]               # newest kept
         ctx.close()

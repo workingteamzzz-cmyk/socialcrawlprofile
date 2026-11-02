@@ -118,17 +118,25 @@ not show that number. The Excel gets extra columns Caption, Likes, Comments, Sha
 
 ## News from Google
 
-The **News Search** page opens Google's **News** tab with your keyword and a custom date range (sorted by date), reads
-the result cards and clicks *Next* page after page, pausing like a reader. Results Google hides as "very similar"
-are included. Google shows at most about 300 results per search, so with **Search day by day** (on by default) a longer
-period is searched one day at a time, newest day first — a 30-day period becomes 30 searches per keyword and finds far
-more. If Google asks for a captcha ("unusual traffic"), solve it in the browser window — the run waits up to 5 minutes.
+Two sources, used together by default (*Source* option):
 
-If a results page cannot be read at all (Google changed its layout), the search is marked as an error and a copy of
-the page is saved in `outputs/debug/` — send it in so the reader can be updated. (Check it first: it can contain the
-name of the Google account you are signed in with.)
+- **Google News feed** (most reliable): the browser asks news.google.com for the keyword per day and gets a
+  structured list (title, media, exact publish time — up to 100 articles per search). Each Google News link is then
+  opened once to catch the media's own article URL (*Get the media's own link*; about 1–3 s each — turn it off to keep
+  the news.google.com links, which still open the article).
+- **Google Search, News tab**: opens Google with the keyword and a custom date range (sorted by date), reads the
+  result cards and clicks *Next* page after page, pausing like a reader. Results Google hides as "very similar" are
+  included. If Google asks for a captcha ("unusual traffic"), solve it in the browser window — the run waits up to
+  5 minutes.
 
-Options: search day by day, max links per keyword (50 / 100 / 300 / 1,000 / no limit), region (Indonesia / global English), exact phrase, excluded words, only these
+Google shows a limited number of results per search, so with **Search day by day** (on by default) a longer period is
+searched one day at a time, newest day first. Links found by both sources appear once.
+
+If a Google Search results page cannot be read at all (Google changed its layout), a copy of the page is saved in
+`outputs/debug/` — send it in so the reader can be updated. (Check it first: it can contain the name of the Google
+account you are signed in with.)
+
+Options: source, get the media's own link, search day by day, max links per keyword (50 / 100 / 300 / 1,000 / no limit), region (Indonesia / global English), exact phrase, excluded words, only these
 sites (e.g. `kompas.com, detik.com`), and the output level:
 - **Links only** — keyword + link.
 - **Links + title, media & date** — read from the result cards, no extra time.

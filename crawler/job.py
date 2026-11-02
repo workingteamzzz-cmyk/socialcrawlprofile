@@ -11,6 +11,7 @@ import threading
 import time
 import traceback
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 
 from .accounts import PLATFORM_LABEL, PLATFORMS, parse_accounts
 from .browser import BROWSER_CLOSED, LOGIN_PAGES, BrowserCrawler, Result, Stopped, launch_context
@@ -563,7 +564,11 @@ class Job:
                             self._check_or_raise()
                             self.current = f"{label} — article {j + 1}/{len(new)}"
                             try:
-                                r.update({k: v for k, v in crawler.article(r["url"]).items() if v})   # keep Google's title if the page gives none
+                                art = crawler.article(r["url"])
+                                r.update({k: v for k, v in art.items() if v})   # keep Google's title if the page gives none
+                                final = art.get("final_url") or ""
+                                if final and "google." not in (urlparse(final).hostname or ""):
+                                    r["url"] = final                             # Google News link -> media's own link
                             except Stopped:
                                 raise
                             except Exception as e:  # noqa: BLE001

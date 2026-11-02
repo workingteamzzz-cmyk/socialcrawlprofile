@@ -207,7 +207,10 @@ def write_news_outputs(path_xlsx: str, path_csv: str, rows, statuses, meta: dict
     ws3 = wb.create_sheet("Info")
     for k, v in [("Period", f"{meta['start']} to {meta['end']} ({meta['tz_name']})"),
                  ("Keywords", ", ".join(meta["keywords"])),
-                 ("Source", "Google Search, News tab, custom date range, sorted by date"),
+                 ("Source", {"news": "Google News feed", "search": "Google Search (News tab)",
+                             "both": "Google News feed + Google Search (News tab)"}[opt.source]
+                  + ("; searched day by day" if opt.by_day else "")),
+                 ("Media links", "resolved from Google News links" if opt.resolve else "Google News links kept as-is"),
                  ("Region", "Indonesia (Indonesian)" if opt.region == "id" else "Global (English)"),
                  ("Exact phrase", "yes" if opt.exact else "no"),
                  ("Excluded words", ", ".join(opt.exclude) or "-"),

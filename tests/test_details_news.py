@@ -152,3 +152,28 @@ def test_google_news_search_and_article(browser_ctx):
     assert a["title"] == "Tarif listrik naik mulai November" and a["site"] == "Kompas.com" and a["author"] == "Budi"
     assert a["published_full"] == "2026-10-05 08:30"
     assert "menaikkan tarif listrik" in a["text"] and "Baca juga" not in a["text"] and "menu menu" not in a["text"]
+
+
+def test_excel_survives_control_characters_and_long_links(tmp_path):
+    import openpyxl
+    from crawler.news import NewsOptions
+    from crawler.output import write_news_outputs
+    long_url = "https://example.com/" + "a" * 2100
+    rows = [{"url": "https://a.b/c", "keyword": "k", "keywords": ["k"], "title": "bad\x0bchar\x08", "text": "x" * 40000, "ts": 0},
+            {"url": long_url, "keyword": "k", "keywords": ["k"], "title": "long", "ts": 0}]
+    meta = {"options": NewsOptions(detail="full"), "start": "a", "end": "b", "tz_name": "WIB", "created": "n", "keywords": ["k"]}
+    write_news_outputs(str(tmp_path / "n.xlsx"), str(tmp_path / "n.csv"), rows, [], meta)
+    ws = openpyxl.load_workbook(tmp_path / "n.xlsx")["News Links"]
+    vals = list(ws.values)
+    assert "badchar" in vals[1] and len(vals[1][-1]) <= 32000
+
+
+def test_locked_output_file_does_not_stop_the_run():
+    from crawler.job import Job
+    j = Job()
+
+    def locked():
+        raise PermissionError("file is open")
+    j._safe_save(locked, "/x/post_links.xlsx")
+    j._safe_save(locked, "/x/post_links.xlsx")
+    assert sum("is it open in Excel" in line for line in j.logs) == 1   # warned once, no exception

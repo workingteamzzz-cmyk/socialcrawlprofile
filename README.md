@@ -39,6 +39,16 @@ What you get is chosen per run:
 4. The first start installs the packages and a Chromium browser (a few minutes). Then http://127.0.0.1:8770 opens.
    Keep the black server window open while you use the app.
 
+## Updating to a new version
+
+1. Close the app (close the black server window).
+2. Download and extract the new ZIP into a **new** folder.
+3. Copy these folders from the old folder into the new one, so nothing is lost:
+   - `data/` — your account lists
+   - `browser_profile/` — your platform logins (otherwise log in again)
+   - `outputs/` — earlier Excel/CSV results
+4. Start the app from the new folder as usual.
+
 ## Using the dashboard
 
 | Page | What it does |
@@ -123,7 +133,8 @@ Output: `news_links_<period>_<time>.xlsx` with sheets **News Links**, **Search S
 
 ## Output (profiles)
 
-Saved to `outputs/` after every account, and downloadable from the dashboard:
+Saved to `outputs/` after every account, and downloadable from the dashboard. If one of these files is open in Excel
+while a run is going, the app keeps collecting and saves again after the next account — close Excel to let it save.
 
 - `post_links_<period>_<time>.xlsx`
   - **Post Links**: No, Platform, Group, Handle, Date, Time, Post Link (clickable)

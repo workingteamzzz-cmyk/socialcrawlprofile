@@ -133,6 +133,17 @@ class Job:
                 p.details = {"error": str(e).splitlines()[0][:120]}
         return False
 
+    def _safe_save(self, fn, path):
+        """Write the result files; if Excel has one open (locked on Windows), keep going and retry later."""
+        try:
+            fn()
+            self.__dict__.pop("_save_warned", None)
+        except OSError as e:
+            if not self.__dict__.get("_save_warned"):
+                self.log(f"⚠ Could not save {os.path.basename(path)} ({e.__class__.__name__}) — is it open in Excel? "
+                         "Close it; saving is retried after the next account.")
+                self._save_warned = True
+
     def _check_or_raise(self):
         if self.stop_flag.is_set():
             raise Stopped()
@@ -228,7 +239,7 @@ class Job:
                              "url": acc.url, "status": res.status, "count": len(res.posts), "note": res.note})
 
         def save():
-            write_outputs(xlsx, csvp, links, statuses, meta)
+            self._safe_save(lambda: write_outputs(xlsx, csvp, links, statuses, meta), xlsx)
 
         self.log(f"Period {d_start:%Y-%m-%d} to {d_end:%Y-%m-%d} ({tz_name}) — {len(accounts)} accounts")
         need_browser = any(not a.problem for a in accounts)
@@ -353,7 +364,7 @@ class Job:
                 b["version"] += 1
 
         def save():
-            write_keyword_outputs(xlsx, csvp, list(seen.values()), statuses, meta)
+            self._safe_save(lambda: write_keyword_outputs(xlsx, csvp, list(seen.values()), statuses, meta), xlsx)
 
         self.log(f"Keyword search: {', '.join(kws)} — {len(plats)} platforms — period {d_start:%Y-%m-%d} to {d_end:%Y-%m-%d} ({tz_name})")
         pw = ctx = crawler = None
@@ -442,7 +453,7 @@ class Job:
         statuses: list[dict] = []
 
         def save():
-            write_news_outputs(xlsx, csvp, list(seen.values()), statuses, meta)
+            self._safe_save(lambda: write_news_outputs(xlsx, csvp, list(seen.values()), statuses, meta), xlsx)
 
         def record(kw, res):
             added = 0

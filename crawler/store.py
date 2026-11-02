@@ -95,6 +95,8 @@ def create_list(name: str) -> tuple[str | None, str | None]:
     name = re.sub(r"[^\w .()&+-]", "", " ".join((name or "").split()), flags=re.UNICODE).strip(" .")[:60]
     if not name:
         return None, "Enter a list name (letters, numbers, spaces)."
+    if name.upper().split(".")[0] in {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}:
+        name += " list"                   # reserved file names on Windows
     with _lock:
         _migrate()
         if any(n[:-4].lower() == name.lower() for n in os.listdir(LISTS_DIR) if n.endswith(".csv")):

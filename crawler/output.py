@@ -5,6 +5,7 @@ import csv
 from datetime import timedelta, timezone
 
 from openpyxl import Workbook
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 
@@ -17,6 +18,23 @@ STATUS_LABEL = {
     "stopped": "Stopped",
     "skipped": "Not processed",
 }
+
+
+def _cell(v):
+    """Excel refuses control characters and cells over 32,767 characters — captions and articles can have both."""
+    if isinstance(v, str):
+        return ILLEGAL_CHARACTERS_RE.sub("", v)[:32000]
+    return v
+
+
+def _append(ws, row):
+    ws.append([_cell(v) for v in row])
+
+
+def _link(cell, url):
+    if url and len(url) <= 2000:          # longer hyperlinks make Excel report the file as damaged
+        cell.hyperlink = url
+        cell.font = Font(color="0563C1", underline="single")
 
 
 def _autosize(ws, widths):
@@ -59,18 +77,16 @@ def write_outputs(path_xlsx: str, path_csv: str, links, statuses, meta: dict):
     wb = Workbook()
     ws = wb.active
     ws.title = "Post Links"
-    ws.append(["No"] + head)
+    _append(ws, ["No"] + head)
     for i, r in enumerate(rows, 1):
-        ws.append([i] + r)
-        cell = ws.cell(row=i + 1, column=7)
-        cell.hyperlink = r[5]
-        cell.font = Font(color="0563C1", underline="single")
+        _append(ws, [i] + r)
+        _link(ws.cell(row=i + 1, column=7), r[5])
     _autosize(ws, [6, 11, 34, 26, 16, 10, 70] + (DETAIL_WIDTHS if det else []))
 
     ws2 = wb.create_sheet("Account Status")
-    ws2.append(["Platform", "Group", "Handle", "Profile URL", "Status", "Links", "Notes"])
+    _append(ws2, ["Platform", "Group", "Handle", "Profile URL", "Status", "Links", "Notes"])
     for s in statuses:
-        ws2.append([s["platform_label"], s.get("label", ""), s["handle"], s["url"],
+        _append(ws2, [s["platform_label"], s.get("label", ""), s["handle"], s["url"],
                     STATUS_LABEL.get(s["status"], s["status"]), s["count"], s["note"]])
     _autosize(ws2, [11, 34, 26, 50, 20, 12, 70])
 
@@ -79,7 +95,7 @@ def write_outputs(path_xlsx: str, path_csv: str, links, statuses, meta: dict):
                  ("Created", meta["created"]), ("Total links", len(rows)),
                  ("Output", "Links + caption & engagement (snapshot at collection time)" if det else "Links only"),
                  ("Method", "Browser (no API) — dates decoded from post IDs")]:
-        ws3.append([k, v])
+        _append(ws3, [k, v])
     ws3.column_dimensions["A"].width = 14
     ws3.column_dimensions["B"].width = 70
     wb.save(path_xlsx)
@@ -103,18 +119,16 @@ def write_keyword_outputs(path_xlsx: str, path_csv: str, rows, statuses, meta: d
     wb = Workbook()
     ws = wb.active
     ws.title = "Post Links"
-    ws.append(header)
+    _append(ws, header)
     for i, r in enumerate(rows, 1):
-        ws.append([i] + values(r))
-        cell = ws.cell(row=i + 1, column=7)
-        cell.hyperlink = r["url"]
-        cell.font = Font(color="0563C1", underline="single")
+        _append(ws, [i] + values(r))
+        _link(ws.cell(row=i + 1, column=7), r["url"])
     _autosize(ws, [6, 22, 11, 26, 16, 10, 70] + (DETAIL_WIDTHS if det else []))
 
     ws2 = wb.create_sheet("Search Status")
-    ws2.append(["Keyword", "Platform", "Status", "Links", "Notes"])
+    _append(ws2, ["Keyword", "Platform", "Status", "Links", "Notes"])
     for s in statuses:
-        ws2.append([s["keyword"], PLATFORM_LABEL[s["platform"]], STATUS_LABEL.get(s["status"], s["status"]),
+        _append(ws2, [s["keyword"], PLATFORM_LABEL[s["platform"]], STATUS_LABEL.get(s["status"], s["status"]),
                     s["count"], s["note"]])
     _autosize(ws2, [22, 11, 18, 10, 90])
 
@@ -132,7 +146,7 @@ def write_keyword_outputs(path_xlsx: str, path_csv: str, rows, statuses, meta: d
                  ("Created", meta["created"]), ("Total links", len(rows)),
                  ("Method", "Each platform's own search in a logged-in browser (no API); dates decoded from post IDs. "
                             "Coverage depends on the platform's search.")]:
-        ws3.append([k, v])
+        _append(ws3, [k, v])
     ws3.column_dimensions["A"].width = 34
     ws3.column_dimensions["B"].width = 90
     wb.save(path_xlsx)
@@ -163,18 +177,16 @@ def write_news_outputs(path_xlsx: str, path_csv: str, rows, statuses, meta: dict
     wb = Workbook()
     ws = wb.active
     ws.title = "News Links"
-    ws.append(["No"] + [h for _, h, _ in cols])
+    _append(ws, ["No"] + [h for _, h, _ in cols])
     for i, r in enumerate(rows, 1):
-        ws.append([i] + [r.get(k, "") or "" for k, _, _ in cols])
-        cell = ws.cell(row=i + 1, column=link_col)
-        cell.hyperlink = r["url"]
-        cell.font = Font(color="0563C1", underline="single")
+        _append(ws, [i] + [r.get(k, "") or "" for k, _, _ in cols])
+        _link(ws.cell(row=i + 1, column=link_col), r["url"])
     _autosize(ws, [6] + [w for _, _, w in cols])
 
     ws2 = wb.create_sheet("Search Status")
-    ws2.append(["Keyword", "Status", "Links", "Notes"])
+    _append(ws2, ["Keyword", "Status", "Links", "Notes"])
     for s in statuses:
-        ws2.append([s["keyword"], STATUS_LABEL.get(s["status"], s["status"]), s["count"], s["note"]])
+        _append(ws2, [s["keyword"], STATUS_LABEL.get(s["status"], s["status"]), s["count"], s["note"]])
     _autosize(ws2, [26, 18, 10, 90])
 
     ws3 = wb.create_sheet("Info")
@@ -189,7 +201,7 @@ def write_news_outputs(path_xlsx: str, path_csv: str, rows, statuses, meta: dict
                  ("Output", {"links": "Links only", "basic": "Links + title, media, date",
                              "full": "Full: + article text, author, published time"}[opt.detail]),
                  ("Created", meta["created"]), ("Total links", len(rows))]:
-        ws3.append([k, v])
+        _append(ws3, [k, v])
     ws3.column_dimensions["A"].width = 24
     ws3.column_dimensions["B"].width = 90
     wb.save(path_xlsx)

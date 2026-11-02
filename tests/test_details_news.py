@@ -177,3 +177,52 @@ def test_locked_output_file_does_not_stop_the_run():
     j._safe_save(locked, "/x/post_links.xlsx")
     j._safe_save(locked, "/x/post_links.xlsx")
     assert sum("is it open in Excel" in line for line in j.logs) == 1   # warned once, no exception
+
+
+GOOGLE_NO_HEADING = """<html><body><div id="search"><div id="rso">
+<div class="SoaBEf" data-hveid="1"><a class="WlydOe" href="https://www.kompas.id/baca/2026/10/20/listrik-pln">
+  <div class="MgUUmf"><img src="x.png"><span>Kompas.id</span></div>
+  <div class="n0jPhd ynAwRc">PLN siapkan pasokan listrik untuk akhir tahun 2026</div>
+  <div class="GI74Re">Ringkasan berita ...</div><div class="OSrXXb"><span>20 Okt 2026</span></div></a></div>
+<div class="SoaBEf" data-hveid="2"><a href="/url?q=https://www.antaranews.com/berita/123/listrik&amp;sa=U&amp;ved=2a">
+  <div>ANTARA News</div><div>Pemadaman listrik bergilir di Jawa Tengah dijadwalkan ulang</div><span>21 Okt 2026</span></a></div>
+<div data-hveid="3"><a href="https://www.google.com/search?q=listrik+pln">Penelusuran terkait listrik pln</a>
+  <a href="https://www.kompas.id/"><img src="logo.png"></a></div>
+</div></div></body></html>"""
+GOOGLE_EMPTY = """<html><body><div id="search"><div id="rso"></div>
+<p>Your search - <b>xyz</b> - did not match any news results.</p></div></body></html>"""
+GOOGLE_UNREADABLE = """<html><body><div id="search"><div id="rso">
+<a href="https://site.example/a"><img src="a.png"></a><a href="https://site.example/b">Go</a></div></div></body></html>"""
+
+
+@pytest.mark.parametrize("page,expect", [("no_heading", "ok"), ("empty", "empty"), ("unreadable", "unreadable")])
+def test_google_layout_variants(tmp_path, page, expect):
+    if _browser_path() is None:
+        pytest.skip("no local Chromium")
+    from playwright.sync_api import sync_playwright
+
+    from crawler.browser import launch_context
+    from crawler.news import NewsCrawler, NewsOptions
+    body = {"no_heading": GOOGLE_NO_HEADING, "empty": GOOGLE_EMPTY, "unreadable": GOOGLE_UNREADABLE}[page]
+    os.environ["CRAWLER_BROWSER_PATH"] = _browser_path()
+    with sync_playwright() as pw:
+        ctx = launch_context(pw, str(tmp_path / "profile"), headless=True)
+        ctx.route("**/*", lambda r: r.fulfill(status=200, content_type="text/html", body=body))
+        c = _fast(NewsCrawler(ctx, lambda m: None, threading.Event(), datetime(2026, 9, 30, 17, tzinfo=UTC),
+                              datetime(2026, 10, 31, 16, 59, tzinfo=UTC), tz=WIB, debug_dir=str(tmp_path / "debug")))
+        c.page.wait_for_selector = lambda *a, **k: None
+        res = c.search("listrik pln", NewsOptions(), datetime(2026, 10, 1), datetime(2026, 10, 31))
+        ctx.close()
+    if expect == "ok":
+        got = {r["url"]: r for r in res.posts}
+        assert set(got) == {"https://www.kompas.id/baca/2026/10/20/listrik-pln", "https://www.antaranews.com/berita/123/listrik"}
+        k = got["https://www.kompas.id/baca/2026/10/20/listrik-pln"]
+        assert k["title"] == "PLN siapkan pasokan listrik untuk akhir tahun 2026" and k["media"] == "Kompas.id"
+        assert k["published"] == "2026-10-20" and got["https://www.antaranews.com/berita/123/listrik"]["published"] == "2026-10-21"
+        assert not (tmp_path / "debug").exists()
+    elif expect == "empty":
+        assert res.status == "ok" and res.posts == [] and "no news results" in res.note
+    else:
+        assert res.status == "error" and "layout may have changed" in res.note
+        saved = os.listdir(tmp_path / "debug")
+        assert len(saved) == 1 and saved[0] in res.note

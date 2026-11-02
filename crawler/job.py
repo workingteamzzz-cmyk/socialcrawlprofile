@@ -514,7 +514,8 @@ class Job:
             from playwright.sync_api import sync_playwright
             pw = sync_playwright().start()
             ctx = launch_context(pw, PROFILE_DIR)
-            crawler = NewsCrawler(ctx, self.log, self.stop_flag, start_utc, end_utc, tz=tz)
+            crawler = NewsCrawler(ctx, self.log, self.stop_flag, start_utc, end_utc, tz=tz,
+                                  debug_dir=os.path.join(OUTPUT_DIR, "debug"))
             for i, kw in enumerate(kws):
                 if self.stop_flag.is_set():
                     stopped = True

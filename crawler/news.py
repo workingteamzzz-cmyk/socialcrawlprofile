@@ -6,6 +6,7 @@ Google shows a captcha when it sees too many searches too fast; the run waits so
 the browser window."""
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -87,18 +88,39 @@ def parse_news_date(text: str, now: datetime) -> datetime | None:
 
 
 _RESULTS_JS = r"""() => {
-  const root = document.querySelector('#rso') || document.querySelector('#search') || document.body;
-  const out = [];
-  for (const a of root.querySelectorAll('a[href^="http"]')) {
-    let host = '';
-    try { host = new URL(a.href).hostname; } catch (e) { continue; }
-    if (/(^|\.)google\.[a-z.]+$|(^|\.)youtube\.com$|googleusercontent/.test(host)) continue;
-    const h = a.querySelector('[role="heading"], h3');
-    if (!h) continue;
-    const lines = a.innerText.split('\n').map(s => s.trim()).filter(Boolean);
-    out.push({url: a.href, title: h.innerText.trim(), lines});
+  // Read Google's news result cards without depending on one exact layout: any link to an outside site
+  // with a title-like text counts. Google redirect links (/url?q=...) are unwrapped to the real article.
+  const root = document.querySelector('#rso') || document.querySelector('#search') || document.querySelector('#center_col') || document.body;
+  const skipHost = /(^|\.)(google\.[a-z.]+|googleusercontent\.com|gstatic\.com|googleadservices\.com|youtube\.com|blogger\.com)$/;
+  const real = href => {
+    try {
+      let u = new URL(href, location.href);
+      if (/(^|\.)google\.[a-z.]+$/.test(u.hostname) && /^\/(url|aclk|imgres)$/.test(u.pathname)) {
+        const q = u.searchParams.get('q') || u.searchParams.get('url') || u.searchParams.get('adurl');
+        if (!q) return null;
+        u = new URL(q);
+      }
+      if (!/^https?:$/.test(u.protocol) || skipHost.test(u.hostname)) return null;
+      return u.href;
+    } catch (e) { return null; }
+  };
+  const textLines = el => ((el && el.innerText) || '').split('\n').map(s => s.trim()).filter(Boolean);
+  const out = [], seen = new Set();
+  let outside = 0;
+  for (const a of root.querySelectorAll('a[href]')) {
+    const url = real(a.getAttribute('href'));
+    if (!url) continue;
+    outside++;
+    if (seen.has(url)) continue;
+    const card = a.closest('[data-news-doc-id], .SoaBEf, g-card, article, [data-hveid]') || a;
+    const head = a.querySelector('[role="heading"], h3, [aria-level="3"]') || card.querySelector('[role="heading"], h3, [aria-level="3"]');
+    let title = head ? head.innerText.trim() : '';
+    if (!title) title = textLines(a).filter(t => t.length >= 20).sort((x, y) => y.length - x.length)[0] || '';
+    if (!title || title.length < (head ? 3 : 12)) continue;      // icons, "more results" links, etc.
+    seen.add(url);
+    out.push({url, title, lines: textLines(card).slice(0, 12)});
   }
-  return out;
+  return {items: out, outside};
 }"""
 
 _ARTICLE_JS = r"""() => {
@@ -132,9 +154,10 @@ _ARTICLE_JS = r"""() => {
 
 
 class NewsCrawler(BrowserCrawler):
-    def __init__(self, *a, tz=timezone.utc, **kw):
+    def __init__(self, *a, tz=timezone.utc, debug_dir: str | None = None, **kw):
         super().__init__(*a, **kw)
         self.tz = tz
+        self.debug_dir = debug_dir      # where to keep a copy of a results page that could not be read
 
     def _wait_google_captcha(self) -> bool:
         """True when the page is usable; waits up to ~5 minutes for the user to solve a captcha."""
@@ -169,13 +192,23 @@ class NewsCrawler(BrowserCrawler):
             raise Stopped(list(found.values())) from None
 
     def _search_pages(self, q: str, opt: NewsOptions, found: dict) -> Result:
-        pages = 0
+        pages = cards = outside_period = 0
+        snapshot = ""
         while pages < 40:
             self._check_stop()
             if not self._wait_google_captcha():
                 return Result("error", list(found.values()), "Google captcha was not solved in time")
             pages += 1
-            for item in self.page.evaluate(_RESULTS_JS) or []:
+            try:
+                self.page.wait_for_selector("#rso a[href], #search a[href]", timeout=8000)
+            except Exception:  # noqa: BLE001
+                pass
+            data = self.page.evaluate(_RESULTS_JS) or {}
+            items = data.get("items") or []
+            cards += len(items)
+            if pages == 1 and not items:
+                snapshot = self._save_snapshot(q)
+            for item in items:
                 url = item["url"]
                 if url in found:
                     continue
@@ -183,6 +216,7 @@ class NewsCrawler(BrowserCrawler):
                 date_txt = next((ln for ln in reversed(lines) if parse_news_date(ln, datetime.now(self.tz))), "")
                 dt = parse_news_date(date_txt, datetime.now(self.tz)) if date_txt else None
                 if dt and not (self.start - timedelta(days=1) <= dt <= self.end + timedelta(days=1)):
+                    outside_period += 1
                     continue                                  # outside the period (Google's filter is approximate)
                 media = next((ln for ln in lines if ln != date_txt and len(ln) < 60), "") or urlparse(url).netloc.removeprefix("www.")
                 found[url] = {"url": url, "title": item["title"], "media": media,
@@ -203,10 +237,32 @@ class NewsCrawler(BrowserCrawler):
                     raise
                 break
             self._pause(1.5, 3)
-        note = f"query: {q}; {pages} result page{'s' if pages != 1 else ''}"
+        note = f"query: {q}; {pages} result page{'s' if pages != 1 else ''}; {cards} results read"
+        if outside_period:
+            note += f"; {outside_period} outside the period dropped"
         if not found and ("/sorry/" in self.page.url):
             return Result("error", [], "Google captcha")
+        if not cards:
+            hint = ("Google showed no news results for this query and period" if "did not match" in self._body_text()
+                    or "tidak cocok" in self._body_text() else
+                    "Google's page could not be read (its layout may have changed)")
+            if snapshot:
+                hint += f" — a copy of the page was saved to outputs/debug/{snapshot}; please send it to the developer"
+            return Result("error" if snapshot and "layout" in hint else "ok", [], note + "; " + hint)
         return Result("ok", list(found.values()), note)
+
+    def _save_snapshot(self, q: str) -> str:
+        """Keep the HTML of a results page we could not read, so the reader can be fixed."""
+        if not self.debug_dir:
+            return ""
+        try:
+            os.makedirs(self.debug_dir, exist_ok=True)
+            name = "google_" + re.sub(r"[^\w-]+", "_", q)[:40] + f"_{datetime.now():%H%M%S}.html"
+            with open(os.path.join(self.debug_dir, name), "w", encoding="utf-8") as f:
+                f.write(f"<!-- {self.page.url} -->\n" + self.page.content())
+            return name
+        except Exception:  # noqa: BLE001
+            return ""
 
     def article(self, url: str) -> dict:
         self._goto(url)

@@ -56,7 +56,10 @@ class Result:
 
 
 class Stopped(Exception):
-    pass
+    """Raised when the user presses Stop. .posts carries what was collected for the current item."""
+    def __init__(self, posts=None):
+        super().__init__("stopped")
+        self.posts = posts or []
 
 
 BROWSER_CLOSED = "has been closed"   # Playwright error text when the user closes the browser window
@@ -93,7 +96,8 @@ def launch_context(pw, profile_dir: str, headless: bool = False):
             return pw.chromium.launch_persistent_context(**opts)
         except Exception as e:  # noqa: BLE001
             errors.append(f"{channel or 'chromium'}: {str(e).splitlines()[0]}")
-    raise RuntimeError("Could not open a browser. " + " | ".join(errors))
+    raise RuntimeError("Could not open a browser. Install Google Chrome (or Microsoft Edge), or start the app again "
+                       "with internet access so it can download Chromium. Details: " + " | ".join(errors))
 
 
 class BrowserCrawler:
@@ -171,6 +175,12 @@ class BrowserCrawler:
         or nothing new loads. older_needed > 1 so pinned old posts at the top don't stop it early;
         older_needed=0 for feeds that are not in date order. cap>0 stops after that many in-range posts."""
         found: dict[str, Post] = {}
+        try:
+            return self._scroll_loop(found, extract, older_needed, idle_limit, max_rounds, cap)
+        except Stopped as e:
+            raise Stopped(list(found.values()) or e.posts) from None
+
+    def _scroll_loop(self, found, extract, older_needed, idle_limit, max_rounds, cap):
         idle = 0
         for _ in range(max_rounds):
             self._check_stop()
@@ -374,7 +384,11 @@ class BrowserCrawler:
             if f"/{tab}" not in self.page.url:   # channel has no such tab (YouTube redirects to the home tab)
                 continue
             tabs_seen += 1
-            for p in self._yt_collect("ytd-rich-item-renderer a[href], ytd-grid-video-renderer a[href]", older_needed=2):
+            try:
+                tab_posts = self._yt_collect("ytd-rich-item-renderer a[href], ytd-grid-video-renderer a[href]", older_needed=2)
+            except Stopped as e:              # keep the tabs already read
+                raise Stopped(list(found.values()) + e.posts) from None
+            for p in tab_posts:
                 found.setdefault(p.url, p)
         if not tabs_seen:
             return self._finish([], ("consent.youtube.com",))
@@ -444,6 +458,8 @@ def _parse_iso(value: str) -> datetime | None:
     value = (value or "").strip()
     if not value:
         return None
+    value = re.sub(r"([+-]\d{2})(\d{2})$", r"\1:\2", value)          # +0700 -> +07:00 (Python 3.10)
+    value = re.sub(r"(\.\d{1,6})\d*(?=[+-]|Z|$)", r"\1", value)     # trim fractions beyond microseconds
     try:
         if len(value) == 10:          # date only
             return datetime.strptime(value, "%Y-%m-%d").replace(hour=12, tzinfo=timezone.utc)

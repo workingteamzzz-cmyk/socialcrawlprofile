@@ -145,7 +145,9 @@ while a run is going, the app keeps collecting and saves again after the next ac
 ## Account lists
 
 - Each list is a CSV file in `data/lists/` with columns Group, Platform, Handle, URL, Status, Source, Notes.
-  Create, fill and delete lists in the dashboard, or edit the CSV in Excel (save as CSV UTF-8) and reload the page.
+  Create, fill and delete lists in the dashboard, or edit the CSV in Excel and reload the page. Comma or semicolon
+  CSVs (Excel with Indonesian regional settings) and UTF-8 or plain "CSV (Comma delimited)" files are all read; the app
+  keeps the file's separator when it saves. Close the file in Excel before adding or removing accounts in the dashboard.
   Deleted lists are kept as `*.csv.deleted` backups.
 - Bundled example: **Ditjen SDA** — official accounts of 51 Ditjen SDA units on six platforms, checked through web
   search in November 2026:

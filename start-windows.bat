@@ -10,6 +10,8 @@ if not exist .setup_done (
   pip install -r requirements.txt || (echo Package install failed - check your internet connection and run this file again. & pause & exit /b 1)
   echo done> .setup_done
 )
+rem Quick when everything is installed; picks up new requirements after an update.
+pip install -q -r requirements.txt >nul 2>nul
 python -m playwright install chromium >nul 2>nul || echo Note: Chromium could not be downloaded - the app will use Google Chrome or Edge if installed.
 python run.py
 pause

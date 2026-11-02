@@ -18,6 +18,7 @@ if [ ! -f .setup_done ] || [ requirements.txt -nt .setup_done ]; then
   pip install -r requirements.txt
   touch .setup_done
 fi
+pip install -q -r requirements.txt >/dev/null 2>&1 || true   # picks up new requirements after an update
 # Quick when already installed; retried on every start if an earlier download failed.
 python -m playwright install chromium >/dev/null 2>&1 || echo "Note: Chromium could not be downloaded - the app will use Google Chrome or Edge if installed."
 python run.py

@@ -58,6 +58,8 @@ class Job:
         self.done = self.total = 0
         self.current = ""
         self.error = ""
+        self.job_id = 0
+        self.log_total = 0            # lines ever logged in this job (the kept list is capped)
 
     # ---------- shared ----------
     def log(self, msg: str):
@@ -68,14 +70,16 @@ class Job:
             pass
         with self.lock:
             self.logs.append(line)
+            self.log_total += 1
             if len(self.logs) > 3000:
                 self.logs = self.logs[-3000:]
 
     def state(self, since: int = 0) -> dict:
         with self.lock:
             return {"kind": self.kind, "running": self.running, "done": self.done, "total": self.total,
-                    "current": self.current, "error": self.error,
-                    "logs": self.logs[since:], "log_count": len(self.logs),
+                    "current": self.current, "error": self.error, "job_id": self.job_id,
+                    "logs": self.logs[max(0, since - (self.log_total - len(self.logs))):] if since < self.log_total else [],
+                    "log_count": self.log_total,
                     "modes": {m: {"count": len(b["links"]), "files": list(b["files"]), "period": b["period"],
                                   "version": b["version"]} for m, b in self.data.items()}}
 
@@ -85,14 +89,18 @@ class Job:
             return {"links": list(b["links"]), "statuses": list(b["statuses"]), "period": b["period"], "meta": b["meta"]}
 
     def _start(self, kind, target, *args) -> str | None:
-        if self.running:
-            return "A job is already running. Wait for it to finish or click Stop."
-        self.kind = kind
-        self.logs, self.done, self.total, self.current, self.error = [], 0, 0, "", ""
-        if kind in MODES:
-            self.data[kind] = _bucket()
-        self.stop_flag.clear()
-        self.running = True
+        with self.lock:
+            if self.running:
+                return ("A job is already running. Wait for it to finish, click Stop, or — in login mode — "
+                        "close the login browser window.")
+            self.running = True
+            self.job_id += 1
+            self.kind = kind
+            self.logs, self.log_total, self.done, self.total, self.current, self.error = [], 0, 0, 0, "", ""
+            self.__dict__.pop("_save_warned", None)
+            if kind in MODES:
+                self.data[kind] = _bucket()
+            self.stop_flag.clear()
 
         def wrap():
             try:
@@ -133,16 +141,34 @@ class Job:
                 p.details = {"error": str(e).splitlines()[0][:120]}
         return False
 
-    def _safe_save(self, fn, path):
+    def _safe_save(self, fn, path) -> bool:
         """Write the result files; if Excel has one open (locked on Windows), keep going and retry later."""
         try:
             fn()
             self.__dict__.pop("_save_warned", None)
+            return True
         except OSError as e:
             if not self.__dict__.get("_save_warned"):
                 self.log(f"⚠ Could not save {os.path.basename(path)} ({e.__class__.__name__}) — is it open in Excel? "
                          "Close it; saving is retried after the next account.")
                 self._save_warned = True
+            return False
+
+    def _finish_files(self, save, paths: list, anything: bool) -> list:
+        """Last save of a run; returns the file names to offer for download.
+        Nothing is written for a run that never got going (e.g. the browser could not open).
+        If the files are locked (open in Excel), the results go to a *_copy file instead."""
+        if not anything:
+            return []
+        if save():
+            return [os.path.basename(p) for p in paths]
+        alt = [p.replace(".xlsx", "_copy.xlsx").replace(".csv", "_copy.csv") for p in paths]
+        if save(alt):
+            self.log(f"⚠ The result file was locked (open in Excel?) — saved as {os.path.basename(alt[0])} instead.")
+            return [os.path.basename(p) for p in alt]
+        self.error = "Could not save the result files — close them in Excel. The links are still shown in the dashboard."
+        self.log("❌ " + self.error)
+        return []
 
     def _check_or_raise(self):
         if self.stop_flag.is_set():
@@ -238,8 +264,9 @@ class Job:
             statuses.append({"platform_label": PLATFORM_LABEL[acc.platform], "handle": acc.handle, "label": acc.label,
                              "url": acc.url, "status": res.status, "count": len(res.posts), "note": res.note})
 
-        def save():
-            self._safe_save(lambda: write_outputs(xlsx, csvp, links, statuses, meta), xlsx)
+        def save(paths=None):
+            x, c = paths or (xlsx, csvp)
+            return self._safe_save(lambda: write_outputs(x, c, links, statuses, meta), x)
 
         self.log(f"Period {d_start:%Y-%m-%d} to {d_end:%Y-%m-%d} ({tz_name}) — {len(accounts)} accounts")
         need_browser = any(not a.problem for a in accounts)
@@ -268,9 +295,10 @@ class Job:
                     if with_details and res.posts and self._fill_details(crawler, acc.platform, res.posts, label):
                         stopped = True
                         res.note = (res.note + "; " if res.note else "") + "stopped while reading details"
-                except Stopped:
+                except Stopped as e:
                     stopped = True
-                    record(acc, Result("stopped", [], "Stopped before finishing"))
+                    part = crawler._in_range(e.posts) if crawler else []
+                    record(acc, Result("stopped", part, f"Stopped before finishing — {len(part)} links collected so far kept"))
                     break
                 except Exception as e:  # noqa: BLE001
                     if BROWSER_CLOSED in str(e):
@@ -294,10 +322,10 @@ class Job:
                 if (PLATFORM_LABEL[acc.platform], acc.handle) not in done_keys:
                     statuses.append({"platform_label": PLATFORM_LABEL[acc.platform], "handle": acc.handle, "label": acc.label,
                                      "url": acc.url, "status": "skipped", "count": 0, "note": ""})
-            save()
+            files = self._finish_files(save, [xlsx, csvp], any(st["status"] != "skipped" for st in statuses))
             self._close(ctx, pw)
-        b["files"] = [os.path.basename(xlsx), os.path.basename(csvp)]
-        self.log(("⏹ Stopped. " if stopped else "✅ Done. ") + f"Total {len(links)} links → {os.path.basename(xlsx)}")
+        b["files"] = files
+        self.log(("⏹ Stopped. " if stopped else "✅ Done. ") + f"Total {len(links)} links" + (f" → {files[0]}" if files else ""))
 
     # ---------- keywords ----------
     def start_keywords(self, keywords: list[str], start: str, end: str, tz_name: str,
@@ -363,8 +391,9 @@ class Job:
                 b["statuses"].append(st)
                 b["version"] += 1
 
-        def save():
-            self._safe_save(lambda: write_keyword_outputs(xlsx, csvp, list(seen.values()), statuses, meta), xlsx)
+        def save(paths=None):
+            x, c = paths or (xlsx, csvp)
+            return self._safe_save(lambda: write_keyword_outputs(x, c, list(seen.values()), statuses, meta), x)
 
         self.log(f"Keyword search: {', '.join(kws)} — {len(plats)} platforms — period {d_start:%Y-%m-%d} to {d_end:%Y-%m-%d} ({tz_name})")
         pw = ctx = crawler = None
@@ -388,9 +417,10 @@ class Job:
                         if self._fill_details(crawler, plat, fresh, label):
                             stopped = True
                             res.note = (res.note + "; " if res.note else "") + "stopped while reading details"
-                except Stopped:
+                except Stopped as e:
                     stopped = True
-                    record(kw, plat, Result("stopped", [], "Stopped before finishing"))
+                    part = crawler._cap_trim(e.posts, opt.cap) if crawler else []
+                    record(kw, plat, Result("stopped", part, f"Stopped before finishing — {len(part)} links collected so far kept"))
                     break
                 except Exception as e:  # noqa: BLE001
                     if BROWSER_CLOSED in str(e):
@@ -409,10 +439,10 @@ class Job:
                 if i + 1 < len(tasks):
                     self._pause_between()
         finally:
-            save()
+            files = self._finish_files(save, [xlsx, csvp], bool(statuses))
             self._close(ctx, pw)
-        b["files"] = [os.path.basename(xlsx), os.path.basename(csvp)]
-        self.log(("⏹ Stopped. " if stopped else "✅ Done. ") + f"Total {len(seen)} unique links → {os.path.basename(xlsx)}")
+        b["files"] = files
+        self.log(("⏹ Stopped. " if stopped else "✅ Done. ") + f"Total {len(seen)} unique links" + (f" → {files[0]}" if files else ""))
 
 
     # ---------- news (Google) ----------
@@ -452,8 +482,9 @@ class Job:
         seen: dict[str, dict] = {}
         statuses: list[dict] = []
 
-        def save():
-            self._safe_save(lambda: write_news_outputs(xlsx, csvp, list(seen.values()), statuses, meta), xlsx)
+        def save(paths=None):
+            x, c = paths or (xlsx, csvp)
+            return self._safe_save(lambda: write_news_outputs(x, c, list(seen.values()), statuses, meta), x)
 
         def record(kw, res):
             added = 0
@@ -500,16 +531,18 @@ class Job:
                             self._check_or_raise()
                             self.current = f"{label} — article {j + 1}/{len(new)}"
                             try:
-                                r.update(crawler.article(r["url"]))
+                                r.update({k: v for k, v in crawler.article(r["url"]).items() if v})   # keep Google's title if the page gives none
                             except Stopped:
                                 raise
                             except Exception as e:  # noqa: BLE001
                                 if BROWSER_CLOSED in str(e):
                                     raise
                                 r["error"] = str(e).splitlines()[0][:120]
-                except Stopped:
+                except Stopped as e:
                     stopped = True
-                    res.note = (res.note + "; " if res.note else "") + "stopped"
+                    if e.posts and not res.posts:
+                        res = Result("stopped", e.posts, "")
+                    res.note = (res.note + "; " if res.note else "") + "stopped — links collected so far kept"
                 except Exception as e:  # noqa: BLE001
                     if BROWSER_CLOSED in str(e):
                         stopped = True
@@ -528,10 +561,10 @@ class Job:
                 if i + 1 < len(kws):
                     self._pause_between()
         finally:
-            save()
+            files = self._finish_files(save, [xlsx, csvp], bool(statuses))
             self._close(ctx, pw)
-        b["files"] = [os.path.basename(xlsx), os.path.basename(csvp)]
-        self.log(("⏹ Stopped. " if stopped else "✅ Done. ") + f"Total {len(seen)} unique news links → {os.path.basename(xlsx)}")
+        b["files"] = files
+        self.log(("⏹ Stopped. " if stopped else "✅ Done. ") + f"Total {len(seen)} unique news links" + (f" → {files[0]}" if files else ""))
 
 
 JOB = Job()

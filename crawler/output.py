@@ -29,6 +29,20 @@ def _cell(v):
 
 def _append(ws, row):
     ws.append([_cell(v) for v in row])
+    for c in ws[ws.max_row]:              # text such as "=== INFO ===" must stay text, not become a formula
+        if isinstance(c.value, str) and c.value.startswith("="):
+            c.data_type = "s"
+
+
+def _csv(v):
+    """Excel would run CSV values starting with = + - @ as formulas; keep them as text."""
+    if isinstance(v, str) and v[:1] in ("=", "+", "@") or (isinstance(v, str) and v[:1] == "-" and not v[1:2].isdigit()):
+        return "'" + v
+    return v
+
+
+def _csv_row(row):
+    return [_csv(v) for v in row]
 
 
 def _link(cell, url):
@@ -103,7 +117,7 @@ def write_outputs(path_xlsx: str, path_csv: str, links, statuses, meta: dict):
     with open(path_csv, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
         w.writerow(head)
-        w.writerows(rows)
+        w.writerows(_csv_row(r) for r in rows)
 
 
 def write_keyword_outputs(path_xlsx: str, path_csv: str, rows, statuses, meta: dict):
@@ -155,7 +169,7 @@ def write_keyword_outputs(path_xlsx: str, path_csv: str, rows, statuses, meta: d
         w = csv.writer(f)
         w.writerow(header[1:])
         for r in rows:
-            w.writerow(values(r))
+            w.writerow(_csv_row(values(r)))
 
 
 NEWS_COLUMNS = {   # detail level -> columns (key, header, width)
@@ -210,4 +224,4 @@ def write_news_outputs(path_xlsx: str, path_csv: str, rows, statuses, meta: dict
         w = csv.writer(f)
         w.writerow([h for _, h, _ in cols])
         for r in rows:
-            w.writerow([r.get(k, "") or "" for k, _, _ in cols])
+            w.writerow(_csv_row([r.get(k, "") or "" for k, _, _ in cols]))

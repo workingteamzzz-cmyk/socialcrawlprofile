@@ -30,6 +30,18 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, json.dumps(obj).encode())
 
     def do_GET(self):
+        try:
+            self._get()
+        except Exception as e:  # noqa: BLE001  never leave the dashboard without an answer
+            self._json({"error": f"{e.__class__.__name__}: {e}"}, 500)
+
+    def do_POST(self):
+        try:
+            self._post()
+        except Exception as e:  # noqa: BLE001
+            self._json({"ok": False, "error": f"{e.__class__.__name__}: {e}"}, 500)
+
+    def _get(self):
         u = urlparse(self.path)
         if u.path in ("/", "/index.html"):
             with open(os.path.join(STATIC, "index.html"), "rb") as f:
@@ -65,10 +77,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, data, ctype, {"Content-Disposition": f'attachment; filename="{name}"'})
         self._json({"error": "not found"}, 404)
 
-    def do_POST(self):
+    def _post(self):
         # Only accept requests from this app's own page.
         origin = self.headers.get("Origin", "")
-        if origin and not origin.startswith(("http://127.0.0.1", "http://localhost")):
+        if origin and urlparse(origin).hostname not in ("127.0.0.1", "localhost"):
             return self._json({"error": "forbidden"}, 403)
         n = int(self.headers.get("Content-Length") or 0)
         try:
@@ -88,15 +100,20 @@ class Handler(BaseHTTPRequestHandler):
         elif u.path == "/api/keywords/start":
             err = JOB.start_keywords(data.get("keywords") or [], data.get("start", ""), data.get("end", ""),
                                      data.get("tz", "WIB"), data.get("platforms") or [], data.get("options") or {})
-        elif u.path == "/api/accounts/add":
-            return self._json(store.add(data.get("list", ""), data.get("text", ""), data.get("group", "")))
-        elif u.path == "/api/accounts/remove":
-            return self._json({"removed": store.remove(data.get("list", ""), data.get("ids") or [])})
-        elif u.path == "/api/lists/create":
-            list_id, err = store.create_list(data.get("name", ""))
-            return self._json({"ok": err is None, "error": err, "id": list_id})
-        elif u.path == "/api/lists/delete":
-            return self._json({"ok": store.delete_list(data.get("id", ""))})
+        elif u.path in ("/api/accounts/add", "/api/accounts/remove", "/api/lists/create", "/api/lists/delete"):
+            try:
+                if u.path == "/api/accounts/add":
+                    return self._json(store.add(data.get("list", ""), data.get("text", ""), data.get("group", "")))
+                if u.path == "/api/accounts/remove":
+                    return self._json({"removed": store.remove(data.get("list", ""), data.get("ids") or [])})
+                if u.path == "/api/lists/create":
+                    list_id, err = store.create_list(data.get("name", ""))
+                    return self._json({"ok": err is None, "error": err, "id": list_id})
+                return self._json({"ok": store.delete_list(data.get("id", ""))})
+            except store.ListFileError as e:
+                return self._json({"ok": False, "error": str(e)})
+            except OSError:
+                return self._json({"ok": False, "error": "Could not change the list file — is it open in Excel? Close it and try again."})
         elif u.path == "/api/stop":
             JOB.stop()
             err = None

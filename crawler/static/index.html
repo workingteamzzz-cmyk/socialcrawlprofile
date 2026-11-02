@@ -677,8 +677,12 @@ let logCount = 0, running = false;
 
 function toast(t){ const el = $('toast'); el.textContent = t; el.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('show'), 2200); }
 async function api(url, body){
-  const r = await fetch(url, body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-  return r.json();
+  try {
+    const r = await fetch(url, body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    return await r.json();
+  } catch (e) {
+    return {ok: false, error: 'Lost connection to the app — is the black server window still open?', offline: true};
+  }
 }
 
 /* ---------- navigation ---------- */
@@ -837,12 +841,16 @@ $('listSave').onclick = async () => {
 };
 $('btnDelList').onclick = async () => {
   if (!listId || !confirm(`Delete the list "${listId}"? (A backup copy stays in data/lists.)`)) return;
-  await api('/api/lists/delete', {id: listId}); ls.set('selected_' + listId, null); listId = ''; await loadLists(); await loadAccounts(); toast('List deleted');
+  const rd = await api('/api/lists/delete', {id: listId});
+  if (rd.error || !rd.ok){ toast(rd.error || 'Could not delete the list.'); return; }
+  ls.set('selected_' + listId, null); listId = ''; await loadLists(); await loadAccounts(); toast('List deleted');
 };
 async function removeAccount(id){
   const a = accounts.find(x => x.id === id);
   if (!a || !confirm(`Remove ${shortHandle(a)} (${PL[a.platform].n}) from the list?`)) return;
-  await api('/api/accounts/remove', {list: listId, ids: [id]}); selected.delete(id); saveSel(); await loadLists(); await loadAccounts(); toast('Profile removed');
+  const rr = await api('/api/accounts/remove', {list: listId, ids: [id]});
+  if (rr.error){ toast(rr.error); return; }
+  selected.delete(id); saveSel(); await loadLists(); await loadAccounts(); toast('Profile removed');
 }
 
 /* ---------- add modal ---------- */
@@ -855,7 +863,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape'){ closeAdd();
 $('addSave').onclick = async () => {
   const text = $('addUrls').value; if (!text.trim()){ $('addUrls').focus(); return; }
   const r = await api('/api/accounts/add', {list: listId, text, group: $('addUnit').value});
-  $('addErrs').innerHTML = (r.errors || []).map(e => `<li>${esc(e)}</li>`).join('');
+  $('addErrs').innerHTML = (r.errors || (r.error ? [r.error] : [])).map(e => `<li>${esc(e)}</li>`).join('');
   if (r.added && r.added.length){
     await loadLists(); await loadAccounts();
     const added = new Set(r.added.map(u => u.toLowerCase()));
@@ -887,13 +895,13 @@ $('btnStart').onclick = async () => {
   if (!P1.start || !P1.end){ alertMsg('Choose a start and end date.'); return; }
   const r = await api('/api/start', {list: listId, ids, start: P1.start, end: P1.end, tz: P1.tz, platforms: [...platOn], detail: radioValue('pDetail')});
   if (r.error){ alertMsg(r.error); return; }
-  alertMsg(''); $('log').textContent = ''; logCount = 0; toast('Collection started');
+  alertMsg(''); $('log').textContent = ''; logCount = 0; toast('Collection started'); started();
 };
 $('btnStop').onclick = () => api('/api/stop', {});
 $('kBtnStop').onclick = () => api('/api/stop', {});
 $('btnLogin').onclick = async () => {
   const r = await api('/api/login', {});
-  if (r.error) toast(r.error); else { toast('Browser opened — sign in, then close it'); go('log'); }
+  if (r.error) toast(r.error); else { toast('Browser opened — sign in, then close it'); go('log'); started(); }
 };
 
 /* ---------- results ---------- */
@@ -1008,7 +1016,7 @@ $('kBtnStart').onclick = async () => {
   const r = await api('/api/keywords/start', {keywords, start: P2.start, end: P2.end, tz: P2.tz,
     platforms: KW_PLATS.map(p => p.k).filter(k => kwPlatOn.has(k)), options: kwOptions()});
   if (r.error){ kwAlert(r.error); return; }
-  kwAlert(''); $('log').textContent = ''; logCount = 0; toast('Keyword search started');
+  kwAlert(''); $('log').textContent = ''; logCount = 0; toast('Keyword search started'); started();
 };
 
 $('kFilterPlat').innerHTML += PLATS.map(p => `<option value="${p.k}">${p.n}</option>`).join('');
@@ -1091,7 +1099,7 @@ $('nBtnStart').onclick = async () => {
   if (!P3.start || !P3.end){ nwAlert('Choose a start and end date.'); return; }
   const r = await api('/api/news/start', {keywords: NW.items, start: P3.start, end: P3.end, tz: P3.tz, options: nwOptions()});
   if (r.error){ nwAlert(r.error); return; }
-  nwAlert(''); $('log').textContent = ''; logCount = 0; toast('News search started');
+  nwAlert(''); $('log').textContent = ''; logCount = 0; toast('News search started'); started();
 };
 $('nBtnStop').onclick = () => api('/api/stop', {});
 const NEWS_COLS = {
@@ -1129,7 +1137,15 @@ $('nFilterKw').addEventListener('change', renderNews);
 async function refreshNews(){ nwResults = await api('/api/results?mode=news'); renderNews(); }
 
 /* ---------- polling ---------- */
+let pollTimer = null, polling = false, shownErrJob = null;
+function started(){   // a job was accepted: reflect it at once instead of waiting for the next poll
+  running = true;
+  ['btnStart', 'kBtnStart', 'nBtnStart'].forEach(id => $(id).style.display = 'none');
+  clearTimeout(pollTimer); poll();
+}
 async function poll(){
+  if (polling) return;
+  polling = true;
   try {
     const s = await api('/api/status?since=' + logCount);
     if (s.log_count < logCount){ $('log').textContent = ''; logCount = 0; }
@@ -1164,12 +1180,17 @@ async function poll(){
     if (mp.profiles && mp.profiles.version !== versions.profiles){ versions.profiles = mp.profiles.version; await refreshResults(); }
     if (mp.keywords && mp.keywords.version !== versions.keywords){ versions.keywords = mp.keywords.version; await refreshKw(); }
     if (mp.news && mp.news.version !== versions.news){ versions.news = mp.news.version; await refreshNews(); }
-    if (was && !running && s.error){ (isKw ? kwAlert : isNews ? nwAlert : alertMsg)(s.error); if (s.kind === 'login') toast(s.error); }
+    if (shownErrJob === null) shownErrJob = s.job_id;              // page (re)loaded: don't replay an old error
+    if (!running && s.error && s.job_id !== shownErrJob){           // also catches jobs that failed within a second
+      shownErrJob = s.job_id; (isKw ? kwAlert : isNews ? nwAlert : alertMsg)(s.error); if (s.kind === 'login') toast(s.error);
+    }
     if (was && !running){ refreshResults(); refreshKw(); refreshNews(); loadExports();
       if (!s.error) toast(s.kind === 'login' ? 'Login sessions saved' : isKw ? 'Keyword search finished — results saved'
         : isNews ? 'News search finished — results saved' : 'Collection finished — results saved'); }
   } catch(e){}
-  setTimeout(poll, running ? 1200 : 2500);
+  polling = false;
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(poll, running ? 1200 : 2500);
 }
 
 go(document.getElementById('p-' + ls.get('page', 'collect')) ? ls.get('page', 'collect') : 'collect');

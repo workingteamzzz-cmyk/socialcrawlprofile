@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from urllib.parse import quote
 
-from .browser import BrowserCrawler, Post, Result
+from .browser import BrowserCrawler, Post, Result, Stopped
 from .idtime import instagram_shortcode_time, tiktok_id_time, x_status_time
 
 KEYWORD_PLATFORMS = ["x", "youtube", "threads", "instagram", "tiktok", "facebook"]
@@ -188,8 +188,12 @@ class KeywordCrawler(BrowserCrawler):
             return out
 
         for _name, url in sources:
-            self._goto(url)
-            for p in self._scroll_collect(extract, older_needed=0, idle_limit=4, max_rounds=40, cap=opt.cap):
+            try:
+                self._goto(url)
+                got = self._scroll_collect(extract, older_needed=0, idle_limit=4, max_rounds=40, cap=opt.cap)
+            except Stopped as e:              # keep the source already read
+                raise Stopped(list(found.values()) + e.posts) from None
+            for p in got:
                 found.setdefault(p.url, p)
             self._pause(2, 4)
         note = "Instagram shows top posts only (not every post) — " + " + ".join(n for n, _ in sources)

@@ -25,24 +25,65 @@ def _id(url: str) -> str:
     return hashlib.sha1(url.lower().encode()).hexdigest()[:12]
 
 
-def _read_csv(path):
+class ListFileError(Exception):
+    """The CSV exists but is not in a shape we can safely read or rewrite."""
+
+
+def _decode(raw: bytes) -> str:
+    for enc in ("utf-8-sig", "cp1252"):      # Excel "CSV UTF-8" or plain "CSV (Comma delimited)"
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("latin-1")
+
+
+def _dialect(path) -> str:
+    """',' or ';' — Excel with Indonesian/European regional settings saves CSV with semicolons."""
+    try:
+        with open(path, "rb") as f:
+            first = _decode(f.read(4096)).splitlines()[0] if os.path.getsize(path) else ""
+    except (OSError, IndexError):
+        return ","
+    return ";" if first.count(";") > first.count(",") else ","
+
+
+def _read_csv(path, strict=False):
+    """Rows as dicts. strict=True (before rewriting a file) refuses files without a URL column,
+    so a file we misread is never overwritten."""
     if not os.path.exists(path):
         return []
-    with open(path, encoding="utf-8-sig", newline="") as f:
-        rows = list(csv.DictReader(f))
-    for r in rows:                       # older files used "Unit"
-        if "Group" not in r and "Unit" in r:
+    with open(path, "rb") as f:
+        text = _decode(f.read())
+    delim, lines = _dialect(path), text.splitlines()
+    header = next(csv.reader(lines[:1], delimiter=delim), []) if lines else []
+    rows = list(csv.DictReader(lines, delimiter=delim))
+    if strict and text.strip() and "URL" not in {h.strip() for h in header}:
+        raise ListFileError(f"{os.path.basename(path)} has no URL column — check the file in Excel")
+    out = []
+    for r in rows:
+        r = {(k or "").strip(): (v or "") for k, v in r.items() if k is not None}
+        if "Group" not in r and "Unit" in r:   # older files used "Unit"
             r["Group"] = r.pop("Unit")
-    return rows
+        out.append(r)
+    return out
 
 
-def _write_csv(path, rows):
+def _write_csv(path, rows, delimiter=None):
+    delimiter = delimiter or (_dialect(path) if os.path.exists(path) else ",")
     tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8-sig", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=FIELDS, extrasaction="ignore")
-        w.writeheader()
-        w.writerows(rows)
-    os.replace(tmp, path)
+    try:
+        with open(tmp, "w", encoding="utf-8-sig", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=FIELDS, extrasaction="ignore", delimiter=delimiter)
+            w.writeheader()
+            w.writerows(rows)
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _migrate():
@@ -86,7 +127,10 @@ def lists() -> list[dict]:
         out = []
         for name in sorted(os.listdir(LISTS_DIR), key=str.lower):
             if name.endswith(".csv"):
-                n = sum(1 for r in _read_csv(os.path.join(LISTS_DIR, name)) if (r.get("URL") or "").strip())
+                try:
+                    n = sum(1 for r in _read_csv(os.path.join(LISTS_DIR, name)) if (r.get("URL") or "").strip())
+                except (OSError, ValueError, csv.Error):
+                    n = 0
                 out.append({"id": name[:-4], "name": name[:-4], "count": n})
         return out
 
@@ -119,7 +163,11 @@ def load(list_id: str) -> list[dict]:
     with _lock:
         p = _path(list_id)
         out, seen = [], set()
-        for row in _read_csv(p) if p else []:
+        try:
+            rows = _read_csv(p) if p else []
+        except (OSError, csv.Error):
+            rows = []
+        for row in rows:
             e = _entry(row)
             if e and e["id"] not in seen and not (e["problem"] and e["status"] == "Not found"):
                 seen.add(e["id"])
@@ -134,7 +182,10 @@ def add(list_id: str, text: str, group: str) -> dict:
         p = _path(list_id)
         if not p:
             return {"added": [], "errors": ["List not found."]}
-        rows = _read_csv(p)
+        try:
+            rows = _read_csv(p, strict=True)
+        except (ListFileError, OSError, csv.Error) as e:
+            return {"added": [], "errors": [str(e)]}
         existing = {(e["platform"], e["handle"].lower()) for e in (_entry(r) for r in rows) if e}
         for raw in text.splitlines():
             line = raw.strip()
@@ -162,7 +213,10 @@ def add(list_id: str, text: str, group: str) -> dict:
                          "Notes": f"Added {datetime.now():%Y-%m-%d}"})
             added.append(acc.url)
         if added:
-            _write_csv(p, rows)
+            try:
+                _write_csv(p, rows)
+            except OSError:
+                return {"added": [], "errors": ["Could not save the list — is the CSV open in Excel? Close it and try again."]}
     return {"added": added, "errors": errors}
 
 
@@ -172,7 +226,7 @@ def remove(list_id: str, ids: list[str]) -> int:
         p = _path(list_id)
         if not p:
             return 0
-        rows = _read_csv(p)
+        rows = _read_csv(p, strict=True)
 
         def row_id(r):
             acc = parse_line((r.get("URL") or "").strip()) if (r.get("URL") or "").strip() else None

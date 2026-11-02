@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, urlparse
 
-from .browser import BrowserCrawler, Result, _parse_iso
+from .browser import BrowserCrawler, Result, Stopped, _parse_iso
 
 DETAIL_LEVELS = ("links", "basic", "full")
 _MAX_TEXT = 30000
@@ -163,6 +163,12 @@ class NewsCrawler(BrowserCrawler):
         self._goto(google_news_url(q, start_local, end_local, opt.region))
         self._accept_consent()
         found: dict[str, dict] = {}
+        try:
+            return self._search_pages(q, opt, found)
+        except Stopped:
+            raise Stopped(list(found.values())) from None
+
+    def _search_pages(self, q: str, opt: NewsOptions, found: dict) -> Result:
         pages = 0
         while pages < 40:
             self._check_stop()
@@ -210,7 +216,7 @@ class NewsCrawler(BrowserCrawler):
             if "closed" in str(e):
                 raise
             a = {}
-        pub = _parse_iso(str(a.get("published", ""))[:25])
+        pub = _parse_iso(str(a.get("published", "")))
         return {"title": (a.get("title") or "").strip(), "site": (a.get("site") or "").strip(),
                 "published_full": pub.astimezone(self.tz).strftime("%Y-%m-%d %H:%M") if pub else "",
                 "author": (a.get("author") or "").strip()[:200], "text": (a.get("text") or "").strip()[:_MAX_TEXT],

@@ -1,8 +1,13 @@
 # Post Link Collector (no API)
 
 A local app that collects **post links** for a **chosen date range** from **Instagram, X, TikTok, YouTube, Threads and
-Facebook** — either from a list of **profiles**, or from each platform's **search for keywords**. No paid APIs, no AI,
-no engagement data — just the post links with their dates.
+Facebook** — from lists of **profiles** or from each platform's **search for keywords** — and **news links from Google**.
+It works the way a person does, in a real browser on your computer. No paid APIs, no AI.
+
+What you get is chosen per run:
+- **Links only** (fastest), or
+- **Links + caption & engagement** for social posts (caption, likes, comments, shares/reposts, views), or
+- for news: **links only**, **links + title, media & date**, or **full article** (title, author, published time, text).
 
 ## Download
 
@@ -44,6 +49,8 @@ no engagement data — just the post links with their dates.
 | **Account Status** | Accounts that were not found, need login, errored, or had no posts in the period |
 | **Keyword Search** | Keywords (as many as you like, `#hashtags` too), period, platforms and advanced options; start/stop |
 | **Keyword Links** | Links found per keyword (filter by keyword/platform/author), search status per keyword × platform, Excel/CSV |
+| **News Search** | Keywords, period, output level (links / + title, media, date / full article), region, exact phrase, excluded words, only-these-sites |
+| **News Links** | News links per keyword with the chosen details, search status, Excel/CSV |
 | **Exports** | Excel files from earlier runs |
 | **Activity Log** | Live log of the current job |
 
@@ -81,6 +88,38 @@ videos. A link found by several keywords appears once, with all its keywords.
 
 Output: `keyword_links_<period>_<time>.xlsx` with sheets **Post Links** (Keyword, Platform, Author, Date, Time,
 Post Link), **Search Status** and **Info** (the options used), plus a `.csv`.
+
+## Caption & engagement (optional)
+
+Choose **Links + caption & engagement** under *Output* (Collect page) or *Advanced options → Output* (Keyword Search).
+After the links of an account/search are collected, the browser opens each post and reads what the page shows:
+
+| Platform | Caption | Likes | Comments | Shares / reposts | Views |
+| --- | --- | --- | --- | --- | --- |
+| X | ✓ | ✓ | ✓ (replies) | ✓ (reposts) | ✓ |
+| YouTube | ✓ (title + description) | ✓ | ✓ | – | ✓ |
+| TikTok | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Instagram | ✓ | ✓ (unless hidden) | ✓ | – | reels, when shown |
+| Threads | ✓ | ✓ | ✓ (replies) | ✓ (reposts + quotes) | – |
+| Facebook | ✓ | ✓ (all reactions) | ✓ | ✓ | videos, when shown |
+
+It takes roughly 3–8 seconds per post, and the numbers are a snapshot at collection time. Empty cells mean the page did
+not show that number. The Excel gets extra columns Caption, Likes, Comments, Shares / Reposts, Views.
+
+## News from Google
+
+The **News Search** page opens Google's **News** tab with your keyword and a custom date range (sorted by date), reads
+the result cards and clicks *Next* page after page, pausing like a reader. Google shows at most about 300 results per
+search. If Google asks for a captcha ("unusual traffic"), solve it in the browser window — the run waits up to 5 minutes.
+
+Options: max links per keyword (50–300), region (Indonesia / global English), exact phrase, excluded words, only these
+sites (e.g. `kompas.com, detik.com`), and the output level:
+- **Links only** — keyword + link.
+- **Links + title, media & date** — read from the result cards, no extra time.
+- **Full article** — also opens each article and copies title, author, published time and the article text
+  (paragraphs of the main article; "Baca juga"/related-link lines are skipped). Paywalled or multi-page articles may be partial.
+
+Output: `news_links_<period>_<time>.xlsx` with sheets **News Links**, **Search Status** and **Info**, plus a `.csv`.
 
 ## Output (profiles)
 
@@ -127,6 +166,8 @@ Saved to `outputs/` after every account, and downloadable from the dashboard:
 | `crawler/idtime.py` | Decodes post dates from post IDs (IG/Threads/X/TikTok) |
 | `crawler/browser.py` | Opens profiles in the browser, scrolls and collects links per platform |
 | `crawler/keywords.py` | Keyword search per platform + query options |
+| `crawler/details.py` | Optional caption & engagement readers per platform |
+| `crawler/news.py` | Google News search + article text extraction |
 | `crawler/store.py` | Account lists (`data/lists/*.csv`) |
 | `crawler/job.py` | Background login/collection jobs, saving results |
 | `crawler/output.py` | Excel/CSV writer |

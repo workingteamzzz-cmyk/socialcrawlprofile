@@ -48,7 +48,7 @@ class Handler(BaseHTTPRequestHandler):
             files = []
             if os.path.isdir(OUTPUT_DIR):
                 for name in os.listdir(OUTPUT_DIR):
-                    if name.endswith(".xlsx") and name.startswith(("post_links_", "keyword_links_")):
+                    if name.endswith(".xlsx") and name.startswith(("post_links_", "keyword_links_", "news_links_")):
                         st = os.stat(os.path.join(OUTPUT_DIR, name))
                         files.append({"name": name, "size": st.st_size, "mtime": int(st.st_mtime)})
             files.sort(key=lambda f: f["mtime"], reverse=True)
@@ -81,7 +81,10 @@ class Handler(BaseHTTPRequestHandler):
         elif u.path == "/api/start":
             text = store.lines_for(data.get("list", ""), data["ids"]) if data.get("ids") else data.get("text", "")
             err = JOB.start_crawl(text, data.get("start", ""), data.get("end", ""),
-                                  data.get("tz", "WIB"), data.get("platforms") or [])
+                                  data.get("tz", "WIB"), data.get("platforms") or [], data.get("detail", "links"))
+        elif u.path == "/api/news/start":
+            err = JOB.start_news(data.get("keywords") or [], data.get("start", ""), data.get("end", ""),
+                                 data.get("tz", "WIB"), data.get("options") or {})
         elif u.path == "/api/keywords/start":
             err = JOB.start_keywords(data.get("keywords") or [], data.get("start", ""), data.get("end", ""),
                                      data.get("tz", "WIB"), data.get("platforms") or [], data.get("options") or {})

@@ -18,7 +18,13 @@ UTC = timezone.utc
 IN_RANGE = [datetime(2026, 10, d, 9, tzinfo=UTC) for d in (25, 12, 3)]
 OLD = [datetime(2026, 9, 28 - i, tzinfo=UTC) for i in range(8)]
 
+from tests.test_details_news import ARTICLE, GOOGLE_P2  # noqa: E402
+
 PAGES = {
+    "instagram.com/p/": '<html><head><meta property="og:description" content="1.234 suka, 56 komentar - pu_sda pada '
+                        '5 Oktober 2026: &quot;Caption IG&quot;"></head><body>x</body></html>',
+    "google.com/search": GOOGLE_P2,
+    "kompas.com/a1": ARTICLE,
     "instagram.com/pu_sda/": _fake_feed_html([[f"/p/{ig_code(d)}/", ""] for d in IN_RANGE + OLD]),
     "tiktok.com/@pu_sda_citarum": _fake_feed_html([[f"https://www.tiktok.com/@pu_sda_citarum/video/{tt_id(d)}", ""] for d in IN_RANGE + OLD]),
     "instagram.com/akun_hilang/": "<html><body>Sorry, this page isn't available.</body></html>",
@@ -164,3 +170,46 @@ def test_browser_closed_mid_run_stops_cleanly(app, monkeypatch):
     res = call("/api/results?mode=profiles")
     assert [st["status"] for st in res["statuses"]] == ["stopped"]
     assert s["modes"]["profiles"]["files"]   # partial results still saved
+
+
+def test_profile_flow_with_details(app):
+    call, wait_done, _ = app
+    r = call("/api/start", {"text": "https://www.instagram.com/pu_sda | Ditjen SDA", "start": "2026-10-01", "end": "2026-10-31",
+                            "tz": "WIB", "platforms": ["instagram"], "detail": "full"})
+    assert r["ok"], r
+    s = wait_done()
+    res = call("/api/results?mode=profiles")
+    assert res["meta"]["details"] is True and len(res["links"]) == 3
+    assert all(l["caption"] == "Caption IG" and l["likes"] == 1234 and l["comments"] == 56 for l in res["links"])
+    import openpyxl
+    from crawler import job
+    wb = openpyxl.load_workbook(os.path.join(job.OUTPUT_DIR, s["modes"]["profiles"]["files"][0]))
+    head = [c.value for c in wb["Post Links"][1]]
+    assert head[-5:] == ["Caption", "Likes", "Comments", "Shares / Reposts", "Views"]
+    assert list(wb["Post Links"].values)[1][7] == "Caption IG"
+
+
+@pytest.mark.parametrize("detail", ["links", "basic", "full"])
+def test_news_flow(app, detail):
+    call, wait_done, _ = app
+    assert call("/api/news/start", {"keywords": [], "start": "2026-10-01", "end": "2026-10-31"})["error"]
+    r = call("/api/news/start", {"keywords": ["listrik", "PLN"], "start": "2026-10-01", "end": "2026-10-31", "tz": "WIB",
+                                 "options": {"detail": detail, "cap": 100}})
+    assert r["ok"], r
+    s = wait_done()
+    assert s["error"] == "", s
+    res = call("/api/results?mode=news")
+    assert res["meta"]["detail"] == detail
+    by = {l["url"]: l for l in res["links"]}
+    assert set(by) == {"https://www.cnnindonesia.com/a3", "https://www.kompas.com/a1"}
+    assert all(set(l["keywords"]) == {"listrik", "PLN"} for l in res["links"])     # same results for both keywords, merged
+    if detail == "full":
+        assert by["https://www.kompas.com/a1"]["author"] == "Budi" and "menaikkan tarif" in by["https://www.kompas.com/a1"]["text"]
+    import openpyxl
+    from crawler import job
+    wb = openpyxl.load_workbook(os.path.join(job.OUTPUT_DIR, s["modes"]["news"]["files"][0]))
+    head = [c.value for c in wb["News Links"][1]]
+    assert head == {"links": ["No", "Keyword", "Link"],
+                    "basic": ["No", "Keyword", "Date", "Media", "Title", "Link"],
+                    "full": ["No", "Keyword", "Date", "Media", "Title", "Link", "Published (article)", "Author", "Article Text"]}[detail]
+    assert any(f["name"].startswith("news_links_") for f in call("/api/outputs")["files"])

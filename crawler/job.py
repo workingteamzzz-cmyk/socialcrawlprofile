@@ -14,14 +14,15 @@ from datetime import datetime, timedelta, timezone
 
 from .accounts import PLATFORM_LABEL, PLATFORMS, parse_accounts
 from .browser import BROWSER_CLOSED, LOGIN_PAGES, BrowserCrawler, Result, Stopped, launch_context
-from .output import write_keyword_outputs, write_outputs
+from .details import read_details
+from .output import write_keyword_outputs, write_news_outputs, write_outputs
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROFILE_DIR = os.path.join(ROOT, "browser_profile")
 OUTPUT_DIR = os.environ.get("OUTPUT_DIR") or os.path.join(ROOT, "outputs")
 
 TIMEZONES = {"WIB": 7, "WITA": 8, "WIT": 9, "UTC": 0}
-MODES = ("profiles", "keywords")
+MODES = ("profiles", "keywords", "news")
 
 
 def _bucket():
@@ -116,6 +117,26 @@ class Job:
         while time.time() < t_end and not self.stop_flag.is_set():
             time.sleep(0.25)
 
+    def _fill_details(self, crawler, platform: str, posts, label: str) -> bool:
+        """Open each post and read caption + engagement. Returns True if the user pressed Stop."""
+        for j, p in enumerate(posts):
+            if self.stop_flag.is_set():
+                return True
+            self.current = f"{label} — details {j + 1}/{len(posts)}"
+            try:
+                p.details = read_details(crawler, platform, p.url)
+            except Stopped:
+                return True
+            except Exception as e:  # noqa: BLE001
+                if BROWSER_CLOSED in str(e):
+                    raise
+                p.details = {"error": str(e).splitlines()[0][:120]}
+        return False
+
+    def _check_or_raise(self):
+        if self.stop_flag.is_set():
+            raise Stopped()
+
     @staticmethod
     def _close(ctx, pw):
         for obj, fn in ((ctx, "close"), (pw, "stop")):
@@ -156,7 +177,7 @@ class Job:
         self.log("✅ Browser closed. Login sessions saved.")
 
     # ---------- profiles ----------
-    def start_crawl(self, text: str, start: str, end: str, tz_name: str, platforms: list[str]):
+    def start_crawl(self, text: str, start: str, end: str, tz_name: str, platforms: list[str], detail: str = "links"):
         d_start, d_end, err = _period(start, end)
         if err:
             return err
@@ -164,9 +185,9 @@ class Job:
         accounts, bad = parse_accounts(text, platforms)
         if not accounts:
             return "No recognised accounts selected."
-        return self._start("profiles", self._crawl, accounts, bad, d_start, d_end, tz_name)
+        return self._start("profiles", self._crawl, accounts, bad, d_start, d_end, tz_name, detail == "full")
 
-    def _crawl(self, accounts, bad, d_start, d_end, tz_name):
+    def _crawl(self, accounts, bad, d_start, d_end, tz_name, with_details=False):
         tz_hours = TIMEZONES.get(tz_name, 7)
         tz = timezone(timedelta(hours=tz_hours))
         start_utc, end_utc = _utc_range(d_start, d_end, tz)
@@ -182,7 +203,8 @@ class Job:
         base = f"post_links_{d_start:%Y%m%d}-{d_end:%Y%m%d}_{datetime.now():%Y%m%d_%H%M%S}"
         xlsx, csvp = (os.path.join(OUTPUT_DIR, base + ext) for ext in (".xlsx", ".csv"))
         meta = {"tz_hours": tz_hours, "tz_name": tz_name, "start": f"{d_start:%Y-%m-%d}",
-                "end": f"{d_end:%Y-%m-%d}", "created": datetime.now().strftime("%Y-%m-%d %H:%M")}
+                "end": f"{d_end:%Y-%m-%d}", "created": datetime.now().strftime("%Y-%m-%d %H:%M"), "details": with_details}
+        b["meta"] = {"details": with_details}
         links: list[dict] = []
         statuses: list[dict] = []
 
@@ -193,14 +215,15 @@ class Job:
                     b["links"].append({"platform": acc.platform, "group": acc.label or acc.handle,
                                        "handle": acc.handle, "url": p.url,
                                        "date": t.strftime("%Y-%m-%d") if t else "",
-                                       "time": t.strftime("%H:%M") if t else ""})
+                                       "time": t.strftime("%H:%M") if t else "", **(p.details or {})})
                 b["statuses"].append({"platform": acc.platform, "group": acc.label or acc.handle,
                                       "handle": acc.handle, "url": acc.url, "status": res.status,
                                       "count": len(res.posts), "note": res.note})
                 b["version"] += 1
             for p in res.posts:
                 links.append({"order": order[acc.platform], "platform_label": PLATFORM_LABEL[acc.platform],
-                              "handle": acc.handle, "label": acc.label, "url": p.url, "time": p.time_utc})
+                              "handle": acc.handle, "label": acc.label, "url": p.url, "time": p.time_utc,
+                              **(p.details or {})})
             statuses.append({"platform_label": PLATFORM_LABEL[acc.platform], "handle": acc.handle, "label": acc.label,
                              "url": acc.url, "status": res.status, "count": len(res.posts), "note": res.note})
 
@@ -231,6 +254,9 @@ class Job:
                 self.current = label + (f" — {acc.label}" if acc.label else "")
                 try:
                     res = getattr(crawler, acc.platform)(acc)
+                    if with_details and res.posts and self._fill_details(crawler, acc.platform, res.posts, label):
+                        stopped = True
+                        res.note = (res.note + "; " if res.note else "") + "stopped while reading details"
                 except Stopped:
                     stopped = True
                     record(acc, Result("stopped", [], "Stopped before finishing"))
@@ -247,6 +273,8 @@ class Job:
                 self.log(f"   {'✅' if res.status == 'ok' else '⚠'} {len(res.posts)} links" + (f" — {res.note}" if res.note else ""))
                 self.done = i + 1
                 save()
+                if stopped:
+                    break
                 if i + 1 < len(accounts):
                     self._pause_between()
         finally:
@@ -292,7 +320,7 @@ class Job:
         start_utc, end_utc = _utc_range(d_start, d_end, tz)
         b = self.data["keywords"]
         b["period"] = {"start": f"{d_start:%Y-%m-%d}", "end": f"{d_end:%Y-%m-%d}", "tz": tz_name}
-        b["meta"] = {"keywords": kws, "platforms": plats, "cap": opt.cap}
+        b["meta"] = {"keywords": kws, "platforms": plats, "cap": opt.cap, "details": opt.detail == "full"}
         tasks = [(k, p) for k in kws for p in plats]
         self.total = len(tasks)
 
@@ -316,7 +344,7 @@ class Job:
                     t = p.time_utc.astimezone(tz) if p.time_utc else None
                     row = {"keyword": kw, "keywords": [kw], "platform": plat, "author": p.author, "url": p.url,
                            "date": t.strftime("%Y-%m-%d") if t else "", "time": t.strftime("%H:%M") if t else "",
-                           "ts": p.time_utc.timestamp() if p.time_utc else 0}
+                           "ts": p.time_utc.timestamp() if p.time_utc else 0, **(p.details or {})}
                     seen[p.url] = row
                     b["links"].append(row)
                 st = {"keyword": kw, "platform": plat, "status": res.status, "count": len(res.posts), "note": res.note}
@@ -344,6 +372,11 @@ class Job:
                 self.current = label
                 try:
                     res = getattr(crawler, f"search_{plat}")(kw, opt)
+                    if opt.detail == "full" and res.posts:
+                        fresh = [p for p in res.posts if p.url not in seen]     # skip links already read for another keyword
+                        if self._fill_details(crawler, plat, fresh, label):
+                            stopped = True
+                            res.note = (res.note + "; " if res.note else "") + "stopped while reading details"
                 except Stopped:
                     stopped = True
                     record(kw, plat, Result("stopped", [], "Stopped before finishing"))
@@ -360,6 +393,8 @@ class Job:
                 self.log(f"   {'✅' if res.status == 'ok' else '⚠'} {len(res.posts)} links" + (f" — {res.note}" if res.note else ""))
                 self.done = i + 1
                 save()
+                if stopped:
+                    break
                 if i + 1 < len(tasks):
                     self._pause_between()
         finally:
@@ -367,6 +402,125 @@ class Job:
             self._close(ctx, pw)
         b["files"] = [os.path.basename(xlsx), os.path.basename(csvp)]
         self.log(("⏹ Stopped. " if stopped else "✅ Done. ") + f"Total {len(seen)} unique links → {os.path.basename(xlsx)}")
+
+
+    # ---------- news (Google) ----------
+    def start_news(self, keywords: list[str], start: str, end: str, tz_name: str, options: dict):
+        from .news import NewsOptions
+        d_start, d_end, err = _period(start, end)
+        if err:
+            return err
+        kws = []
+        for k in keywords:
+            k = " ".join(str(k).split())[:150]
+            if k and k.lower() not in [x.lower() for x in kws]:
+                kws.append(k)
+        if not kws:
+            return "Enter at least one keyword."
+        if len(kws) > 50:
+            return "Up to 50 keywords per run."
+        try:
+            opt = NewsOptions.from_dict(options)
+        except (TypeError, ValueError):
+            return "Invalid search options."
+        return self._start("news", self._news, kws, opt, d_start, d_end, tz_name)
+
+    def _news(self, kws, opt, d_start, d_end, tz_name):
+        from .news import NewsCrawler
+        tz = timezone(timedelta(hours=TIMEZONES.get(tz_name, 7)))
+        start_utc, end_utc = _utc_range(d_start, d_end, tz)
+        b = self.data["news"]
+        b["period"] = {"start": f"{d_start:%Y-%m-%d}", "end": f"{d_end:%Y-%m-%d}", "tz": tz_name}
+        b["meta"] = {"keywords": kws, "detail": opt.detail, "cap": opt.cap}
+        self.total = len(kws)
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        base = f"news_links_{d_start:%Y%m%d}-{d_end:%Y%m%d}_{datetime.now():%Y%m%d_%H%M%S}"
+        xlsx, csvp = (os.path.join(OUTPUT_DIR, base + ext) for ext in (".xlsx", ".csv"))
+        meta = {"tz_name": tz_name, "start": f"{d_start:%Y-%m-%d}", "end": f"{d_end:%Y-%m-%d}",
+                "created": datetime.now().strftime("%Y-%m-%d %H:%M"), "keywords": kws, "options": opt}
+        seen: dict[str, dict] = {}
+        statuses: list[dict] = []
+
+        def save():
+            write_news_outputs(xlsx, csvp, list(seen.values()), statuses, meta)
+
+        def record(kw, res):
+            added = 0
+            with self.lock:
+                for r in res.posts:
+                    row = seen.get(r["url"])
+                    if row:
+                        if kw not in row["keywords"]:
+                            row["keywords"].append(kw)
+                            row["keyword"] = ", ".join(row["keywords"])
+                        continue
+                    r.update({"keyword": kw, "keywords": [kw]})
+                    seen[r["url"]] = r
+                    b["links"].append(r)
+                    added += 1
+                st = {"keyword": kw, "status": res.status, "count": len(res.posts), "note": res.note}
+                statuses.append(st)
+                b["statuses"].append(st)
+                b["version"] += 1
+            return added
+
+        self.log(f"News search (Google): {', '.join(kws)} — period {d_start:%Y-%m-%d} to {d_end:%Y-%m-%d} "
+                 f"({tz_name}) — detail: {opt.detail}")
+        pw = ctx = None
+        stopped = False
+        try:
+            from playwright.sync_api import sync_playwright
+            pw = sync_playwright().start()
+            ctx = launch_context(pw, PROFILE_DIR)
+            crawler = NewsCrawler(ctx, self.log, self.stop_flag, start_utc, end_utc, tz=tz)
+            for i, kw in enumerate(kws):
+                if self.stop_flag.is_set():
+                    stopped = True
+                    break
+                label = f"Google News · “{kw}”"
+                self.log(f"({i + 1}/{len(kws)}) {label} ...")
+                self.current = label
+                res = Result("stopped", [], "Stopped before finishing")
+                try:
+                    res = crawler.search(kw, opt, d_start, d_end)
+                    if opt.detail == "full":
+                        new = [r for r in res.posts if r["url"] not in seen]
+                        for j, r in enumerate(new):
+                            self._check_or_raise()
+                            self.current = f"{label} — article {j + 1}/{len(new)}"
+                            try:
+                                r.update(crawler.article(r["url"]))
+                            except Stopped:
+                                raise
+                            except Exception as e:  # noqa: BLE001
+                                if BROWSER_CLOSED in str(e):
+                                    raise
+                                r["error"] = str(e).splitlines()[0][:120]
+                except Stopped:
+                    stopped = True
+                    res.note = (res.note + "; " if res.note else "") + "stopped"
+                except Exception as e:  # noqa: BLE001
+                    if BROWSER_CLOSED in str(e):
+                        stopped = True
+                        self.error = "The browser window was closed, so the search stopped. Results so far are saved."
+                        self.log("⏹ " + self.error)
+                        record(kw, Result("stopped", res.posts if res.status == "ok" else [], "Browser window was closed"))
+                        break
+                    res = Result("error", [], str(e).splitlines()[0][:200])
+                added = record(kw, res)
+                self.log(f"   {'✅' if res.status == 'ok' else '⚠'} {len(res.posts)} links ({added} new)"
+                         + (f" — {res.note}" if res.note else ""))
+                self.done = i + 1
+                save()
+                if stopped:
+                    break
+                if i + 1 < len(kws):
+                    self._pause_between()
+        finally:
+            save()
+            self._close(ctx, pw)
+        b["files"] = [os.path.basename(xlsx), os.path.basename(csvp)]
+        self.log(("⏹ Stopped. " if stopped else "✅ Done. ") + f"Total {len(seen)} unique news links → {os.path.basename(xlsx)}")
 
 
 JOB = Job()

@@ -37,6 +37,7 @@ class SearchOptions:
     ig_hashtag: bool = True             # Instagram: hashtag page (single-word keywords)
     ig_keyword: bool = True             # Instagram: keyword search page
     cap: int = 300                      # max in-period links per keyword per platform (0 = no limit)
+    detail: str = "links"               # "links" or "full" (also open each post for caption + engagement)
 
     @classmethod
     def from_dict(cls, d: dict) -> "SearchOptions":
@@ -53,6 +54,7 @@ class SearchOptions:
             ig_hashtag=bool(d.get("ig_hashtag", True)),
             ig_keyword=bool(d.get("ig_keyword", True)),
             cap=max(0, int(d.get("cap") or 0)),
+            detail="full" if d.get("detail") == "full" else "links",
         )
 
 

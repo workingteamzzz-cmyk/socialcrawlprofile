@@ -182,6 +182,16 @@ svg.i{width:18px;height:18px;flex:none;stroke:currentColor;fill:none;stroke-widt
 .acc .h small{color:var(--muted);font-size:12px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);cursor:pointer;margin:0}
 
+/* output choice */
+.choices{display:flex;flex-direction:column;gap:10px}
+.choice{display:flex;gap:12px;align-items:flex-start;border:1px solid var(--line);border-radius:12px;padding:12px 14px;cursor:pointer}
+.choice:hover{border-color:#cfd5df}
+.choice:has(input:checked){border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.choice input{margin-top:3px;accent-color:var(--accent)}
+.choice b{display:block;font-size:13.5px}
+.choice small{color:var(--muted);font-size:12px}
+.tbl td:first-child{white-space:nowrap}
+td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#374151}
 /* keyword page */
 .kwbox{display:flex;flex-wrap:wrap;gap:8px;align-items:center;border:1px solid var(--line);border-radius:12px;padding:8px;min-height:48px;cursor:text}
 .kwbox:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
@@ -265,6 +275,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);cursor:po
   <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></symbol>
   <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+  <symbol id="i-news" viewBox="0 0 24 24"><path d="M4 5h13v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M17 9h3v10a2 2 0 0 1-2 2M8 9h5M8 13h5M8 17h3"/></symbol>
   <symbol id="i-tick" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
 </svg>
 
@@ -280,6 +291,9 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);cursor:po
       <div class="sep">Keywords</div>
       <button data-p="kwsearch"><svg class="i"><use href="#i-search"/></svg>Keyword Search</button>
       <button data-p="kwlinks"><svg class="i"><use href="#i-link"/></svg>Keyword Links<span class="count" id="navKw">0</span></button>
+      <div class="sep">News</div>
+      <button data-p="nwsearch"><svg class="i"><use href="#i-news"/></svg>News Search</button>
+      <button data-p="nwlinks"><svg class="i"><use href="#i-link"/></svg>News Links<span class="count" id="navNews">0</span></button>
       <div class="sep">System</div>
       <button data-p="exports"><svg class="i"><use href="#i-file"/></svg>Exports</button>
       <button data-p="log"><svg class="i"><use href="#i-term"/></svg>Activity Log</button>
@@ -331,6 +345,11 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);cursor:po
               </div>
               <p class="hint">Account list: <b id="runList">—</b>. Change the list or which accounts are included on the <a href="#" data-go="accounts">Accounts</a> page.</p>
             </div></div>
+          <div class="card"><div class="card-hd"><h3>Output</h3></div>
+            <div class="card-bd"><div class="choices">
+              <label class="choice"><input type="radio" name="pDetail" value="links" checked><span><b>Links only</b><small>Fastest — post link, date and time.</small></span></label>
+              <label class="choice"><input type="radio" name="pDetail" value="full"><span><b>Links + caption &amp; engagement</b><small>Also opens every post to copy its caption and read likes, comments, shares/reposts and views. Slower (about 3–8 s per post); numbers are a snapshot.</small></span></label>
+            </div></div></div>
           <div class="card"><div class="card-hd"><h3>Before the first run</h3></div>
             <div class="card-bd"><ol class="steps">
               <li><span class="num">1</span><span>Click <b>Log in to platforms</b> (bottom left). Sign in on each tab, then close that browser window. Needed once — YouTube needs no login.</span></li>
@@ -378,7 +397,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);cursor:po
           <span class="tag gray" id="rCount">0 links</span>
         </div>
         <div class="tblwrap"><table class="tbl">
-          <thead><tr><th>Date</th><th>Time</th><th>Platform</th><th>Group</th><th>Handle</th><th>Post link</th></tr></thead>
+          <thead id="resHead"><tr><th>Date</th><th>Time</th><th>Platform</th><th>Group</th><th>Handle</th><th>Post link</th></tr></thead>
           <tbody id="resBody"></tbody></table></div>
       </div>
     </section>
@@ -444,6 +463,8 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);cursor:po
             </div></div>
           <div class="card"><div class="card-hd"><h3>Advanced options</h3></div>
             <div class="card-bd">
+              <div class="opt-row"><div class="t"><b>Output</b><small>Caption &amp; engagement opens every post — slower</small></div>
+                <select id="oDetail"><option value="links">Links only</option><option value="full">Links + caption &amp; engagement</option></select></div>
               <div class="opt-row"><div class="t"><b>Max links per keyword per platform</b><small>Keeps runs short and protects your logged-in accounts</small></div>
                 <select id="oCap"><option value="50">50</option><option value="100">100</option><option value="300" selected>300</option><option value="1000">1,000</option><option value="0">No limit</option></select></div>
               <div class="opt-row"><div class="t"><b>Exact phrase</b><small>Multi-word keywords are searched as one phrase (X, YouTube, Facebook)</small></div>
@@ -476,7 +497,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);cursor:po
           <span class="tag gray" id="kCount">0 links</span>
         </div>
         <div class="tblwrap"><table class="tbl">
-          <thead><tr><th>Date</th><th>Time</th><th>Platform</th><th>Keyword</th><th>Author</th><th>Post link</th></tr></thead>
+          <thead id="kwHead"><tr><th>Date</th><th>Time</th><th>Platform</th><th>Keyword</th><th>Author</th><th>Post link</th></tr></thead>
           <tbody id="kwBody"></tbody></table></div>
       </div>
       <div class="card">
@@ -484,6 +505,93 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);cursor:po
         <div class="tblwrap" style="margin-top:10px"><table class="tbl">
           <thead><tr><th>Keyword</th><th>Platform</th><th>Status</th><th class="num">Links</th><th>Notes</th></tr></thead>
           <tbody id="kwStBody"></tbody></table></div>
+      </div>
+    </section>
+
+    <!-- NEWS SEARCH -->
+    <section class="page" id="p-nwsearch">
+      <div class="pagehead"><div><h1>News Search</h1><p>Collect news links from Google (News tab) for your keywords and period — the way a person searches, page by page. No API.</p></div></div>
+      <div class="collect">
+        <div style="display:flex;flex-direction:column;gap:16px">
+          <div class="card"><div class="card-hd"><h3>Keywords</h3><div class="tools"><button class="btn sm" id="nwClear">Clear</button></div></div>
+            <div class="card-bd">
+              <div class="kwbox" id="nwBox"><input id="nwInput" placeholder="Type a keyword and press Enter — e.g. pemadaman listrik, banjir Jakarta" autocomplete="off" aria-label="Add news keyword"></div>
+              <p class="hint" style="margin-top:8px">Each keyword is a separate Google search. Google operators work too, e.g. <code>"tarif listrik" OR TDL</code>.</p>
+            </div></div>
+          <div class="card"><div class="card-hd"><h3>Period</h3><div class="tools"><span class="tag likely" id="nPeriodTag"></span></div></div>
+            <div class="card-bd">
+              <div class="presets" id="nPresets">
+                <button class="chip" data-p="today">Today</button><button class="chip" data-p="yesterday">Yesterday</button>
+                <button class="chip" data-p="7d">Last 7 days</button><button class="chip" data-p="30d">Last 30 days</button>
+                <button class="chip" data-p="thismonth">This month</button><button class="chip" data-p="lastmonth">Last month</button>
+                <button class="chip" data-p="thisyear">This year</button>
+              </div>
+              <div class="fields">
+                <div class="field"><label for="nStart">From</label><input type="date" id="nStart"></div>
+                <div class="field"><label for="nEnd">To</label><input type="date" id="nEnd"></div>
+                <div class="field"><label for="nTz">Time zone</label><select id="nTz"><option value="WIB">WIB (UTC+7)</option><option value="WITA">WITA (UTC+8)</option><option value="WIT">WIT (UTC+9)</option><option value="UTC">UTC</option></select></div>
+              </div>
+            </div></div>
+          <div class="card"><div class="card-hd"><h3>Output</h3></div>
+            <div class="card-bd"><div class="choices">
+              <label class="choice"><input type="radio" name="nDetail" value="links"><span><b>Links only</b><small>Just the article links.</small></span></label>
+              <label class="choice"><input type="radio" name="nDetail" value="basic" checked><span><b>Links + title, media &amp; date</b><small>Read from Google's result cards — no extra time.</small></span></label>
+              <label class="choice"><input type="radio" name="nDetail" value="full"><span><b>Full article</b><small>Also opens every article to copy its title, author, published time and text. Slower (about 3–6 s per article); paywalled pages may be partial.</small></span></label>
+            </div></div></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:16px">
+          <div class="card"><div class="card-hd"><h3>Run</h3></div>
+            <div class="card-bd">
+              <div class="stats">
+                <div class="stat"><b id="nS1">0</b><small>keywords</small></div>
+                <div class="stat"><b id="nS2">100</b><small>max links each</small></div>
+                <div class="stat"><b id="nS3">0</b><small>days</small></div>
+              </div>
+              <button class="btn primary lg" id="nBtnStart"><svg class="i"><use href="#i-news"/></svg>Start news search</button>
+              <button class="btn danger lg" id="nBtnStop" style="display:none"><svg class="i"><use href="#i-stop"/></svg>Stop (keeps what was collected)</button>
+              <div class="alert" id="nMsg"></div>
+              <div class="prog" id="nProg">
+                <div class="track"><div class="fill" id="nProgFill"></div></div>
+                <div class="meta"><span id="nProgText">0 / 0 keywords</span><span id="nProgLinks">0 links</span></div>
+                <div class="now" id="nProgNow">Preparing…</div>
+              </div>
+              <p class="hint">If Google shows a captcha ("unusual traffic"), solve it in the browser window — the run waits for you.</p>
+            </div></div>
+          <div class="card"><div class="card-hd"><h3>Advanced options</h3></div>
+            <div class="card-bd">
+              <div class="opt-row"><div class="t"><b>Max links per keyword</b><small>Google shows at most about 300 results per search</small></div>
+                <select id="nCap"><option value="50">50</option><option value="100" selected>100</option><option value="200">200</option><option value="300">300</option></select></div>
+              <div class="opt-row"><div class="t"><b>Region &amp; language</b></div>
+                <select id="nRegion"><option value="id">Indonesia (Indonesian)</option><option value="any">Global (English)</option></select></div>
+              <div class="opt-row"><div class="t"><b>Exact phrase</b><small>Multi-word keywords searched as one phrase</small></div>
+                <label class="switch"><input type="checkbox" id="nExact"><span></span></label></div>
+              <div class="opt-row"><div class="t"><b>Exclude words</b><small>Comma-separated</small></div>
+                <input type="text" id="nExclude" placeholder="word, word"></div>
+              <div class="opt-row"><div class="t"><b>Only these sites</b><small>Optional, comma-separated, e.g. <i>kompas.com, detik.com</i></small></div>
+                <input type="text" id="nSites" placeholder="site.com, site.co.id"></div>
+              <div class="qprev" id="nPrev"><small>Google query preview</small>—</div>
+            </div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- NEWS LINKS -->
+    <section class="page" id="p-nwlinks">
+      <div class="pagehead"><div><h1>News Links</h1><p id="nwPeriod">News links found by the last news search.</p></div>
+        <div class="actions" id="nwDownloads"></div></div>
+      <div class="card" style="margin-bottom:16px">
+        <div class="toolbar">
+          <input class="search" id="nq" placeholder="Search title, media or link…" autocomplete="off">
+          <select class="select" id="nFilterKw"><option value="">All keywords</option></select>
+          <span class="tag gray" id="nCount">0 links</span>
+        </div>
+        <div class="tblwrap"><table class="tbl"><thead id="nwHead"></thead><tbody id="nwBody"></tbody></table></div>
+      </div>
+      <div class="card">
+        <div class="card-hd"><h3>Search status</h3></div>
+        <div class="tblwrap" style="margin-top:10px"><table class="tbl">
+          <thead><tr><th>Keyword</th><th>Status</th><th class="num">Links</th><th>Notes</th></tr></thead>
+          <tbody id="nwStBody"></tbody></table></div>
       </div>
     </section>
 
@@ -561,9 +669,10 @@ let selected = new Set();
 let firstLoad = false;
 let platOn = new Set(ls.get('plats', PLATS.map(p => p.k)));
 let openUnits = new Set();
-let results = {links: [], statuses: [], period: null};
+let results = {links: [], statuses: [], period: null, meta: {}};
+let nwResults = {links: [], statuses: [], period: null, meta: {}};
 let kwResults = {links: [], statuses: [], period: null, meta: {}};
-const versions = {profiles: -1, keywords: -1};
+const versions = {profiles: -1, keywords: -1, news: -1};
 let logCount = 0, running = false;
 
 function toast(t){ const el = $('toast'); el.textContent = t; el.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('show'), 2200); }
@@ -757,13 +866,26 @@ $('addSave').onclick = async () => {
   }
 };
 
+/* ---------- output choices ---------- */
+function radioValue(name){ const r = document.querySelector(`input[name="${name}"]:checked`); return r ? r.value : ''; }
+function bindRadio(name, key, onChange){
+  const v = ls.get(key, null);
+  if (v) document.querySelectorAll(`input[name="${name}"]`).forEach(r => r.checked = r.value === v);
+  document.querySelectorAll(`input[name="${name}"]`).forEach(r => r.addEventListener('change', () => { ls.set(key, radioValue(name)); onChange && onChange(); }));
+}
+bindRadio('pDetail', 'p_detail');
+const DETAIL_COLS = [['caption', 'Caption'], ['likes', 'Likes'], ['comments', 'Comments'], ['shares', 'Shares'], ['views', 'Views']];
+const num = v => v === null || v === undefined || v === '' ? '<span style="color:var(--faint)">—</span>' : fmt(+v);
+const detailCells = l => `<td class="cap" title="${esc(l.caption || l.error || '')}">${l.caption ? esc(l.caption) : (l.error ? '<span style="color:var(--bad)">' + esc(l.error) + '</span>' : '<span style="color:var(--faint)">—</span>')}</td>`
+  + DETAIL_COLS.slice(1).map(([k]) => `<td class="num">${num(l[k])}</td>`).join('');
+
 /* ---------- run ---------- */
 function alertMsg(text, kind){ const m = $('runMsg'); m.textContent = text || ''; m.className = 'alert' + (text ? ' show ' + (kind || 'err') : ''); }
 $('btnStart').onclick = async () => {
   const ids = runnable().map(a => a.id);
   if (!ids.length){ alertMsg('No accounts selected on the active platforms.'); return; }
   if (!P1.start || !P1.end){ alertMsg('Choose a start and end date.'); return; }
-  const r = await api('/api/start', {list: listId, ids, start: P1.start, end: P1.end, tz: P1.tz, platforms: [...platOn]});
+  const r = await api('/api/start', {list: listId, ids, start: P1.start, end: P1.end, tz: P1.tz, platforms: [...platOn], detail: radioValue('pDetail')});
   if (r.error){ alertMsg(r.error); return; }
   alertMsg(''); $('log').textContent = ''; logCount = 0; toast('Collection started');
 };
@@ -784,10 +906,13 @@ function renderResults(){
   const rows = L.filter(l => (!fp || l.platform === fp) && (!q || (l.group + ' ' + l.handle + ' ' + l.url).toLowerCase().includes(q)))
     .sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time));
   $('rCount').textContent = `${fmt(rows.length)} link${rows.length === 1 ? '' : 's'}`;
+  const det = !!(results.meta && results.meta.details);
+  $('resHead').innerHTML = '<tr><th>Date</th><th>Time</th><th>Platform</th><th>Group</th><th>Handle</th><th>Post link</th>'
+    + (det ? DETAIL_COLS.map(([k, h]) => `<th${k === 'caption' ? '' : ' class="num"'}>${h}</th>`).join('') : '') + '</tr>';
   $('resBody').innerHTML = rows.length ? rows.slice(0, 5000).map(l => `<tr><td>${esc(l.date)}</td><td>${esc(l.time)}</td>
       <td>${pi(l.platform, true)}</td><td>${esc(l.group)}</td><td>${esc(shortHandle(l))}</td>
-      <td class="url"><a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.url.replace(/^https?:\/\/(www\.)?/, ''))}</a></td></tr>`).join('')
-    : `<tr><td colspan="6">${emptyBox(L.length ? 'Nothing matches the filters.' : (running ? 'Waiting for the first links…' : 'No links yet. Start a collection on the Collect page.'), 'i-link')}</td></tr>`;
+      <td class="url"><a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.url.replace(/^https?:\/\/(www\.)?/, ''))}</a></td>${det ? detailCells(l) : ''}</tr>`).join('')
+    : `<tr><td colspan="11">${emptyBox(L.length ? 'Nothing matches the filters.' : (running ? 'Waiting for the first links…' : 'No links yet. Start a collection on the Collect page.'), 'i-link')}</td></tr>`;
 
   const A = results.statuses, sf = $('sFilter').value;
   const st = A.filter(a => sf === 'all' || (sf === 'zero' ? a.status === 'ok' && a.count === 0 : ['not_found','login_required','error','invalid','stopped'].includes(a.status)));
@@ -805,9 +930,9 @@ async function refreshResults(){ results = await api('/api/results?mode=profiles
 async function loadExports(){
   const d = await api('/api/outputs');
   $('exports').innerHTML = d.files.length ? d.files.map(f => {
-    const m = f.name.match(/(post|keyword)_links_(\d{8})-(\d{8})_/); const fd = s => nice(`${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`);
+    const m = f.name.match(/(post|keyword|news)_links_(\d{8})-(\d{8})_/); const fd = s => nice(`${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`);
     return `<a href="/download/${encodeURIComponent(f.name)}"><span class="pin">${icon('i-file', 'width:16px;height:16px')}</span>
-      <span style="flex:1;min-width:0"><b>${m ? (m[1] === 'keyword' ? 'Keyword search · ' : 'Profiles · ') + fd(m[2]) + ' – ' + fd(m[3]) : esc(f.name)}</b><small>${esc(f.name)} · ${(f.size / 1024).toFixed(0)} KB</small></span>
+      <span style="flex:1;min-width:0"><b>${m ? ({keyword: 'Keyword search · ', news: 'News · ', post: 'Profiles · '}[m[1]]) + fd(m[2]) + ' – ' + fd(m[3]) : esc(f.name)}</b><small>${esc(f.name)} · ${(f.size / 1024).toFixed(0)} KB</small></span>
       <small>${new Date(f.mtime * 1000).toLocaleString('en-GB', {day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'})}</small>${icon('i-dl')}</a>`;
   }).join('') : emptyBox('No exports yet.', 'i-file');
 }
@@ -849,15 +974,15 @@ function kwRender(){
   $('qPrev').innerHTML = `<small>X query preview${keywords.length > 1 ? ' (first keyword)' : ''}</small>${esc(parts.join(' '))}`;
 }
 function kwOptions(){
-  return { cap: +$('oCap').value, exact: $('oExact').checked,
+  return { detail: $('oDetail').value, cap: +$('oCap').value, exact: $('oExact').checked,
     exclude: $('oExclude').value.split(',').map(w => w.trim().replace(/^-/, '')).filter(Boolean),
     x_lang: $('oLang').value, x_no_replies: $('oNoReplies').checked, x_no_reposts: $('oNoReposts').checked,
     ig_hashtag: $('oIgTag').checked, ig_keyword: $('oIgKw').checked };
 }
-(function(){ const o = ls.get('kw_opts', null); if (o){ $('oCap').value = o.cap; $('oExact').checked = o.exact; $('oExclude').value = (o.exclude || []).join(', ');
+(function(){ const o = ls.get('kw_opts', null); if (o){ $('oDetail').value = o.detail || 'links'; $('oCap').value = o.cap; $('oExact').checked = o.exact; $('oExclude').value = (o.exclude || []).join(', ');
   $('oLang').value = o.x_lang || ''; $('oNoReplies').checked = o.x_no_replies; $('oNoReposts').checked = o.x_no_reposts;
   $('oIgTag').checked = o.ig_hashtag; $('oIgKw').checked = o.ig_keyword; } })();
-['oCap','oExact','oExclude','oLang','oNoReplies','oNoReposts','oIgTag','oIgKw'].forEach(id =>
+['oDetail','oCap','oExact','oExclude','oLang','oNoReplies','oNoReposts','oIgTag','oIgKw'].forEach(id =>
   $(id).addEventListener(id === 'oExclude' ? 'input' : 'change', () => { ls.set('kw_opts', kwOptions()); kwRender(); }));
 $('kwInput').addEventListener('keydown', e => {
   if ((e.key === 'Enter' || e.key === ',') && $('kwInput').value.trim()){ e.preventDefault(); kwAdd($('kwInput').value); $('kwInput').value = ''; }
@@ -897,11 +1022,14 @@ function renderKw(){
   const rows = L.filter(l => (!fp || l.platform === fp) && (!fk || (l.keywords || [l.keyword]).includes(fk)) &&
       (!q || (l.author + ' ' + l.url).toLowerCase().includes(q))).sort((a, b) => b.ts - a.ts);
   $('kCount').textContent = `${fmt(rows.length)} link${rows.length === 1 ? '' : 's'}`;
+  const det = !!(kwResults.meta && kwResults.meta.details);
+  $('kwHead').innerHTML = '<tr><th>Date</th><th>Time</th><th>Platform</th><th>Keyword</th><th>Author</th><th>Post link</th>'
+    + (det ? DETAIL_COLS.map(([k, h]) => `<th${k === 'caption' ? '' : ' class="num"'}>${h}</th>`).join('') : '') + '</tr>';
   $('kwBody').innerHTML = rows.length ? rows.slice(0, 5000).map(l => `<tr><td>${esc(l.date)}</td><td>${esc(l.time)}</td>
       <td>${pi(l.platform, true)}</td><td>${(l.keywords || [l.keyword]).map(k => `<span class="tag likely" style="margin:1px">${esc(k)}</span>`).join('')}</td>
       <td>${l.author ? '@' + esc(l.author) : '<span style="color:var(--faint)">—</span>'}</td>
-      <td class="url"><a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.url.replace(/^https?:\/\/(www\.)?/, ''))}</a></td></tr>`).join('')
-    : `<tr><td colspan="6">${emptyBox(L.length ? 'Nothing matches the filters.' : (running ? 'Waiting for the first links…' : 'No links yet. Start a search on the Keyword Search page.'), 'i-search')}</td></tr>`;
+      <td class="url"><a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.url.replace(/^https?:\/\/(www\.)?/, ''))}</a></td>${det ? detailCells(l) : ''}</tr>`).join('')
+    : `<tr><td colspan="11">${emptyBox(L.length ? 'Nothing matches the filters.' : (running ? 'Waiting for the first links…' : 'No links yet. Start a search on the Keyword Search page.'), 'i-search')}</td></tr>`;
   $('kwStBody').innerHTML = S.length ? S.map(st => `<tr><td>${esc(st.keyword)}</td><td>${pi(st.platform, true)}</td>
       <td><span class="tag ${st.status === 'ok' ? 'ok' : st.status === 'login_required' ? 'unv' : 'bad'}">${st.status === 'ok' ? 'OK' : esc(ISSUE[st.status] || st.status)}</span></td>
       <td class="num">${st.count}</td><td style="max-width:520px">${esc(st.note)}</td></tr>`).join('')
@@ -911,6 +1039,95 @@ function renderKw(){
 ['kFilterKw','kFilterPlat'].forEach(id => $(id).addEventListener('change', renderKw));
 async function refreshKw(){ kwResults = await api('/api/results?mode=keywords'); renderKw(); }
 
+/* ---------- news ---------- */
+function chipInput(boxId, inputId, key, onChange){
+  const C = { items: ls.get(key, []) };
+  const save = () => { ls.set(key, C.items); C.render(); onChange && onChange(); };
+  C.add = text => { text.split(/[\n,;]+/).map(w => w.replace(/\s+/g, ' ').trim()).filter(Boolean).forEach(w => {
+      if (!C.items.some(k => k.toLowerCase() === w.toLowerCase()) && C.items.length < 50) C.items.push(w.slice(0, 150)); }); save(); };
+  C.render = () => { const box = $(boxId), inp = $(inputId); box.querySelectorAll('.kw').forEach(e => e.remove());
+    C.items.forEach((k, i) => { const el = document.createElement('span'); el.className = 'kw';
+      el.innerHTML = `${esc(k)}<button data-i="${i}" aria-label="Remove ${esc(k)}">${icon('i-x', 'width:12px;height:12px;stroke-width:2.6')}</button>`;
+      box.insertBefore(el, inp); }); };
+  C.flush = () => { const v = $(inputId).value; if (v.trim()){ C.add(v); $(inputId).value = ''; } };
+  $(inputId).addEventListener('keydown', e => {
+    if ((e.key === 'Enter') && $(inputId).value.trim()){ e.preventDefault(); C.flush(); }
+    else if (e.key === 'Backspace' && !$(inputId).value && C.items.length){ C.items.pop(); save(); } });
+  $(inputId).addEventListener('paste', e => { const t = (e.clipboardData || window.clipboardData).getData('text');
+    if (/[\n;]/.test(t)){ e.preventDefault(); C.add(t); } });
+  $(inputId).addEventListener('blur', C.flush);
+  $(boxId).addEventListener('click', e => { const b = e.target.closest('button[data-i]');
+    if (b){ C.items.splice(+b.dataset.i, 1); save(); } else $(inputId).focus(); });
+  C.clear = () => { C.items = []; save(); };
+  C.render();
+  return C;
+}
+let P3 = null;
+const NW = chipInput('nwBox', 'nwInput', 'nw_list', () => nwRender());
+$('nwClear').onclick = () => NW.clear();
+P3 = periodWidget({key:'nw_', start:'nStart', end:'nEnd', tz:'nTz', presets:'nPresets', tag:'nPeriodTag', onChange: () => { if (P3) nwRender(); }});
+bindRadio('nDetail', 'nw_detail');
+function nwOptions(){
+  return { detail: radioValue('nDetail'), cap: +$('nCap').value, region: $('nRegion').value, exact: $('nExact').checked,
+    exclude: $('nExclude').value.split(',').map(w => w.trim().replace(/^-/, '')).filter(Boolean),
+    sites: $('nSites').value.split(',').map(w => w.trim()).filter(Boolean) };
+}
+(function(){ const o = ls.get('nw_opts', null); if (o){ $('nCap').value = o.cap || 100; $('nRegion').value = o.region || 'id';
+  $('nExact').checked = !!o.exact; $('nExclude').value = (o.exclude || []).join(', '); $('nSites').value = (o.sites || []).join(', '); } })();
+['nCap','nRegion','nExact','nExclude','nSites'].forEach(id => $(id).addEventListener(['nExclude','nSites'].includes(id) ? 'input' : 'change',
+  () => { ls.set('nw_opts', nwOptions()); nwRender(); }));
+function nwRender(){
+  if (!P3) return;
+  const o = nwOptions(), kw = NW.items[0] || 'keyword';
+  const parts = [o.exact && kw.includes(' ') ? `"${kw}"` : kw, ...o.exclude.map(w => '-' + w)];
+  if (o.sites.length) parts.push('(' + o.sites.map(x => 'site:' + x.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '')).join(' OR ') + ')');
+  $('nPrev').innerHTML = `<small>Google query preview${NW.items.length > 1 ? ' (first keyword)' : ''} · News tab · ${esc(P3.start)} to ${esc(P3.end)} · sorted by date</small>${esc(parts.join(' '))}`;
+  $('nS1').textContent = NW.items.length; $('nS2').textContent = o.cap; $('nS3').textContent = P3.days() || '–';
+}
+function nwAlert(text, kind){ const m = $('nMsg'); m.textContent = text || ''; m.className = 'alert' + (text ? ' show ' + (kind || 'err') : ''); }
+$('nBtnStart').onclick = async () => {
+  NW.flush();
+  if (!NW.items.length){ nwAlert('Add at least one keyword.'); $('nwInput').focus(); return; }
+  if (!P3.start || !P3.end){ nwAlert('Choose a start and end date.'); return; }
+  const r = await api('/api/news/start', {keywords: NW.items, start: P3.start, end: P3.end, tz: P3.tz, options: nwOptions()});
+  if (r.error){ nwAlert(r.error); return; }
+  nwAlert(''); $('log').textContent = ''; logCount = 0; toast('News search started');
+};
+$('nBtnStop').onclick = () => api('/api/stop', {});
+const NEWS_COLS = {
+  links: [['keyword', 'Keyword'], ['url', 'Link']],
+  basic: [['published', 'Date'], ['keyword', 'Keyword'], ['media', 'Media'], ['title', 'Title'], ['url', 'Link']],
+  full: [['published', 'Date'], ['keyword', 'Keyword'], ['media', 'Media'], ['title', 'Title'], ['url', 'Link'], ['author', 'Author'], ['text', 'Article text']],
+};
+function renderNews(){
+  const L = nwResults.links, S = nwResults.statuses, per = nwResults.period, meta = nwResults.meta || {};
+  const cols = NEWS_COLS[meta.detail || 'basic'];
+  $('navNews').textContent = fmt(L.length);
+  $('nwPeriod').textContent = per ? `Period ${nice(per.start)} – ${nice(per.end)} (${per.tz}) · keywords: ${(meta.keywords || []).join(', ')}` : 'News links found by the last news search.';
+  const cur = $('nFilterKw').value;
+  $('nFilterKw').innerHTML = '<option value="">All keywords</option>' + (meta.keywords || []).map(k => `<option${k === cur ? ' selected' : ''}>${esc(k)}</option>`).join('');
+  const q = $('nq').value.trim().toLowerCase(), fk = $('nFilterKw').value;
+  const rows = L.filter(l => (!fk || (l.keywords || []).includes(fk)) && (!q || ((l.title || '') + ' ' + (l.media || '') + ' ' + l.url).toLowerCase().includes(q)))
+    .sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  $('nCount').textContent = `${fmt(rows.length)} link${rows.length === 1 ? '' : 's'}`;
+  $('nwHead').innerHTML = '<tr>' + cols.map(([, h]) => `<th>${h}</th>`).join('') + '</tr>';
+  const cell = (l, k) => {
+    if (k === 'url') return `<td class="url"><a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.url.replace(/^https?:\/\/(www\.)?/, ''))}</a></td>`;
+    if (k === 'keyword') return `<td>${(l.keywords || [l.keyword]).map(x => `<span class="tag likely" style="margin:1px">${esc(x)}</span>`).join('')}</td>`;
+    if (k === 'text' || k === 'title') return `<td class="cap" title="${esc(l[k] || '')}">${esc(l[k] || '') || (k === 'text' && l.error ? '<span style="color:var(--bad)">' + esc(l.error) + '</span>' : '<span style="color:var(--faint)">—</span>')}</td>`;
+    return `<td>${esc(l[k] || '') || '<span style="color:var(--faint)">—</span>'}</td>`;
+  };
+  $('nwBody').innerHTML = rows.length ? rows.slice(0, 5000).map(l => '<tr>' + cols.map(([k]) => cell(l, k)).join('') + '</tr>').join('')
+    : `<tr><td colspan="${cols.length}">${emptyBox(L.length ? 'Nothing matches the filters.' : (running ? 'Waiting for the first links…' : 'No links yet. Start a search on the News Search page.'), 'i-news')}</td></tr>`;
+  $('nwStBody').innerHTML = S.length ? S.map(st => `<tr><td>${esc(st.keyword)}</td>
+      <td><span class="tag ${st.status === 'ok' ? 'ok' : 'bad'}">${st.status === 'ok' ? 'OK' : esc(ISSUE[st.status] || st.status)}</span></td>
+      <td class="num">${st.count}</td><td style="max-width:560px">${esc(st.note)}</td></tr>`).join('')
+    : `<tr><td colspan="4">${emptyBox('No searches yet.', 'i-check')}</td></tr>`;
+}
+$('nq').addEventListener('input', renderNews);
+$('nFilterKw').addEventListener('change', renderNews);
+async function refreshNews(){ nwResults = await api('/api/results?mode=news'); renderNews(); }
+
 /* ---------- polling ---------- */
 async function poll(){
   try {
@@ -919,16 +1136,17 @@ async function poll(){
     if (s.logs.length){ const box = $('log'), bottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
       box.textContent += s.logs.join('\n') + '\n'; logCount = s.log_count; if (bottom) box.scrollTop = box.scrollHeight; }
     const was = running; running = s.running;
-    const isProf = s.kind === 'profiles', isKw = s.kind === 'keywords';
-    $('btnStart').style.display = $('kBtnStart').style.display = running ? 'none' : '';
+    const isProf = s.kind === 'profiles', isKw = s.kind === 'keywords', isNews = s.kind === 'news';
+    $('btnStart').style.display = $('kBtnStart').style.display = $('nBtnStart').style.display = running ? 'none' : '';
     $('btnStop').style.display = running && isProf ? '' : 'none';
     $('kBtnStop').style.display = running && isKw ? '' : 'none';
+    $('nBtnStop').style.display = running && isNews ? '' : 'none';
     $('btnLogin').disabled = running;
     $('stDot').classList.toggle('run', running);
     const mp = s.modes || {};
-    $('stTitle').textContent = running ? (s.kind === 'login' ? 'Login mode' : isKw ? 'Keyword search' : 'Collecting') : 'Ready';
+    $('stTitle').textContent = running ? (s.kind === 'login' ? 'Login mode' : isKw ? 'Keyword search' : isNews ? 'News search' : 'Collecting') : 'Ready';
     $('stSub').textContent = running ? (s.kind === 'login' ? 'Close the browser when done'
-      : `${s.done}/${s.total} ${isKw ? 'searches' : 'accounts'} · ${fmt((mp[s.kind] || {}).count || 0)} links`) : 'No job running';
+      : `${s.done}/${s.total} ${isKw ? 'searches' : isNews ? 'keywords' : 'accounts'} · ${fmt((mp[s.kind] || {}).count || 0)} links`) : 'No job running';
     const progFor = (pref, mine, unit, count) => {
       const show = mine && (running || s.total > 0);
       $(pref + 'rog').classList.toggle('show', show);
@@ -939,19 +1157,23 @@ async function poll(){
     };
     progFor('p', isProf, 'accounts', (mp.profiles || {}).count || 0);
     progFor('kP', isKw, 'searches', (mp.keywords || {}).count || 0);
+    progFor('nP', isNews, 'keywords', (mp.news || {}).count || 0);
     const dl = files => (files || []).map(f => `<a class="btn" href="/download/${encodeURIComponent(f)}">${icon('i-dl')}${f.endsWith('.csv') ? 'CSV' : 'Excel'}</a>`).join('');
     $('downloads').innerHTML = dl((mp.profiles || {}).files); $('kwDownloads').innerHTML = dl((mp.keywords || {}).files);
+    $('nwDownloads').innerHTML = dl((mp.news || {}).files);
     if (mp.profiles && mp.profiles.version !== versions.profiles){ versions.profiles = mp.profiles.version; await refreshResults(); }
     if (mp.keywords && mp.keywords.version !== versions.keywords){ versions.keywords = mp.keywords.version; await refreshKw(); }
-    if (was && !running && s.error){ (isKw ? kwAlert : alertMsg)(s.error); if (s.kind === 'login') toast(s.error); }
-    if (was && !running){ refreshResults(); refreshKw(); loadExports();
-      if (!s.error) toast(s.kind === 'login' ? 'Login sessions saved' : isKw ? 'Keyword search finished — results saved' : 'Collection finished — results saved'); }
+    if (mp.news && mp.news.version !== versions.news){ versions.news = mp.news.version; await refreshNews(); }
+    if (was && !running && s.error){ (isKw ? kwAlert : isNews ? nwAlert : alertMsg)(s.error); if (s.kind === 'login') toast(s.error); }
+    if (was && !running){ refreshResults(); refreshKw(); refreshNews(); loadExports();
+      if (!s.error) toast(s.kind === 'login' ? 'Login sessions saved' : isKw ? 'Keyword search finished — results saved'
+        : isNews ? 'News search finished — results saved' : 'Collection finished — results saved'); }
   } catch(e){}
   setTimeout(poll, running ? 1200 : 2500);
 }
 
 go(document.getElementById('p-' + ls.get('page', 'collect')) ? ls.get('page', 'collect') : 'collect');
-loadLists().then(loadAccounts); renderResults(); kwRender(); renderKw(); poll();
+loadLists().then(loadAccounts); renderResults(); kwRender(); renderKw(); nwRender(); renderNews(); poll();
 </script>
 </body>
 </html>

@@ -45,6 +45,7 @@ class Post:
     url: str
     time_utc: datetime | None
     author: str = ""
+    details: dict | None = None      # caption / engagement, when requested
 
 
 @dataclass

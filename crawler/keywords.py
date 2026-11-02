@@ -43,6 +43,9 @@ class SearchOptions:
     def from_dict(cls, d: dict) -> "SearchOptions":
         d = d or {}
         excl = d.get("exclude") or []
+        if not isinstance(excl, (str, list)):
+            excl = []
+        excl = [str(w) for w in excl] if isinstance(excl, list) else excl
         if isinstance(excl, str):
             excl = re.split(r"[,\n]+", excl)
         return cls(

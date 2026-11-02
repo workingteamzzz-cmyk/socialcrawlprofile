@@ -83,10 +83,24 @@ class Job:
                     "modes": {m: {"count": len(b["links"]), "files": list(b["files"]), "period": b["period"],
                                   "version": b["version"]} for m, b in self.data.items()}}
 
+    PREVIEW_CHARS = 300
+
     def results_view(self, mode: str) -> dict:
+        """What the dashboard shows. Long captions/article texts are cut to a preview here
+        (the Excel/CSV files keep the full text), so polling stays light on big runs."""
         b = self.data.get(mode) or _bucket()
+        cut = self.PREVIEW_CHARS
+
+        def light(row):
+            if any(isinstance(row.get(k), str) and len(row[k]) > cut for k in ("caption", "text")):
+                row = dict(row)
+                for k in ("caption", "text"):
+                    if isinstance(row.get(k), str) and len(row[k]) > cut:
+                        row[k] = row[k][:cut] + "…"
+            return row
         with self.lock:
-            return {"links": list(b["links"]), "statuses": list(b["statuses"]), "period": b["period"], "meta": b["meta"]}
+            return {"links": [light(r) for r in b["links"]], "statuses": list(b["statuses"]),
+                    "period": b["period"], "meta": b["meta"]}
 
     def _start(self, kind, target, *args) -> str | None:
         with self.lock:
@@ -98,6 +112,7 @@ class Job:
             self.kind = kind
             self.logs, self.log_total, self.done, self.total, self.current, self.error = [], 0, 0, 0, "", ""
             self.__dict__.pop("_save_warned", None)
+            self._last_save = 0
             if kind in MODES:
                 self.data[kind] = _bucket()
             self.stop_flag.clear()
@@ -141,6 +156,16 @@ class Job:
                 p.details = {"error": str(e).splitlines()[0][:120]}
         return False
 
+    AUTOSAVE_SECONDS = 20
+
+    def _autosave_due(self) -> bool:
+        """Big runs rewrite a growing Excel file, so autosave at most every AUTOSAVE_SECONDS (always at the end)."""
+        now = time.time()
+        if now - self.__dict__.get("_last_save", 0) >= self.AUTOSAVE_SECONDS:
+            self._last_save = now
+            return True
+        return False
+
     def _safe_save(self, fn, path) -> bool:
         """Write the result files; if Excel has one open (locked on Windows), keep going and retry later."""
         try:
@@ -160,10 +185,10 @@ class Job:
         If the files are locked (open in Excel), the results go to a *_copy file instead."""
         if not anything:
             return []
-        if save():
+        if save(force=True):
             return [os.path.basename(p) for p in paths]
         alt = [p.replace(".xlsx", "_copy.xlsx").replace(".csv", "_copy.csv") for p in paths]
-        if save(alt):
+        if save(alt, force=True):
             self.log(f"⚠ The result file was locked (open in Excel?) — saved as {os.path.basename(alt[0])} instead.")
             return [os.path.basename(p) for p in alt]
         self.error = "Could not save the result files — close them in Excel. The links are still shown in the dashboard."
@@ -264,7 +289,9 @@ class Job:
             statuses.append({"platform_label": PLATFORM_LABEL[acc.platform], "handle": acc.handle, "label": acc.label,
                              "url": acc.url, "status": res.status, "count": len(res.posts), "note": res.note})
 
-        def save(paths=None):
+        def save(paths=None, force=False):
+            if not force and not self._autosave_due():
+                return True
             x, c = paths or (xlsx, csvp)
             return self._safe_save(lambda: write_outputs(x, c, links, statuses, meta), x)
 
@@ -348,7 +375,7 @@ class Job:
             return "Choose at least one platform."
         try:
             opt = SearchOptions.from_dict(options)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, AttributeError):
             return "Invalid search options."
         return self._start("keywords", self._keywords, kws, plats, opt, d_start, d_end, tz_name)
 
@@ -391,7 +418,9 @@ class Job:
                 b["statuses"].append(st)
                 b["version"] += 1
 
-        def save(paths=None):
+        def save(paths=None, force=False):
+            if not force and not self._autosave_due():
+                return True
             x, c = paths or (xlsx, csvp)
             return self._safe_save(lambda: write_keyword_outputs(x, c, list(seen.values()), statuses, meta), x)
 
@@ -462,7 +491,7 @@ class Job:
             return "Up to 50 keywords per run."
         try:
             opt = NewsOptions.from_dict(options)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, AttributeError):
             return "Invalid search options."
         return self._start("news", self._news, kws, opt, d_start, d_end, tz_name)
 
@@ -482,7 +511,9 @@ class Job:
         seen: dict[str, dict] = {}
         statuses: list[dict] = []
 
-        def save(paths=None):
+        def save(paths=None, force=False):
+            if not force and not self._autosave_due():
+                return True
             x, c = paths or (xlsx, csvp)
             return self._safe_save(lambda: write_news_outputs(x, c, list(seen.values()), statuses, meta), x)
 

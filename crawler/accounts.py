@@ -94,7 +94,11 @@ def parse_line(line: str) -> Account | None:
 def _parse_url(line: str) -> Account | None:
     if "://" not in line:
         line = "https://" + line
-    u = urlparse(line)
+    try:
+        u = urlparse(line)
+        u.port                     # raises for malformed hosts like "x.com:abc" or "[..."
+    except ValueError:
+        return None                # a malformed line is reported as "not a profile URL", not a crash
     plat = _platform_of(u.netloc)
     if not plat:
         return None

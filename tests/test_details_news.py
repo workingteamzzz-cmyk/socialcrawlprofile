@@ -137,7 +137,7 @@ def test_google_news_search_and_article(browser_ctx):
     from crawler.news import NewsCrawler, NewsOptions
     start, end = datetime(2026, 9, 30, 17, tzinfo=UTC), datetime(2026, 10, 31, 16, 59, tzinfo=UTC)
     c = _fast(NewsCrawler(browser_ctx, lambda m: None, threading.Event(), start, end, tz=WIB))
-    res = c.search("listrik", NewsOptions(), datetime(2026, 10, 1), datetime(2026, 10, 31))
+    res = c.search("listrik", NewsOptions(by_day=False), datetime(2026, 10, 1), datetime(2026, 10, 31))
     assert res.status == "ok", res
     got = {r["url"]: r for r in res.posts}
     assert set(got) == {"https://www.kompas.com/a1", "https://news.detik.com/a2", "https://www.cnnindonesia.com/a3"}
@@ -145,7 +145,7 @@ def test_google_news_search_and_article(browser_ctx):
     assert got["https://www.kompas.com/a1"]["title"] == "Tarif listrik naik"
     assert got["https://www.cnnindonesia.com/a3"]["published"] == "2026-10-20"
     assert "2 result pages" in res.note
-    res = c.search("listrik", NewsOptions(cap=2), datetime(2026, 10, 1), datetime(2026, 10, 31))
+    res = c.search("listrik", NewsOptions(cap=2, by_day=False), datetime(2026, 10, 1), datetime(2026, 10, 31))
     assert len(res.posts) == 2
 
     a = c.article("https://www.kompas.com/a1")
@@ -192,7 +192,8 @@ GOOGLE_NO_HEADING = """<html><body><div id="search"><div id="rso">
 GOOGLE_EMPTY = """<html><body><div id="search"><div id="rso"></div>
 <p>Your search - <b>xyz</b> - did not match any news results.</p></div></body></html>"""
 GOOGLE_UNREADABLE = """<html><body><div id="search"><div id="rso">
-<a href="https://site.example/a"><img src="a.png"></a><a href="https://site.example/b">Go</a></div></div></body></html>"""
+<a href="https://site.example/a"><img src="a.png"></a><a href="https://site.example/b">Go</a>
+<a href="https://site.example/c"><img src="c.png"></a><a href="https://site.example/d">More</a></div></div></body></html>"""
 
 
 @pytest.mark.parametrize("page,expect", [("no_heading", "ok"), ("empty", "empty"), ("unreadable", "unreadable")])
@@ -211,7 +212,7 @@ def test_google_layout_variants(tmp_path, page, expect):
         c = _fast(NewsCrawler(ctx, lambda m: None, threading.Event(), datetime(2026, 9, 30, 17, tzinfo=UTC),
                               datetime(2026, 10, 31, 16, 59, tzinfo=UTC), tz=WIB, debug_dir=str(tmp_path / "debug")))
         c.page.wait_for_selector = lambda *a, **k: None
-        res = c.search("listrik pln", NewsOptions(), datetime(2026, 10, 1), datetime(2026, 10, 31))
+        res = c.search("listrik pln", NewsOptions(by_day=False), datetime(2026, 10, 1), datetime(2026, 10, 31))
         ctx.close()
     if expect == "ok":
         got = {r["url"]: r for r in res.posts}
@@ -226,3 +227,39 @@ def test_google_layout_variants(tmp_path, page, expect):
         assert res.status == "error" and "layout may have changed" in res.note
         saved = os.listdir(tmp_path / "debug")
         assert len(saved) == 1 and saved[0] in res.note
+
+
+def test_google_news_day_by_day(tmp_path):
+    """A longer period is searched one day at a time (newest first) and merged; the cap still applies."""
+    if _browser_path() is None:
+        pytest.skip("no local Chromium")
+    from urllib.parse import unquote
+
+    from playwright.sync_api import sync_playwright
+
+    from crawler.browser import launch_context
+    from crawler.news import NewsCrawler, NewsOptions
+    asked = []
+
+    def route(r):
+        url = unquote(r.request.url)
+        day = url.split("cd_min:")[1][:10] if "cd_min:" in url else ""
+        asked.append(day)
+        d = day[3:5]
+        body = (f'<html><body><div id="rso"><a href="https://media.example/{d}-a"><div>Media</div><div role="heading">Berita A tanggal {d}</div>'
+                f'<span>{int(d)} Okt 2026</span></a><a href="https://media.example/{d}-b"><div>Media</div>'
+                f'<div role="heading">Berita B tanggal {d}</div><span>{int(d)} Okt 2026</span></a></div></body></html>')
+        r.fulfill(status=200, content_type="text/html", body=body)
+    os.environ["CRAWLER_BROWSER_PATH"] = _browser_path()
+    with sync_playwright() as pw:
+        ctx = launch_context(pw, str(tmp_path / "profile"), headless=True)
+        ctx.route("**/*", route)
+        c = _fast(NewsCrawler(ctx, lambda m: None, threading.Event(), datetime(2026, 10, 9, 17, tzinfo=UTC),
+                              datetime(2026, 10, 12, 16, 59, tzinfo=UTC), tz=WIB))
+        res = c.search("listrik", NewsOptions(cap=0), datetime(2026, 10, 10), datetime(2026, 10, 12))
+        assert asked == ["10/12/2026", "10/11/2026", "10/10/2026"]          # newest day first
+        assert len(res.posts) == 6 and "day by day (3 days)" in res.note
+        asked.clear()
+        res = c.search("listrik", NewsOptions(cap=3), datetime(2026, 10, 10), datetime(2026, 10, 12))
+        assert len(res.posts) == 3 and asked == ["10/12/2026", "10/11/2026"]   # stops once the cap is reached
+        ctx.close()

@@ -30,7 +30,8 @@ _REL = {"menit": "minutes", "minute": "minutes", "min": "minutes", "mins": "minu
 
 @dataclass
 class NewsOptions:
-    cap: int = 100                 # max links per keyword (Google itself stops around 300)
+    cap: int = 100                 # max links per keyword (0 = no limit; Google stops around 300 per search)
+    by_day: bool = True            # search each day of a longer period separately -> far more results
     region: str = "id"             # "id" = Indonesia/Indonesian, "any" = global English
     exact: bool = False
     exclude: list[str] = field(default_factory=list)
@@ -40,14 +41,18 @@ class NewsOptions:
     @classmethod
     def from_dict(cls, d: dict) -> "NewsOptions":
         d = d or {}
-        split = lambda v: [w.strip() for w in (re.split(r"[,\n]+", v) if isinstance(v, str) else (v or [])) if w.strip()]
+        def split(v):
+            items = re.split(r"[,\n]+", v) if isinstance(v, str) else (v if isinstance(v, list) else [])
+            return [str(w).strip() for w in items if str(w).strip()]
         sites = []
         for s in split(d.get("sites")):
             host = urlparse(s if "://" in s else "https://" + s).netloc.lower().removeprefix("www.")
             if re.fullmatch(r"[a-z0-9.-]+\.[a-z]{2,}", host):
                 sites.append(host)
         detail = d.get("detail") if d.get("detail") in DETAIL_LEVELS else "basic"
-        return cls(cap=max(0, int(d.get("cap") or 0)) or 100, region="any" if d.get("region") == "any" else "id",
+        cap = d.get("cap", 100)
+        return cls(cap=max(0, int(cap if cap not in (None, "") else 100)), by_day=bool(d.get("by_day", True)),
+                   region="any" if d.get("region") == "any" else "id",
                    exact=bool(d.get("exact")), exclude=[w.lstrip("-") for w in split(d.get("exclude"))],
                    sites=sites[:20], detail=detail)
 
@@ -64,10 +69,18 @@ def google_query(kw: str, opt: NewsOptions) -> str:
 def google_news_url(q: str, start_local: datetime, end_local: datetime, region: str) -> str:
     rng = f"cdr:1,cd_min:{start_local:%m/%d/%Y},cd_max:{end_local:%m/%d/%Y},sbd:1"
     loc = "&hl=id&gl=ID" if region == "id" else "&hl=en&gl=US"
-    return f"https://www.google.com/search?q={quote(q)}&tbm=nws&tbs={quote(rng, safe=':,')}{loc}"
+    # filter=0: include the results Google hides as "very similar to the ones shown"
+    return f"https://www.google.com/search?q={quote(q)}&tbm=nws&tbs={quote(rng, safe=':,')}{loc}&filter=0"
 
 
 def parse_news_date(text: str, now: datetime) -> datetime | None:
+    try:
+        return _parse_news_date(text, now)
+    except (ValueError, OverflowError):     # e.g. "45 Okt 2026" in a snippet is not a date
+        return None
+
+
+def _parse_news_date(text: str, now: datetime) -> datetime | None:
     """'3 jam lalu', '2 days ago', '5 Okt 2026', 'Oct 5, 2026', '2026-10-05' -> aware datetime."""
     t = (text or "").strip().lower()
     m = re.search(r"(\d+)\s*(menit|jam|hari|minggu|bulan|tahun|mins?|minutes?|hours?|days?|weeks?|months?|years?)\s*(yang\s*)?(lalu|ago)", t)
@@ -153,6 +166,11 @@ _ARTICLE_JS = r"""() => {
 }"""
 
 
+def _with_cards(res: Result, cards: int) -> Result:
+    res.cards = cards
+    return res
+
+
 class NewsCrawler(BrowserCrawler):
     def __init__(self, *a, tz=timezone.utc, debug_dir: str | None = None, **kw):
         super().__init__(*a, **kw)
@@ -182,22 +200,49 @@ class NewsCrawler(BrowserCrawler):
             pass
 
     def search(self, kw: str, opt: NewsOptions, start_local: datetime, end_local: datetime) -> Result:
-        q = google_query(kw, opt)
-        self._goto(google_news_url(q, start_local, end_local, opt.region))
-        self._accept_consent()
+        """Google stops at ~300 results per search, so a longer period is searched day by day (newest first)
+        when opt.by_day is on; results are merged and capped at opt.cap."""
+        days = (end_local.date() - start_local.date()).days + 1
+        windows = [(end_local - timedelta(days=i), end_local - timedelta(days=i)) for i in range(days)] \
+            if opt.by_day and days > 1 else [(start_local, end_local)]
         found: dict[str, dict] = {}
+        notes, errors, cards = [], [], 0
+        q = google_query(kw, opt)
         try:
-            return self._search_pages(q, opt, found)
+            for i, (a, b) in enumerate(windows):
+                if opt.cap and len(found) >= opt.cap:
+                    break
+                if len(windows) > 1:
+                    self.log(f"   · {a:%d %b %Y} ({i + 1}/{len(windows)})")
+                    if i:
+                        self._pause(3, 6)        # a person moving on to the next day
+                self._goto(google_news_url(q, a, b, opt.region))
+                self._accept_consent()
+                res = self._search_pages(q, opt, found)
+                cards += res.cards
+                if res.status == "error":
+                    errors.append(res.note)
+                    if "captcha" in res.note.lower():
+                        break
+                notes.append(res.note)
         except Stopped:
             raise Stopped(list(found.values())) from None
+        if len(windows) == 1:
+            return Result(("error" if errors else "ok"), list(found.values()), notes[0] if notes else "")
+        note = f"query: {q}; searched day by day ({len(windows)} days); {cards} results read"
+        if errors:
+            note += f"; {len(errors)} day(s) with problems: " + errors[0].split("; ", 1)[-1]
+        status = "error" if errors and not found else "ok"
+        return Result(status, list(found.values()), note)
 
     def _search_pages(self, q: str, opt: NewsOptions, found: dict) -> Result:
         pages = cards = outside_period = 0
         snapshot = ""
+        start_count = len(found)
         while pages < 40:
             self._check_stop()
             if not self._wait_google_captcha():
-                return Result("error", list(found.values()), "Google captcha was not solved in time")
+                return _with_cards(Result("error", list(found.values()), "Google captcha was not solved in time"), cards)
             pages += 1
             try:
                 self.page.wait_for_selector("#rso a[href], #search a[href]", timeout=8000)
@@ -206,8 +251,8 @@ class NewsCrawler(BrowserCrawler):
             data = self.page.evaluate(_RESULTS_JS) or {}
             items = data.get("items") or []
             cards += len(items)
-            if pages == 1 and not items:
-                snapshot = self._save_snapshot(q)
+            if pages == 1 and not items and (data.get("outside") or 0) >= 3 and not self._no_results_page():
+                snapshot = self._save_snapshot(q)          # links to other sites, yet no readable result
             for item in items:
                 url = item["url"]
                 if url in found:
@@ -240,16 +285,19 @@ class NewsCrawler(BrowserCrawler):
         note = f"query: {q}; {pages} result page{'s' if pages != 1 else ''}; {cards} results read"
         if outside_period:
             note += f"; {outside_period} outside the period dropped"
-        if not found and ("/sorry/" in self.page.url):
-            return Result("error", [], "Google captcha")
+        if len(found) == start_count and ("/sorry/" in self.page.url):
+            return _with_cards(Result("error", [], "Google captcha"), cards)
         if not cards:
-            hint = ("Google showed no news results for this query and period" if "did not match" in self._body_text()
-                    or "tidak cocok" in self._body_text() else
-                    "Google's page could not be read (its layout may have changed)")
+            hint = ("Google showed no news results for this query and period" if self._no_results_page() or not snapshot
+                    else "Google's page could not be read (its layout may have changed)")
             if snapshot:
                 hint += f" — a copy of the page was saved to outputs/debug/{snapshot}; please send it to the developer"
-            return Result("error" if snapshot and "layout" in hint else "ok", [], note + "; " + hint)
-        return Result("ok", list(found.values()), note)
+            return _with_cards(Result("error" if snapshot and "layout" in hint else "ok", [], note + "; " + hint), cards)
+        return _with_cards(Result("ok", list(found.values()), note), cards)
+
+    def _no_results_page(self) -> bool:
+        t = self._body_text()
+        return any(x in t for x in ("did not match any", "tidak cocok dengan", "no results found", "tidak ada hasil"))
 
     def _save_snapshot(self, q: str) -> str:
         """Keep the HTML of a results page we could not read, so the reader can be fixed."""

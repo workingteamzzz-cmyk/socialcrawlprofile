@@ -559,8 +559,10 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
             </div></div>
           <div class="card"><div class="card-hd"><h3>Advanced options</h3></div>
             <div class="card-bd">
-              <div class="opt-row"><div class="t"><b>Max links per keyword</b><small>Google shows at most about 300 results per search</small></div>
-                <select id="nCap"><option value="50">50</option><option value="100" selected>100</option><option value="200">200</option><option value="300">300</option></select></div>
+              <div class="opt-row"><div class="t"><b>Search day by day</b><small>Google shows at most ~300 results per search; searching each day of the period separately finds far more (one search per day)</small></div>
+                <label class="switch"><input type="checkbox" id="nByDay" checked><span></span></label></div>
+              <div class="opt-row"><div class="t"><b>Max links per keyword</b><small>Across the whole period</small></div>
+                <select id="nCap"><option value="50">50</option><option value="100" selected>100</option><option value="300">300</option><option value="1000">1,000</option><option value="0">No limit</option></select></div>
               <div class="opt-row"><div class="t"><b>Region &amp; language</b></div>
                 <select id="nRegion"><option value="id">Indonesia (Indonesian)</option><option value="any">Global (English)</option></select></div>
               <div class="opt-row"><div class="t"><b>Exact phrase</b><small>Multi-word keywords searched as one phrase</small></div>
@@ -672,7 +674,7 @@ let openUnits = new Set();
 let results = {links: [], statuses: [], period: null, meta: {}};
 let nwResults = {links: [], statuses: [], period: null, meta: {}};
 let kwResults = {links: [], statuses: [], period: null, meta: {}};
-const versions = {profiles: -1, keywords: -1, news: -1};
+const versions = {profiles: -1, keywords: -1, news: -1}, lastFetch = {};
 let logCount = 0, running = false;
 
 function toast(t){ const el = $('toast'); el.textContent = t; el.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('show'), 2200); }
@@ -1076,21 +1078,21 @@ $('nwClear').onclick = () => NW.clear();
 P3 = periodWidget({key:'nw_', start:'nStart', end:'nEnd', tz:'nTz', presets:'nPresets', tag:'nPeriodTag', onChange: () => { if (P3) nwRender(); }});
 bindRadio('nDetail', 'nw_detail');
 function nwOptions(){
-  return { detail: radioValue('nDetail'), cap: +$('nCap').value, region: $('nRegion').value, exact: $('nExact').checked,
+  return { detail: radioValue('nDetail'), cap: +$('nCap').value, by_day: $('nByDay').checked, region: $('nRegion').value, exact: $('nExact').checked,
     exclude: $('nExclude').value.split(',').map(w => w.trim().replace(/^-/, '')).filter(Boolean),
     sites: $('nSites').value.split(',').map(w => w.trim()).filter(Boolean) };
 }
-(function(){ const o = ls.get('nw_opts', null); if (o){ $('nCap').value = o.cap || 100; $('nRegion').value = o.region || 'id';
+(function(){ const o = ls.get('nw_opts', null); if (o){ $('nCap').value = String(o.cap ?? 100); $('nByDay').checked = o.by_day !== false; $('nRegion').value = o.region || 'id';
   $('nExact').checked = !!o.exact; $('nExclude').value = (o.exclude || []).join(', '); $('nSites').value = (o.sites || []).join(', '); } })();
-['nCap','nRegion','nExact','nExclude','nSites'].forEach(id => $(id).addEventListener(['nExclude','nSites'].includes(id) ? 'input' : 'change',
+['nCap','nByDay','nRegion','nExact','nExclude','nSites'].forEach(id => $(id).addEventListener(['nExclude','nSites'].includes(id) ? 'input' : 'change',
   () => { ls.set('nw_opts', nwOptions()); nwRender(); }));
 function nwRender(){
   if (!P3) return;
   const o = nwOptions(), kw = NW.items[0] || 'keyword';
   const parts = [o.exact && kw.includes(' ') ? `"${kw}"` : kw, ...o.exclude.map(w => '-' + w)];
   if (o.sites.length) parts.push('(' + o.sites.map(x => 'site:' + x.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '')).join(' OR ') + ')');
-  $('nPrev').innerHTML = `<small>Google query preview${NW.items.length > 1 ? ' (first keyword)' : ''} · News tab · ${esc(P3.start)} to ${esc(P3.end)} · sorted by date</small>${esc(parts.join(' '))}`;
-  $('nS1').textContent = NW.items.length; $('nS2').textContent = o.cap; $('nS3').textContent = P3.days() || '–';
+  $('nPrev').innerHTML = `<small>Google query preview${NW.items.length > 1 ? ' (first keyword)' : ''} · News tab · ${esc(P3.start)} to ${esc(P3.end)}${o.by_day && P3.days() > 1 ? ` · ${P3.days()} daily searches per keyword` : ''} · sorted by date</small>${esc(parts.join(' '))}`;
+  $('nS1').textContent = NW.items.length; $('nS2').textContent = o.cap ? fmt(o.cap) : '∞'; $('nS3').textContent = P3.days() || '–';
 }
 function nwAlert(text, kind){ const m = $('nMsg'); m.textContent = text || ''; m.className = 'alert' + (text ? ' show ' + (kind || 'err') : ''); }
 $('nBtnStart').onclick = async () => {
@@ -1177,9 +1179,11 @@ async function poll(){
     const dl = files => (files || []).map(f => `<a class="btn" href="/download/${encodeURIComponent(f)}">${icon('i-dl')}${f.endsWith('.csv') ? 'CSV' : 'Excel'}</a>`).join('');
     $('downloads').innerHTML = dl((mp.profiles || {}).files); $('kwDownloads').innerHTML = dl((mp.keywords || {}).files);
     $('nwDownloads').innerHTML = dl((mp.news || {}).files);
-    if (mp.profiles && mp.profiles.version !== versions.profiles){ versions.profiles = mp.profiles.version; await refreshResults(); }
-    if (mp.keywords && mp.keywords.version !== versions.keywords){ versions.keywords = mp.keywords.version; await refreshKw(); }
-    if (mp.news && mp.news.version !== versions.news){ versions.news = mp.news.version; await refreshNews(); }
+    // refresh result tables when they changed — at most every 3 s during a run, so big runs stay smooth
+    const due = m => mp[m] && mp[m].version !== versions[m] && (!running || Date.now() - (lastFetch[m] || 0) > 3000);
+    if (due('profiles')){ versions.profiles = mp.profiles.version; lastFetch.profiles = Date.now(); await refreshResults(); }
+    if (due('keywords')){ versions.keywords = mp.keywords.version; lastFetch.keywords = Date.now(); await refreshKw(); }
+    if (due('news')){ versions.news = mp.news.version; lastFetch.news = Date.now(); await refreshNews(); }
     if (shownErrJob === null) shownErrJob = s.job_id;              // page (re)loaded: don't replay an old error
     if (!running && s.error && s.job_id !== shownErrJob){           // also catches jobs that failed within a second
       shownErrJob = s.job_id; (isKw ? kwAlert : isNews ? nwAlert : alertMsg)(s.error); if (s.kind === 'login') toast(s.error);

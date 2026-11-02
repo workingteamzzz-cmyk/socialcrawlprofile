@@ -119,10 +119,16 @@ not show that number. The Excel gets extra columns Caption, Likes, Comments, Sha
 ## News from Google
 
 The **News Search** page opens Google's **News** tab with your keyword and a custom date range (sorted by date), reads
-the result cards and clicks *Next* page after page, pausing like a reader. Google shows at most about 300 results per
-search. If Google asks for a captcha ("unusual traffic"), solve it in the browser window — the run waits up to 5 minutes.
+the result cards and clicks *Next* page after page, pausing like a reader. Results Google hides as "very similar"
+are included. Google shows at most about 300 results per search, so with **Search day by day** (on by default) a longer
+period is searched one day at a time, newest day first — a 30-day period becomes 30 searches per keyword and finds far
+more. If Google asks for a captcha ("unusual traffic"), solve it in the browser window — the run waits up to 5 minutes.
 
-Options: max links per keyword (50–300), region (Indonesia / global English), exact phrase, excluded words, only these
+If a results page cannot be read at all (Google changed its layout), the search is marked as an error and a copy of
+the page is saved in `outputs/debug/` — send it in so the reader can be updated. (Check it first: it can contain the
+name of the Google account you are signed in with.)
+
+Options: search day by day, max links per keyword (50 / 100 / 300 / 1,000 / no limit), region (Indonesia / global English), exact phrase, excluded words, only these
 sites (e.g. `kompas.com, detik.com`), and the output level:
 - **Links only** — keyword + link.
 - **Links + title, media & date** — read from the result cards, no extra time.
@@ -133,7 +139,8 @@ Output: `news_links_<period>_<time>.xlsx` with sheets **News Links**, **Search S
 
 ## Output (profiles)
 
-Saved to `outputs/` after every account, and downloadable from the dashboard. If one of these files is open in Excel
+Saved to `outputs/` automatically (about every 20 seconds during a run, and always at the end or on Stop), and
+downloadable from the dashboard. If one of these files is open in Excel
 while a run is going, the app keeps collecting and saves again after the next account — close Excel to let it save.
 
 - `post_links_<period>_<time>.xlsx`
@@ -186,4 +193,4 @@ while a run is going, the app keeps collecting and saves again after the next ac
 | `crawler/output.py` | Excel/CSV writer |
 | `crawler/server.py`, `crawler/static/index.html` | Local dashboard (reachable only from this computer) |
 | `data/lists/` | Account lists; `Ditjen SDA.csv` is the bundled example |
-| `tests/` | Unit tests and end-to-end flow tests with fake platform pages (`python -m pytest tests`) |
+| `tests/` | Unit, end-to-end and stress tests with fake platform pages (`python -m pytest tests`, about 2 minutes) |

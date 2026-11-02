@@ -28,10 +28,11 @@ def _cell(v):
 
 
 def _append(ws, row):
-    ws.append([_cell(v) for v in row])
-    for c in ws[ws.max_row]:              # text such as "=== INFO ===" must stay text, not become a formula
-        if isinstance(c.value, str) and c.value.startswith("="):
-            c.data_type = "s"
+    vals = [_cell(v) for v in row]
+    ws.append(vals)
+    for j, v in enumerate(vals):          # text such as "=== INFO ===" must stay text, not become a formula
+        if isinstance(v, str) and v.startswith("="):
+            ws.cell(row=ws._current_row, column=j + 1).data_type = "s"   # (ws.max_row would rescan the sheet)
 
 
 def _csv(v):

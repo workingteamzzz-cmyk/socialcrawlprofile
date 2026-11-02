@@ -194,7 +194,7 @@ def test_news_flow(app, detail):
     call, wait_done, _ = app
     assert call("/api/news/start", {"keywords": [], "start": "2026-10-01", "end": "2026-10-31"})["error"]
     r = call("/api/news/start", {"keywords": ["listrik", "PLN"], "start": "2026-10-01", "end": "2026-10-31", "tz": "WIB",
-                                 "options": {"detail": detail, "cap": 100}})
+                                 "options": {"detail": detail, "cap": 100, "by_day": False}})
     assert r["ok"], r
     s = wait_done()
     assert s["error"] == "", s

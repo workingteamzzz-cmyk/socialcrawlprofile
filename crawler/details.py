@@ -138,7 +138,7 @@ def _read_youtube(c) -> dict:
     title = _unescape(rx(r'"videoDetails":\{.*?"title":"((?:[^"\\]|\\.)*)"'))
     desc = _unescape(rx(r'"shortDescription":"((?:[^"\\]|\\.)*)"'))
     likes = rx(r'"label":"([\d.,]+\s*(?:rb|jt|K|M)?)\s*(?:likes|suka|orang lainnya)') or \
-        rx(r'like this video along with ([\d.,]+) other')
+        rx(r'like this video along with ([\d.,]+) other') or rx(r'bersama ([\d.,]+) orang lainnya')
     comments = rx(r'"commentCount":\{"simpleText":"([^"]+)"') or rx(r'"contextualInfo":\{"runs":\[\{"text":"([^"]+)"')
     return {"caption": (title + ("\n\n" + desc if desc else "")).strip(),
             "views": parse_count(rx(r'"viewCount":"(\d+)"')), "likes": parse_count(likes), "comments": parse_count(comments)}

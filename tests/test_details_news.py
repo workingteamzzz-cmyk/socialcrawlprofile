@@ -312,7 +312,7 @@ def test_google_news_feed_with_media_links(tmp_path):
         assert got["PLN pulihkan listrik"]["url"] == "https://media.example/A1" and got["PLN pulihkan listrik"]["media"] == "Kompas"
         assert got["Pemadaman bergilir & jadwal"]["published"] == "2026-10-21"
         assert got["Tanpa redirect"]["url"].startswith("https://news.google.com/rss/articles/A4")   # kept when no redirect
-        assert "after:2026-09-30 before:2026-11-01" in feeds[0] and "hl=id" in feeds[0]
+        assert "after:2026-09-29 before:2026-11-01" in feeds[0] and "hl=id" in feeds[0]
         assert "2/3 media links resolved" in res.note and "1 outside the period dropped" in res.note
         feeds.clear()
         res = c.search("listrik", NewsOptions(source="news", cap=0, resolve=False), datetime(2026, 10, 20), datetime(2026, 10, 22))

@@ -147,8 +147,8 @@ Output: `news_links_<period>_<time>.xlsx` with sheets **News Links**, **Search S
 
 ## Output (profiles)
 
-Saved to `outputs/` automatically (about every 20 seconds during a run, and always at the end or on Stop), and
-downloadable from the dashboard. If one of these files is open in Excel
+Saved to `outputs/` automatically after each finished account or search (at most every 20 seconds, so big runs stay
+fast), and always at the end or on Stop; downloadable from the dashboard. If one of these files is open in Excel
 while a run is going, the app keeps collecting and saves again after the next account — close Excel to let it save.
 
 - `post_links_<period>_<time>.xlsx`

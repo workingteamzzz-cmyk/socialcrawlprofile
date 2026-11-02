@@ -145,3 +145,91 @@ def test_stop_keeps_links_collected_so_far(tmp_path):
             c.tiktok(parse_line("https://www.tiktok.com/@abc"))
         assert len(e.value.posts) >= 3          # what was on the page when Stop was pressed
         ctx.close()
+
+
+# ---------------- engine review ----------------
+
+def test_article_key_merges_url_variants():
+    from crawler.news import _key
+    a = _key("https://www.kompas.com/read/2026/10/20/abc?utm_source=google&utm_medium=x#top")
+    assert a == _key("http://m.kompas.com/read/2026/10/20/abc/") == _key("https://amp.kompas.com/read/2026/10/20/abc/amp")
+    assert a != _key("https://www.kompas.com/read/2026/10/20/abd")
+    assert _key("https://site.example/a?id=5") != _key("https://site.example/a?id=6")
+
+
+def _news_ctx(tmp_path, route):
+    from playwright.sync_api import sync_playwright
+
+    from crawler.browser import launch_context
+    os.environ["CRAWLER_BROWSER_PATH"] = _browser_path()
+    pw = sync_playwright().start()
+    ctx = launch_context(pw, str(tmp_path / "p"), headless=True)
+    ctx.route("**/*", route)
+    return pw, ctx
+
+
+def _news_crawler(ctx, stop=None, start=datetime(2026, 10, 19, 17, tzinfo=UTC), end=datetime(2026, 10, 20, 16, 59, tzinfo=UTC)):
+    from datetime import timedelta as td
+
+    from crawler.news import NewsCrawler
+    c = NewsCrawler(ctx, lambda m: None, stop or threading.Event(), start, end, tz=timezone(td(hours=7)))
+    c._pause = lambda lo=0, hi=0: (c.page.wait_for_timeout(50), c._check_stop())
+    return c
+
+
+@pytest.mark.skipif(_browser_path() is None, reason="no local Chromium")
+def test_news_engine_review_fixes(tmp_path):
+    from crawler.browser import Stopped
+    from crawler.news import NewsOptions
+    feed = ('<?xml version="1.0"?><rss><channel>' + "".join(
+        f"<item><title>Berita {i} - Media</title><link>https://news.google.com/rss/articles/G{i}</link>"
+        f"<pubDate>Tue, 20 Oct 2026 0{i}:00:00 GMT</pubDate><source url='https://m.example'>Media</source></item>" for i in range(5))
+        + "</channel></rss>")
+    google = """<html><body><div id="rso">
+      <a href="https://a.example/1"><div>Media A</div><div role="heading">Arus lalu lintas tidak biasa di tol Cikampek</div><span>20 Okt 2026</span></a>
+      <a href="https://a.example/2"><div>Media B</div><div role="heading">Berita kemarin sebelum periode</div><span>19 Okt 2026</span></a>
+    </div></body></html>"""
+
+    def route(r):
+        url = r.request.url
+        if "/rss/search" in url:
+            return r.fulfill(status=200, content_type="application/xml", body=feed)
+        if "/rss/articles/" in url:
+            gid = url.rsplit("/", 1)[-1]
+            return r.fulfill(status=200, content_type="text/html", body=(
+                "<html><body><iframe src='https://ads.doubleclick.net/x'></iframe>"
+                f"<script>setTimeout(() => location.href = 'https://media.example/{gid}', 400)</script></body></html>"))
+        if "google.com/search" in url:
+            return r.fulfill(status=200, content_type="text/html", body=google)
+        r.fulfill(status=200, content_type="text/html", body="<html><body>x</body></html>")
+    pw, ctx = _news_ctx(tmp_path, route)
+    try:
+        c = _news_crawler(ctx)
+        # ordinary traffic news is not a captcha; an absolute date the day before the period is dropped
+        t = time.time()
+        res = c.search("lalu lintas", NewsOptions(source="search", by_day=False), datetime(2026, 10, 20), datetime(2026, 10, 20))
+        assert time.time() - t < 30 and [p["url"] for p in res.posts] == ["https://a.example/1"]
+        assert "1 outside the period dropped" in res.note
+        # the article's own link, not the ad iframe
+        res = c.search("x", NewsOptions(source="news", by_day=False, cap=1), datetime(2026, 10, 20), datetime(2026, 10, 20))
+        assert res.posts[0]["url"] == "https://media.example/G4"
+        # Stop while links are being resolved keeps the whole batch
+        stop = threading.Event()
+        c2 = _news_crawler(ctx, stop)
+        real = c2._resolve
+        calls = {"n": 0}
+
+        def resolve(u):
+            calls["n"] += 1
+            if calls["n"] == 3:
+                stop.set()
+                c2._check_stop()
+            return real(u)
+        c2._resolve = resolve
+        with pytest.raises(Stopped) as e:
+            c2.search("x", NewsOptions(source="news", by_day=False), datetime(2026, 10, 20), datetime(2026, 10, 20))
+        urls = [p["url"] for p in e.value.posts]
+        assert len(urls) == 5 and sum(u.startswith("https://media.example/") for u in urls) == 2
+    finally:
+        ctx.close()
+        pw.stop()

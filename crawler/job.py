@@ -497,7 +497,7 @@ class Job:
         return self._start("news", self._news, kws, opt, d_start, d_end, tz_name)
 
     def _news(self, kws, opt, d_start, d_end, tz_name):
-        from .news import NewsCrawler
+        from .news import NewsCrawler, _key
         tz = timezone(timedelta(hours=TIMEZONES.get(tz_name, 7)))
         start_utc, end_utc = _utc_range(d_start, d_end, tz)
         b = self.data["news"]
@@ -522,14 +522,14 @@ class Job:
             added = 0
             with self.lock:
                 for r in res.posts:
-                    row = seen.get(r["url"])
+                    row = seen.get(_key(r["url"]))
                     if row:
                         if kw not in row["keywords"]:
                             row["keywords"].append(kw)
                             row["keyword"] = ", ".join(row["keywords"])
                         continue
                     r.update({"keyword": kw, "keywords": [kw]})
-                    seen[r["url"]] = r
+                    seen[_key(r["url"])] = r
                     b["links"].append(r)
                     added += 1
                 st = {"keyword": kw, "status": res.status, "count": len(res.posts), "note": res.note}
@@ -559,7 +559,7 @@ class Job:
                 try:
                     res = crawler.search(kw, opt, d_start, d_end)
                     if opt.detail == "full":
-                        new = [r for r in res.posts if r["url"] not in seen]
+                        new = [r for r in res.posts if _key(r["url"]) not in seen]
                         for j, r in enumerate(new):
                             self._check_or_raise()
                             self.current = f"{label} — article {j + 1}/{len(new)}"

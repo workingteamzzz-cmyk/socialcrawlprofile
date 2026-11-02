@@ -134,7 +134,8 @@ class KeywordCrawler(BrowserCrawler):
     def search_youtube(self, kw: str, opt: SearchOptions) -> Result:
         q = youtube_query(kw, opt, self.start, self.end)
         self._goto(f"https://www.youtube.com/results?search_query={quote(q)}&sp=CAI%253D")   # sort: upload date
-        posts = self._yt_collect("ytd-video-renderer a[href]", older_needed=4, cap=opt.cap, max_rounds=150)
+        # after:/before: narrow the results; the date sort may be ignored by YouTube, so don't stop on older videos
+        posts = self._yt_collect("ytd-video-renderer a[href]", older_needed=0, cap=opt.cap, max_rounds=60)
         return self._done(posts, opt, ("consent.youtube.com",), f"query: {q}")
 
     # ---------- Threads ----------

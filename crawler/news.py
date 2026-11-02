@@ -142,8 +142,26 @@ _RESULTS_JS = r"""() => {
 }"""
 
 _FETCH_JS = r"""async (url) => {
-  try { const r = await fetch(url, {credentials: 'include'}); return r.ok ? await r.text() : ''; } catch (e) { return ''; }
+  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 20000);   // never hang on a stalled request
+  try { const r = await fetch(url, {credentials: 'include', signal: ctl.signal}); return r.ok ? await r.text() : ''; }
+  catch (e) { return ''; } finally { clearTimeout(t); }
 }"""
+
+
+def _key(url: str) -> str:
+    """Same article = same key: ignore http/https, www., m./amp variants, tracking parameters, fragments, trailing /."""
+    try:
+        u = urlparse(url.strip())
+    except ValueError:
+        return url
+    host = (u.hostname or "").lower()
+    for p in ("www.", "m.", "amp."):
+        if host.startswith(p):
+            host = host[len(p):]
+    path = re.sub(r"/(amp)/?$", "", u.path or "").rstrip("/")
+    query = "&".join(sorted(q for q in (u.query or "").split("&")
+                            if q and not re.match(r"(utm_[a-z]+|fbclid|gclid|ocid|oc|ref|source)=", q, re.I)))
+    return f"{host}{path}" + (f"?{query}" if query else "")
 
 
 def _parse_rss(xml: str) -> list[dict]:
@@ -216,9 +234,12 @@ class NewsCrawler(BrowserCrawler):
     def _wait_google_captcha(self) -> bool:
         """True when the page is usable; waits up to ~5 minutes for the user to solve a captcha."""
         for i in range(100):
-            url = self.page.url
-            txt = self._body_text()
-            blocked = "/sorry/" in url or "unusual traffic" in txt or "traffic yang tidak biasa" in txt or "lalu lintas" in txt and "tidak biasa" in txt
+            blocked = "/sorry/" in self.page.url
+            if not blocked:      # judged from the page itself, not its text ("lalu lintas tidak biasa" is ordinary news)
+                try:
+                    blocked = bool(self.page.query_selector("form#captcha-form, #recaptcha, iframe[src*='recaptcha']"))
+                except Exception:  # noqa: BLE001
+                    blocked = False
             if not blocked:
                 return True
             if i == 0:
@@ -249,6 +270,11 @@ class NewsCrawler(BrowserCrawler):
                 statuses.append(res.status)
         except Stopped:
             raise Stopped(list(found.values())) from None
+        except Exception as e:  # noqa: BLE001  keep what was found before the problem
+            if BROWSER_CLOSED in str(e):
+                raise Stopped(list(found.values())) from e
+            notes.append("problem: " + str(e).splitlines()[0][:150])
+            statuses.append("error")
         status = "ok" if "ok" in statuses or found else (statuses[0] if statuses else "ok")
         return Result(status, list(found.values()), " | ".join(notes))
 
@@ -264,16 +290,27 @@ class NewsCrawler(BrowserCrawler):
         self._accept_consent()
         q = google_query(kw, opt)
         fresh, read, outside, failed = [], 0, 0, 0
+        seen_links = set()
+        try:
+            return self._feed_windows(q, opt, windows, loc, found, fresh, seen_links)
+        except Stopped:
+            for r in fresh:                          # keep what was collected (resolved or not)
+                found.setdefault(_key(r["url"]), r)
+            raise
+
+    def _feed_windows(self, q, opt, windows, loc, found, fresh, seen_links) -> Result:
+        read = outside = failed = 0
         for i, (a, b) in enumerate(windows):
             self._check_stop()
             if opt.cap and len(found) + len(fresh) >= opt.cap:
                 break
             if i:
                 self._pause(1.5, 3)
-            qq = f"{q} after:{(a - timedelta(days=1)):%Y-%m-%d} before:{(b + timedelta(days=1)):%Y-%m-%d}"
+            # after:/before: are day-granular in Google's own time zone, so ask a little wider and filter exactly below
+            qq = f"{q} after:{(a - timedelta(days=2)):%Y-%m-%d} before:{(b + timedelta(days=1)):%Y-%m-%d}"
             url = (f"https://news.google.com/rss/search?q={quote(qq)}&hl={loc['hl']}&gl={loc['gl']}&ceid={quote(loc['ceid'])}")
             xml = self.page.evaluate(_FETCH_JS, url) or ""
-            if not xml.lstrip().startswith("<"):
+            if "<rss" not in xml[:1000] and "<channel" not in xml[:2000]:   # captcha/error page instead of a feed
                 failed += 1
                 continue
             for item in _parse_rss(xml):
@@ -282,14 +319,16 @@ class NewsCrawler(BrowserCrawler):
                 if dt and not (self.start <= dt <= self.end):
                     outside += 1
                     continue
-                if item["link"] in found or any(f["google_url"] == item["link"] for f in fresh):
+                if item["link"] in seen_links or _key(item["link"]) in found:
                     continue
+                seen_links.add(item["link"])
                 fresh.append({"url": item["link"], "google_url": item["link"], "title": item["title"], "media": item["source"],
                               "published": dt.astimezone(self.tz).strftime("%Y-%m-%d") if dt else "",
                               "ts": dt.timestamp() if dt else 0})
         fresh.sort(key=lambda r: -r["ts"])
         if opt.cap:
-            fresh = fresh[:max(0, opt.cap - len(found))]
+            del fresh[max(0, opt.cap - len(found)):]
+        n_fresh = len(fresh)
         resolved = 0
         if opt.resolve and opt.detail != "full":        # full mode opens each article anyway
             for j, r in enumerate(fresh):
@@ -299,13 +338,13 @@ class NewsCrawler(BrowserCrawler):
                     r["url"] = real
                     resolved += 1
         for r in fresh:
-            if r["url"] not in found:
-                found[r["url"]] = r
+            found.setdefault(_key(r["url"]), r)
+        fresh.clear()
         note = f"query: {q}; {len(windows)} search{'es' if len(windows) != 1 else ''}; {read} articles read"
         if outside:
             note += f"; {outside} outside the period dropped"
-        if opt.resolve and fresh and opt.detail != "full":
-            note += f"; {resolved}/{len(fresh)} media links resolved"
+        if opt.resolve and n_fresh and opt.detail != "full":
+            note += f"; {resolved}/{n_fresh} media links resolved"
         if failed:
             note += f"; {failed} feed request(s) failed"
         return Result("error" if failed == len(windows) else "ok", [], note)
@@ -318,7 +357,9 @@ class NewsCrawler(BrowserCrawler):
         def handler(route):
             req = route.request
             host = (urlparse(req.url).hostname or "").lower()
-            if req.is_navigation_request() and not re.search(r"(^|\.)(google\.[a-z.]+|gstatic\.com|googleusercontent\.com)$", host):
+            if (req.is_navigation_request() and req.frame == self.page.main_frame
+                    and not re.search(r"(^|\.)(google\.[a-z.]+|gstatic\.com|googleusercontent\.com|doubleclick\.net|"
+                                      r"googlesyndication\.com|googleadservices\.com|youtube\.com)$", host)):
                 target.setdefault("url", req.url)
                 return route.abort()
             return route.fallback()
@@ -397,16 +438,16 @@ class NewsCrawler(BrowserCrawler):
                 snapshot = self._save_snapshot(q)          # links to other sites, yet no readable result
             for item in items:
                 url = item["url"]
-                if url in found:
+                if _key(url) in found:
                     continue
                 lines = [ln for ln in item.get("lines", []) if ln != item["title"]]
                 date_txt = next((ln for ln in reversed(lines) if parse_news_date(ln, datetime.now(self.tz))), "")
                 dt = parse_news_date(date_txt, datetime.now(self.tz)) if date_txt else None
-                if dt and not (self.start - timedelta(days=1) <= dt <= self.end + timedelta(days=1)):
+                if dt and not self._in_period(dt, date_txt):
                     outside_period += 1
                     continue                                  # outside the period (Google's filter is approximate)
                 media = next((ln for ln in lines if ln != date_txt and len(ln) < 60), "") or urlparse(url).netloc.removeprefix("www.")
-                found[url] = {"url": url, "title": item["title"], "media": media,
+                found[_key(url)] = {"url": url, "title": item["title"], "media": media,
                               "published": dt.astimezone(self.tz).strftime("%Y-%m-%d") if dt else "", "ts": dt.timestamp() if dt else 0}
                 if opt.cap and len(found) >= opt.cap:
                     break
@@ -417,8 +458,8 @@ class NewsCrawler(BrowserCrawler):
                 break
             self._pause(2.5, 5.5)                             # read the page like a person before moving on
             try:
-                nxt.click()
-                self.page.wait_for_load_state("domcontentloaded", timeout=30000)
+                with self.page.expect_navigation(wait_until="domcontentloaded", timeout=30000):
+                    nxt.click()
             except Exception as e:  # noqa: BLE001
                 if "closed" in str(e):
                     raise
@@ -436,6 +477,14 @@ class NewsCrawler(BrowserCrawler):
                 hint += f" — a copy of the page was saved to outputs/debug/{snapshot}; please send it to the developer"
             return _with_cards(Result("error" if snapshot and "layout" in hint else "ok", [], note + "; " + hint), cards)
         return _with_cards(Result("ok", list(found.values()), note), cards)
+
+    def _in_period(self, dt: datetime, date_txt: str) -> bool:
+        """Absolute card dates ("19 Okt 2026") are whole days: compare the local date exactly.
+        Relative ones ("3 hari lalu" = 3 to 4 days ago) get one day of slack on the older side only."""
+        if re.search(r"lalu|ago", date_txt, re.I):
+            return self.start - timedelta(days=1) <= dt <= self.end + timedelta(hours=1)
+        d = dt.astimezone(self.tz).date()
+        return self.start.astimezone(self.tz).date() <= d <= self.end.astimezone(self.tz).date()
 
     def _no_results_page(self) -> bool:
         t = self._body_text()

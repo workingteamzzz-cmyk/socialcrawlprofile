@@ -297,7 +297,12 @@ class BrowserCrawler:
 
         def extract():
             out = []
-            for h in self._hrefs():
+            try:   # each tweet's own permalink is the link around its timestamp; quoted (older) tweets are not
+                hrefs = self.page.eval_on_selector_all(
+                    "article a[href*='/status/']", "els => els.filter(e => e.querySelector('time')).map(e => e.getAttribute('href'))")
+            except Exception:  # noqa: BLE001
+                hrefs = []
+            for h in hrefs or self._hrefs():
                 m = rx.match(h or "")
                 if m and m.group(1).lower() == handle:
                     out.append(Post(f"https://x.com/{m.group(1)}/status/{m.group(2)}", x_status_time(m.group(2))))
@@ -321,15 +326,17 @@ class BrowserCrawler:
     _YT_JS = r"""async (ids) => {
       const out = {};
       const one = async (id) => {
+        const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 20000);   // never hang
         try {
-          const r = await fetch('/watch?v=' + id, {credentials: 'include'});
+          const r = await fetch('/watch?v=' + id, {credentials: 'include', signal: ctl.signal});
+          if (!r.ok) { out[id] = {failed: true}; return; }
           const h = await r.text();
           const m = h.match(/"publishDate":"([^"]+)"/) || h.match(/"uploadDate":"([^"]+)"/)
                  || h.match(/itemprop="datePublished" content="([^"]+)"/);
           const a = h.match(/"ownerProfileUrl":"https?:\/\/www\.youtube\.com\/@([^"\/]+)"/)
                  || h.match(/"author":"([^"]+)"/);
           out[id] = {date: m ? m[1] : '', author: a ? a[1] : '', upcoming: /"isUpcoming":true/.test(h)};
-        } catch (e) { out[id] = {date: '', author: '', upcoming: false}; }
+        } catch (e) { out[id] = {failed: true}; } finally { clearTimeout(t); }
       };
       for (let i = 0; i < ids.length; i += 4) await Promise.all(ids.slice(i, i + 4).map(one));
       return out;
@@ -347,9 +354,14 @@ class BrowserCrawler:
                     raise
                 got = {}
             for vid in todo[k:k + 12]:
-                info = got.get(vid) or {}
-                cache[vid] = (None if info.get("upcoming") else _parse_iso(info.get("date", "")), info.get("author", ""))
-        return {i: cache[i] for i in ids}
+                info = got.get(vid) or {"failed": True}
+                entry = (None if info.get("upcoming") else _parse_iso(info.get("date", "")), info.get("author", ""))
+                if info.get("failed"):
+                    self.__dict__.setdefault("_yt_fail", {})[vid] = entry    # retried on the next scroll round
+                else:
+                    cache[vid] = entry
+        fails = self.__dict__.get("_yt_fail", {})
+        return {i: cache.get(i) or fails.pop(i, (None, "")) for i in ids}
 
     def _yt_collect(self, selector: str, older_needed: int, cap: int = 0, max_rounds: int = 200) -> list[Post]:
         rx = re.compile(r"(?:/watch\?v=|/shorts/)([A-Za-z0-9_-]{11})")

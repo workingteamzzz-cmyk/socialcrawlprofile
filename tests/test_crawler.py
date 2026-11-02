@@ -160,25 +160,38 @@ def test_label_and_facebook_id_urls():
     assert y.url == "https://www.youtube.com/channel/UCk0AIb2JDyz8VSPkaNq0OWQ"
 
 
-def test_base_accounts_csv_is_clean():
+def test_bundled_list_is_clean():
     from crawler import store
-    accs = store.load_all()
+    accs = store.load("Ditjen SDA")
     assert len(accs) > 250
     assert [a["url"] for a in accs if a["problem"]] == []
-    assert all(a["unit"] and a["status"] in ("Verified", "Likely", "Unverified") for a in accs)
+    assert all(a["group"] and a["status"] in ("Verified", "Likely", "Unverified") for a in accs)
 
 
-def test_custom_accounts_add_and_remove(tmp_path, monkeypatch):
+def test_lists_add_remove_and_migration(tmp_path, monkeypatch):
     from crawler import store
-    monkeypatch.setattr(store, "CUSTOM_CSV", str(tmp_path / "custom.csv"))
-    r = store.add("https://x.com/akun_contoh\nhttps://www.facebook.com/salah_satu\nhttps://x.com/pupr_sda", "Benchmark")
-    assert r["added"] == ["https://x.com/akun_contoh"]
-    assert len(r["errors"]) == 2   # invalid FB username + already in base list
-    added = [a for a in store.load_all() if a["source"] == "custom"]
-    assert added[0]["unit"] == "Benchmark" and added[0]["status"] == "Added"
-    assert "https://x.com/akun_contoh | Benchmark" in store.lines_for([added[0]["id"]])
-    assert store.remove([added[0]["id"]]) == 1
-    assert not [a for a in store.load_all() if a["source"] == "custom"]
+    monkeypatch.setattr(store, "LISTS_DIR", str(tmp_path / "lists"))
+    monkeypatch.setattr(store, "LEGACY_BASE", str(tmp_path / "accounts.csv"))
+    monkeypatch.setattr(store, "LEGACY_CUSTOM", str(tmp_path / "custom_accounts.csv"))
+    # an older install had data/accounts.csv (column "Unit") -> migrated into a list
+    (tmp_path / "accounts.csv").write_text("Unit,Platform,Handle,URL,Status,Source,Notes\n"
+                                           "BBWS X,Instagram,abc,https://www.instagram.com/abc/,Verified,,\n", encoding="utf-8")
+    assert [l["id"] for l in store.lists()] == ["Ditjen SDA"]
+    assert store.load("Ditjen SDA")[0]["group"] == "BBWS X"
+
+    assert store.create_list("  Client A ")[0] == "Client A"
+    assert store.create_list("client a")[1]                       # duplicate name
+    assert store.create_list("../../etc")[0] == "etc"             # path characters stripped
+    r = store.add("Client A", "https://x.com/akun_contoh\nhttps://www.facebook.com/salah_satu\n"
+                              "https://www.tiktok.com/@brand_a\tBrand A\nhttps://x.com/akun_contoh", "Benchmark")
+    assert r["added"] == ["https://x.com/akun_contoh", "https://www.tiktok.com/@brand_a"]
+    assert len(r["errors"]) == 2                                   # invalid FB username + duplicate
+    accs = store.load("Client A")
+    assert {a["group"] for a in accs} == {"Benchmark", "Brand A"} and all(a["status"] == "Added" for a in accs)
+    assert "https://x.com/akun_contoh | Benchmark" in store.lines_for("Client A", [accs[0]["id"]])
+    assert store.remove("Client A", [accs[0]["id"]]) == 1 and len(store.load("Client A")) == 1
+    assert store.load("../Ditjen SDA") == [] and store.add("nope", "https://x.com/a", "")["errors"]
+    assert store.delete_list("Client A") and "Client A" not in [l["id"] for l in store.lists()]
 
 
 # ---------------- keyword search ----------------
@@ -259,4 +272,72 @@ def test_keyword_search_with_fake_pages(tmp_path):
         assert {p.time_utc.date() for p in res.posts} == want and len(res.posts) == 4
         res = c.search_tiktok("listrik", SearchOptions(cap=2))
         assert len(res.posts) == 2 and res.posts[0].time_utc == inr[0]
+        ctx.close()
+
+
+# ---------------- YouTube (browser) ----------------
+
+def _yt_id(i):
+    return f"vid{i:08d}"
+
+
+def _yt_route(dates, extra_pages):
+    """Fake YouTube: channel tabs / search pages from extra_pages, watch pages carry publishDate + owner."""
+    import re as _re
+
+    def route(r):
+        url = r.request.url
+        m = _re.search(r"/watch\?v=([\w-]{11})", url)
+        if m and m.group(1) in dates:
+            d = dates[m.group(1)]
+            body = ('<html><script>var x = {"microformat":{"playerMicroformatRenderer":{"publishDate":"%s",'
+                    '"ownerProfileUrl":"http://www.youtube.com/@owner_%s"}}};</script></html>' % (d.isoformat(), m.group(1)[-2:]))
+        else:
+            body = next((v for k, v in extra_pages.items() if k in url), "<html><body></body></html>")
+        r.fulfill(status=200, content_type="text/html", body=body)
+    return route
+
+
+@pytest.mark.skipif(_browser_path() is None, reason="no local Chromium")
+def test_youtube_channel_and_search_in_browser(tmp_path):
+    from playwright.sync_api import sync_playwright
+
+    from crawler.accounts import parse_line
+    from crawler.browser import BrowserCrawler, launch_context
+    from crawler.keywords import KeywordCrawler, SearchOptions
+
+    start = datetime(2026, 10, 1, tzinfo=UTC)
+    end = datetime(2026, 10, 31, 23, 59, 59, tzinfo=UTC)
+    vids = [datetime(2026, 11, 1, 2, tzinfo=UTC)] + [datetime(2026, 10, d, 8, tzinfo=UTC) for d in (28, 15, 2)] + \
+           [datetime(2026, 9, 30 - i, tzinfo=UTC) for i in range(10)]
+    dates = {_yt_id(i): d for i, d in enumerate(vids)}
+    shorts = {_yt_id(100 + i): d for i, d in enumerate([datetime(2026, 10, 20, tzinfo=UTC), datetime(2026, 9, 1, tzinfo=UTC),
+                                                        datetime(2026, 8, 1, tzinfo=UTC)])}
+    dates.update(shorts)
+    pages = {
+        "/@chan/videos": _fake_feed_html([[f"/watch?v={v}", ""] for v in list(dates)[:len(vids)]]),
+        "/@chan/shorts": _fake_feed_html([[f"/shorts/{v}", ""] for v in shorts]),
+        "/@chan/streams": "<html><body></body></html>",
+        "youtube.com/results": _fake_feed_html([[f"/watch?v={v}", ""] for v in list(dates)[:len(vids)]]),
+    }
+    os.environ["CRAWLER_BROWSER_PATH"] = _browser_path()
+    with sync_playwright() as pw:
+        ctx = launch_context(pw, str(tmp_path / "profile"), headless=True)
+        ctx.route("**/*", _yt_route(dates, pages))
+        c = BrowserCrawler(ctx, lambda m: None, threading.Event(), start, end)
+        c._pause = lambda lo=0, hi=0: c.page.wait_for_timeout(200)
+        res = c.youtube(parse_line("https://www.youtube.com/@chan"))
+        assert res.status == "ok", res
+        got = sorted(p.url for p in res.posts)
+        assert got == sorted([f"https://www.youtube.com/watch?v={_yt_id(i)}" for i in (1, 2, 3)] +
+                             [f"https://www.youtube.com/shorts/{_yt_id(100)}"])
+        # stopped scrolling soon after passing the start date: not every old video's page was fetched
+        assert len(c._yt_cache) < len(dates)
+
+        k = KeywordCrawler(ctx, lambda m: None, threading.Event(), start, end)
+        k._pause = lambda lo=0, hi=0: k.page.wait_for_timeout(200)
+        res = k.search_youtube("listrik", SearchOptions())
+        assert {p.time_utc.date() for p in res.posts} == {d.date() for d in vids[1:4]}
+        assert {p.author for p in res.posts} == {"owner_01", "owner_02", "owner_03"}
+        assert "after:2026-09-30 before:2026-11-01" in res.note
         ctx.close()

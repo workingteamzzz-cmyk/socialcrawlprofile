@@ -11,6 +11,5 @@ if not exist .setup_done (
   echo done> .setup_done
 )
 python -m playwright install chromium >nul 2>nul || echo Note: Chromium could not be downloaded - the app will use Google Chrome or Edge if installed.
-pip install -q --upgrade yt-dlp >nul 2>nul
 python run.py
 pause

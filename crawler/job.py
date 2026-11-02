@@ -190,11 +190,11 @@ class Job:
             with self.lock:
                 for p in res.posts:
                     t = p.time_utc.astimezone(tz) if p.time_utc else None
-                    b["links"].append({"platform": acc.platform, "unit": acc.label or acc.handle,
+                    b["links"].append({"platform": acc.platform, "group": acc.label or acc.handle,
                                        "handle": acc.handle, "url": p.url,
                                        "date": t.strftime("%Y-%m-%d") if t else "",
                                        "time": t.strftime("%H:%M") if t else ""})
-                b["statuses"].append({"platform": acc.platform, "unit": acc.label or acc.handle,
+                b["statuses"].append({"platform": acc.platform, "group": acc.label or acc.handle,
                                       "handle": acc.handle, "url": acc.url, "status": res.status,
                                       "count": len(res.posts), "note": res.note})
                 b["version"] += 1
@@ -208,7 +208,7 @@ class Job:
             write_outputs(xlsx, csvp, links, statuses, meta)
 
         self.log(f"Period {d_start:%Y-%m-%d} to {d_end:%Y-%m-%d} ({tz_name}) — {len(accounts)} accounts")
-        need_browser = any(a.platform != "youtube" and not a.problem for a in accounts)
+        need_browser = any(not a.problem for a in accounts)
         pw = ctx = crawler = None
         stopped = False
         try:
@@ -230,11 +230,7 @@ class Job:
                 self.log(f"({i + 1}/{len(accounts)}) {label} ...")
                 self.current = label + (f" — {acc.label}" if acc.label else "")
                 try:
-                    if acc.platform == "youtube":
-                        from .youtube import crawl_youtube
-                        res = crawl_youtube(acc, start_utc, end_utc, self.log, self.stop_flag)
-                    else:
-                        res = getattr(crawler, acc.platform)(acc)
+                    res = getattr(crawler, acc.platform)(acc)
                 except Stopped:
                     stopped = True
                     record(acc, Result("stopped", [], "Stopped before finishing"))
@@ -251,7 +247,7 @@ class Job:
                 self.log(f"   {'✅' if res.status == 'ok' else '⚠'} {len(res.posts)} links" + (f" — {res.note}" if res.note else ""))
                 self.done = i + 1
                 save()
-                if acc.platform != "youtube" and i + 1 < len(accounts):
+                if i + 1 < len(accounts):
                     self._pause_between()
         finally:
             done_keys = {(s["platform_label"], s["handle"]) for s in statuses}
@@ -290,8 +286,7 @@ class Job:
         return self._start("keywords", self._keywords, kws, plats, opt, d_start, d_end, tz_name)
 
     def _keywords(self, kws, plats, opt, d_start, d_end, tz_name):
-        from .keywords import KeywordCrawler, youtube_query
-        from .youtube import search_youtube
+        from .keywords import KeywordCrawler
         tz_hours = TIMEZONES.get(tz_name, 7)
         tz = timezone(timedelta(hours=tz_hours))
         start_utc, end_utc = _utc_range(d_start, d_end, tz)
@@ -336,11 +331,10 @@ class Job:
         pw = ctx = crawler = None
         stopped = False
         try:
-            if any(p != "youtube" for p in plats):
-                from playwright.sync_api import sync_playwright
-                pw = sync_playwright().start()
-                ctx = launch_context(pw, PROFILE_DIR)
-                crawler = KeywordCrawler(ctx, self.log, self.stop_flag, start_utc, end_utc)
+            from playwright.sync_api import sync_playwright
+            pw = sync_playwright().start()
+            ctx = launch_context(pw, PROFILE_DIR)
+            crawler = KeywordCrawler(ctx, self.log, self.stop_flag, start_utc, end_utc)
             for i, (kw, plat) in enumerate(tasks):
                 if self.stop_flag.is_set():
                     stopped = True
@@ -349,11 +343,7 @@ class Job:
                 self.log(f"({i + 1}/{len(tasks)}) {label} ...")
                 self.current = label
                 try:
-                    if plat == "youtube":
-                        res = search_youtube(youtube_query(kw, opt, start_utc, end_utc), start_utc, end_utc,
-                                             opt.cap, self.log, self.stop_flag)
-                    else:
-                        res = getattr(crawler, f"search_{plat}")(kw, opt)
+                    res = getattr(crawler, f"search_{plat}")(kw, opt)
                 except Stopped:
                     stopped = True
                     record(kw, plat, Result("stopped", [], "Stopped before finishing"))
@@ -370,7 +360,7 @@ class Job:
                 self.log(f"   {'✅' if res.status == 'ok' else '⚠'} {len(res.posts)} links" + (f" — {res.note}" if res.note else ""))
                 self.done = i + 1
                 save()
-                if plat != "youtube" and i + 1 < len(tasks):
+                if i + 1 < len(tasks):
                     self._pause_between()
         finally:
             save()

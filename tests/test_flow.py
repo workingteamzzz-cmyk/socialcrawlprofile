@@ -47,7 +47,9 @@ def app(tmp_path, monkeypatch):
     monkeypatch.setattr(job, "PROFILE_DIR", str(tmp_path / "profile"))
     monkeypatch.setattr(job, "OUTPUT_DIR", str(tmp_path / "out"))
     monkeypatch.setattr(server, "OUTPUT_DIR", str(tmp_path / "out"))
-    monkeypatch.setattr(store, "CUSTOM_CSV", str(tmp_path / "custom.csv"))
+    monkeypatch.setattr(store, "LISTS_DIR", str(tmp_path / "lists"))
+    monkeypatch.setattr(store, "LEGACY_BASE", str(tmp_path / "none1.csv"))
+    monkeypatch.setattr(store, "LEGACY_CUSTOM", str(tmp_path / "none2.csv"))
     monkeypatch.setattr(job.Job, "_pause_between", lambda self: None)
     monkeypatch.setattr(browser.BrowserCrawler, "_pause", lambda self, lo=0, hi=0: self.page.wait_for_timeout(200))
     fresh = job.Job()
@@ -81,8 +83,13 @@ def app(tmp_path, monkeypatch):
 def test_profile_flow(app):
     call, wait_done, base = app
     assert b"Post Link Collector" in call("/")
-    r = call("/api/accounts/add", {"text": "https://www.instagram.com/pu_sda_citarum_baru\nhttps://x.com/not.valid", "unit": "Test"})
-    assert len(r["added"]) == 1 and len(r["errors"]) == 1
+    assert call("/api/lists")["lists"] == []
+    assert call("/api/lists/create", {"name": "Client A"})["id"] == "Client A"
+    r = call("/api/accounts/add", {"list": "Client A", "group": "Brand",
+                                   "text": "https://www.instagram.com/pu_sda\nhttps://www.tiktok.com/@pu_sda_citarum | Rival\nhttps://x.com/not.valid"})
+    assert len(r["added"]) == 2 and len(r["errors"]) == 1
+    accs = call("/api/accounts?list=Client%20A")["accounts"]
+    assert {a["group"] for a in accs} == {"Brand", "Rival"}
     assert call("/api/start", {"text": "x", "start": "2026-10-31", "end": "2026-10-01"})["error"]
 
     text = ("https://www.instagram.com/pu_sda | Ditjen SDA\nhttps://www.tiktok.com/@pu_sda_citarum | BBWS Citarum\n"
@@ -99,7 +106,7 @@ def test_profile_flow(app):
     assert by[("instagram", "pu_sda")]["count"] == 3 and by[("tiktok", "pu_sda_citarum")]["count"] == 3
     assert by[("instagram", "akun_hilang")]["status"] == "not_found"
     assert by[("x", "setwan.dsdan")]["status"] == "invalid"
-    assert {l["unit"] for l in res["links"]} == {"Ditjen SDA", "BBWS Citarum"}
+    assert {l["group"] for l in res["links"]} == {"Ditjen SDA", "BBWS Citarum"}
     files = s["modes"]["profiles"]["files"]
     assert len(files) == 2
     data = call("/download/" + files[0])
@@ -108,6 +115,19 @@ def test_profile_flow(app):
     assert out and out[0]["name"] == files[0]
     with pytest.raises(urllib.error.HTTPError):
         call("/download/..%2F..%2Fetc%2Fpasswd")
+
+
+def test_profile_flow_from_a_list(app):
+    call, wait_done, _ = app
+    call("/api/lists/create", {"name": "Banks"})
+    call("/api/accounts/add", {"list": "Banks", "text": "https://www.instagram.com/pu_sda | Bank A\nhttps://www.tiktok.com/@pu_sda_citarum | Bank B"})
+    ids = [a["id"] for a in call("/api/accounts?list=Banks")["accounts"]]
+    r = call("/api/start", {"list": "Banks", "ids": ids, "start": "2026-10-01", "end": "2026-10-31", "tz": "WIB",
+                            "platforms": ["instagram", "tiktok"]})
+    assert r["ok"], r
+    wait_done()
+    res = call("/api/results?mode=profiles")
+    assert sorted((st["group"], st["count"]) for st in res["statuses"]) == [("Bank A", 3), ("Bank B", 3)]
 
 
 def test_keyword_flow(app):

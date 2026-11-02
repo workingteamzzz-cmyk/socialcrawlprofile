@@ -37,8 +37,10 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/status":
             since = int(parse_qs(u.query).get("since", ["0"])[0] or 0)
             return self._json(JOB.state(since))
+        if u.path == "/api/lists":
+            return self._json({"lists": store.lists()})
         if u.path == "/api/accounts":
-            return self._json({"accounts": store.load_all()})
+            return self._json({"accounts": store.load(parse_qs(u.query).get("list", [""])[0])})
         if u.path == "/api/results":
             mode = parse_qs(u.query).get("mode", ["profiles"])[0]
             return self._json(JOB.results_view(mode))
@@ -77,16 +79,21 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/login":
             err = JOB.start_login()
         elif u.path == "/api/start":
-            text = store.lines_for(data["ids"]) if data.get("ids") else data.get("text", "")
+            text = store.lines_for(data.get("list", ""), data["ids"]) if data.get("ids") else data.get("text", "")
             err = JOB.start_crawl(text, data.get("start", ""), data.get("end", ""),
                                   data.get("tz", "WIB"), data.get("platforms") or [])
         elif u.path == "/api/keywords/start":
             err = JOB.start_keywords(data.get("keywords") or [], data.get("start", ""), data.get("end", ""),
                                      data.get("tz", "WIB"), data.get("platforms") or [], data.get("options") or {})
         elif u.path == "/api/accounts/add":
-            return self._json(store.add(data.get("text", ""), data.get("unit", "")))
+            return self._json(store.add(data.get("list", ""), data.get("text", ""), data.get("group", "")))
         elif u.path == "/api/accounts/remove":
-            return self._json({"removed": store.remove(data.get("ids") or [])})
+            return self._json({"removed": store.remove(data.get("list", ""), data.get("ids") or [])})
+        elif u.path == "/api/lists/create":
+            list_id, err = store.create_list(data.get("name", ""))
+            return self._json({"ok": err is None, "error": err, "id": list_id})
+        elif u.path == "/api/lists/delete":
+            return self._json({"ok": store.delete_list(data.get("id", ""))})
         elif u.path == "/api/stop":
             JOB.stop()
             err = None

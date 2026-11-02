@@ -304,6 +304,83 @@ class BrowserCrawler:
             return Result("ok", [], "")
         return self._finish(posts, ("/login", "/i/flow/login"))
 
+    # ---------- YouTube ----------
+    # Video IDs carry no date, so each new video's publish date is read from its watch page with a
+    # same-origin fetch from the open YouTube tab (4 at a time). No yt-dlp, no API.
+    _YT_JS = r"""async (ids) => {
+      const out = {};
+      const one = async (id) => {
+        try {
+          const r = await fetch('/watch?v=' + id, {credentials: 'include'});
+          const h = await r.text();
+          const m = h.match(/"publishDate":"([^"]+)"/) || h.match(/"uploadDate":"([^"]+)"/)
+                 || h.match(/itemprop="datePublished" content="([^"]+)"/);
+          const a = h.match(/"ownerProfileUrl":"https?:\/\/www\.youtube\.com\/@([^"\/]+)"/)
+                 || h.match(/"author":"([^"]+)"/);
+          out[id] = {date: m ? m[1] : '', author: a ? a[1] : '', upcoming: /"isUpcoming":true/.test(h)};
+        } catch (e) { out[id] = {date: '', author: '', upcoming: false}; }
+      };
+      for (let i = 0; i < ids.length; i += 4) await Promise.all(ids.slice(i, i + 4).map(one));
+      return out;
+    }"""
+
+    def _yt_dates(self, ids: list[str]) -> dict:
+        cache = self.__dict__.setdefault("_yt_cache", {})
+        todo = [i for i in ids if i not in cache]
+        for k in range(0, len(todo), 12):
+            self._check_stop()
+            try:
+                got = self.page.evaluate(self._YT_JS, todo[k:k + 12])
+            except Exception as e:  # noqa: BLE001
+                if BROWSER_CLOSED in str(e):
+                    raise
+                got = {}
+            for vid in todo[k:k + 12]:
+                info = got.get(vid) or {}
+                cache[vid] = (None if info.get("upcoming") else _parse_iso(info.get("date", "")), info.get("author", ""))
+        return {i: cache[i] for i in ids}
+
+    def _yt_collect(self, selector: str, older_needed: int, cap: int = 0, max_rounds: int = 200) -> list[Post]:
+        rx = re.compile(r"(?:/watch\?v=|/shorts/)([A-Za-z0-9_-]{11})")
+
+        def extract():
+            try:
+                hrefs = self.page.eval_on_selector_all(selector, "els => els.map(e => e.getAttribute('href'))")
+            except Exception:  # noqa: BLE001
+                hrefs = []
+            if not hrefs:                       # layout changed: fall back to every link on the page
+                hrefs = self._hrefs()
+            order, kind = [], {}
+            for h in hrefs:
+                m = rx.search(h or "")
+                if m and m.group(1) not in kind:
+                    order.append(m.group(1))
+                    kind[m.group(1)] = "shorts" if "/shorts/" in h else "watch"
+            dates = self._yt_dates(order)
+            return [Post(f"https://www.youtube.com/shorts/{v}" if kind[v] == "shorts" else f"https://www.youtube.com/watch?v={v}",
+                         dates[v][0], dates[v][1]) for v in order]
+
+        return self._scroll_collect(extract, older_needed=older_needed, idle_limit=4, max_rounds=max_rounds, cap=cap)
+
+    def youtube(self, acc: Account) -> Result:
+        base = acc.url.rstrip("/")
+        found: dict[str, Post] = {}
+        tabs_seen = 0
+        for tab in ("videos", "shorts", "streams"):
+            self._goto(f"{base}/{tab}")
+            if tabs_seen == 0 and self._page_state(("consent.youtube.com",)) == "not_found":
+                return Result("not_found", [], "Channel not found")
+            if f"/{tab}" not in self.page.url:   # channel has no such tab (YouTube redirects to the home tab)
+                continue
+            tabs_seen += 1
+            for p in self._yt_collect("ytd-rich-item-renderer a[href], ytd-grid-video-renderer a[href]", older_needed=2):
+                found.setdefault(p.url, p)
+        if not tabs_seen:
+            return self._finish([], ("consent.youtube.com",))
+        posts = list(found.values())
+        undated = sum(1 for p in posts if p.time_utc is None)
+        return Result("ok", self._in_range(posts), f"{undated} videos without a readable date skipped" if undated else "")
+
     def facebook(self, acc: Account) -> Result:
         posts = self._fb_collect(acc.url, older_needed=3, idle_limit=6)
         return self._finish(posts, ("/login", "checkpoint"))
@@ -360,6 +437,19 @@ class BrowserCrawler:
                 self.page.remove_listener("response", on_response)
             except Exception:  # noqa: BLE001
                 pass
+
+
+def _parse_iso(value: str) -> datetime | None:
+    value = (value or "").strip()
+    if not value:
+        return None
+    try:
+        if len(value) == 10:          # date only
+            return datetime.strptime(value, "%Y-%m-%d").replace(hour=12, tzinfo=timezone.utc)
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
 
 
 def _fb_author(url: str) -> str:

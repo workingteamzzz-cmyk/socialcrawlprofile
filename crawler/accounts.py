@@ -51,7 +51,7 @@ class Account:
     handle: str
     url: str
     problem: str = ""          # non-empty => handle cannot exist on this platform
-    label: str = ""            # optional unit name ("URL | Unit name")
+    label: str = ""            # optional group name ("URL | Group")
     extra: dict = field(default_factory=dict)
 
     @property
@@ -83,7 +83,7 @@ def parse_line(line: str) -> Account | None:
     if not line or line.startswith("#"):
         return None
     label = ""
-    if "|" in line:  # "URL | Unit name"
+    if "|" in line:  # "URL | Group"
         line, label = (x.strip() for x in line.split("|", 1))
     acc = _parse_url(line)
     if acc:

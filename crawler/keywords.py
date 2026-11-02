@@ -3,7 +3,7 @@ limited to the chosen period. No API: the logged-in browser uses the platform's 
 
 How complete the result is depends on each platform's search:
 - X: search operators since:/until: + "Latest" tab -> chronological, good coverage.
-- YouTube: search sorted by upload date (yt-dlp) -> chronological, good coverage.
+- YouTube: search sorted by upload date, with after:/before: -> chronological, good coverage.
 - Threads: "Recent" tab -> chronological, limited depth.
 - Facebook: "Recent posts" filter -> roughly chronological, unstable.
 - Instagram: hashtag page and keyword search show "top" posts only, not in date order.
@@ -124,6 +124,13 @@ class KeywordCrawler(BrowserCrawler):
 
         posts = self._scroll_collect(extract, older_needed=0, idle_limit=5, max_rounds=600, cap=opt.cap)
         return self._done(posts, opt, ("/login", "/i/flow/login"), f"query: {q}")
+
+    # ---------- YouTube ----------
+    def search_youtube(self, kw: str, opt: SearchOptions) -> Result:
+        q = youtube_query(kw, opt, self.start, self.end)
+        self._goto(f"https://www.youtube.com/results?search_query={quote(q)}&sp=CAI%253D")   # sort: upload date
+        posts = self._yt_collect("ytd-video-renderer a[href]", older_needed=4, cap=opt.cap, max_rounds=150)
+        return self._done(posts, opt, ("consent.youtube.com",), f"query: {q}")
 
     # ---------- Threads ----------
     def search_threads(self, kw: str, opt: SearchOptions) -> Result:

@@ -4,3 +4,6 @@ browser_profile/
 outputs/
 .setup_done
 .pytest_cache/
+*.migrated
+*.deleted
+*.tmp

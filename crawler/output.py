@@ -47,7 +47,7 @@ def write_outputs(path_xlsx: str, path_csv: str, links, statuses, meta: dict):
     wb = Workbook()
     ws = wb.active
     ws.title = "Post Links"
-    ws.append(["No", "Platform", "Unit", "Handle", f"Date ({tz_name})", f"Time ({tz_name})", "Post Link"])
+    ws.append(["No", "Platform", "Group", "Handle", f"Date ({tz_name})", f"Time ({tz_name})", "Post Link"])
     for i, r in enumerate(rows, 1):
         ws.append([i] + r)
         cell = ws.cell(row=i + 1, column=7)
@@ -56,7 +56,7 @@ def write_outputs(path_xlsx: str, path_csv: str, links, statuses, meta: dict):
     _autosize(ws, [6, 11, 34, 26, 16, 10, 70])
 
     ws2 = wb.create_sheet("Account Status")
-    ws2.append(["Platform", "Unit", "Handle", "Profile URL", "Status", "Links", "Notes"])
+    ws2.append(["Platform", "Group", "Handle", "Profile URL", "Status", "Links", "Notes"])
     for s in statuses:
         ws2.append([s["platform_label"], s.get("label", ""), s["handle"], s["url"],
                     STATUS_LABEL.get(s["status"], s["status"]), s["count"], s["note"]])
@@ -73,7 +73,7 @@ def write_outputs(path_xlsx: str, path_csv: str, links, statuses, meta: dict):
 
     with open(path_csv, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
-        w.writerow(["Platform", "Unit", "Handle", f"Date ({tz_name})", f"Time ({tz_name})", "Post Link"])
+        w.writerow(["Platform", "Group", "Handle", f"Date ({tz_name})", f"Time ({tz_name})", "Post Link"])
         w.writerows(rows)
 
 

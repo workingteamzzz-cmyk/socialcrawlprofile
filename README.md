@@ -17,7 +17,8 @@ no engagement data — just the post links with their dates.
   - Instagram & Threads: the `/p/…`, `/reel/…`, `/post/…` shortcode
   - X: the status ID (snowflake), plus X search `from:user since:… until:…` to narrow to the period
   - TikTok: the video/photo ID
-  - YouTube: read with `yt-dlp` (Videos, Shorts and Live tabs). No login needed.
+  - YouTube: video IDs carry no date, so each video's publish date is read from its page by the same browser
+    (Videos, Shorts and Live tabs). No login needed.
   - Facebook: read from the data the page loads while scrolling. The most fragile platform — best effort.
 - Scrolling stops on its own once it passes the start date; pinned (old) posts don't stop it early.
 
@@ -38,7 +39,7 @@ no engagement data — just the post links with their dates.
 | Page | What it does |
 | --- | --- |
 | **Collect** | Pick the period (presets or any dates, WIB/WITA/WIT), toggle platforms, start/stop, live progress |
-| **Accounts** | All accounts grouped by unit: search, filter, select/deselect per account or unit, **Add profiles** for any other account (any platform), remove added ones |
+| **Accounts** | Several **account lists** (per client, project or topic): switch, create or delete lists; accounts grouped by **group** (organisation, brand, person); search, filter, select per account or group; **Add profiles** (any platform, `URL | Group`, or two columns pasted from Excel); remove accounts |
 | **Post Links** | Every link found, filterable by platform/search, plus Excel/CSV download |
 | **Account Status** | Accounts that were not found, need login, errored, or had no posts in the period |
 | **Keyword Search** | Keywords (as many as you like, `#hashtags` too), period, platforms and advanced options; start/stop |
@@ -62,7 +63,7 @@ platform's search:
 | Platform | Search used | Coverage |
 | --- | --- | --- |
 | X | `keyword since:… until:…` on the *Latest* tab | **Full** — date-filtered, scrolls to the end of the period |
-| YouTube | Search sorted by upload date with `after:`/`before:` (yt-dlp, no login) | **Full** |
+| YouTube | Search sorted by upload date with `after:`/`before:` (no login needed) | **Full** |
 | Threads | Search, *Recent* tab | **Partial** — newest first, limited depth |
 | Facebook | Post search with the *Recent posts* filter | **Partial** — best effort, unstable |
 | Instagram | `#hashtag` page and keyword search page | **Top only** — Instagram shows popular posts, not every post |
@@ -86,25 +87,29 @@ Post Link), **Search Status** and **Info** (the options used), plus a `.csv`.
 Saved to `outputs/` after every account, and downloadable from the dashboard:
 
 - `post_links_<period>_<time>.xlsx`
-  - **Post Links**: No, Platform, Unit, Handle, Date, Time, Post Link (clickable)
+  - **Post Links**: No, Platform, Group, Handle, Date, Time, Post Link (clickable)
   - **Account Status**: per-account status (OK / Not found / Login required / Invalid username / Error) and link count
   - **Info**: period and creation time
 - a `.csv` with the same links.
 
-## Account base list
+## Account lists
 
-- `data/accounts.csv` is the base list: official accounts of 51 Ditjen SDA units on six platforms, with columns
-  Unit, Platform, Handle, URL, Status, Source, Notes. It was checked through web search in November 2026:
+- Each list is a CSV file in `data/lists/` with columns Group, Platform, Handle, URL, Status, Source, Notes.
+  Create, fill and delete lists in the dashboard, or edit the CSV in Excel (save as CSV UTF-8) and reload the page.
+  Deleted lists are kept as `*.csv.deleted` backups.
+- Bundled example: **Ditjen SDA** — official accounts of 51 Ditjen SDA units on six platforms, checked through web
+  search in November 2026:
 
   | Status | Meaning |
   | --- | --- |
-  | **Verified** | The profile itself, or an official balai site/channel linking it, appeared in search results |
-  | **Likely** | Strong but indirect evidence (e.g. linked from the balai's YouTube channel), or the account looks inactive |
-  | **Unverified** | Handle from the original list with a valid format, not seen in search. Still collected — check **Account Status** after a run and remove it if "Not found" |
-  | **Not found** | The original handle cannot exist on that platform and the real account wasn't found. Kept in the CSV for reference; not collected |
+  | **Verified** | The profile itself, or an official site/channel linking it, appeared in search results |
+  | **Likely** | Strong but indirect evidence (e.g. linked from the unit's YouTube channel), or the account looks inactive |
+  | **Unverified** | Handle with a valid format, not seen in search. Still collected — check **Account Status** after a run and remove it if "Not found" |
+  | **Not found** | The handle cannot exist on that platform and the real account wasn't found. Kept in the CSV for reference; not collected |
+  | **Added** | Added by you from the dashboard |
 
-- Profiles added from the dashboard go to `data/custom_accounts.csv`.
-- You can edit either CSV in Excel (save as CSV UTF-8). The dashboard picks up changes on reload.
+- Lists from earlier versions (`data/accounts.csv`, `data/custom_accounts.csv`) are moved into `data/lists/Ditjen SDA.csv`
+  automatically on first start.
 
 ## Limitations
 
@@ -121,11 +126,10 @@ Saved to `outputs/` after every account, and downloadable from the dashboard:
 | `crawler/accounts.py` | Parses profile URLs, detects the platform, validates usernames |
 | `crawler/idtime.py` | Decodes post dates from post IDs (IG/Threads/X/TikTok) |
 | `crawler/browser.py` | Opens profiles in the browser, scrolls and collects links per platform |
-| `crawler/youtube.py` | YouTube via yt-dlp (channels and search) |
 | `crawler/keywords.py` | Keyword search per platform + query options |
-| `crawler/store.py` | Base + custom account lists |
+| `crawler/store.py` | Account lists (`data/lists/*.csv`) |
 | `crawler/job.py` | Background login/collection jobs, saving results |
 | `crawler/output.py` | Excel/CSV writer |
 | `crawler/server.py`, `crawler/static/index.html` | Local dashboard (reachable only from this computer) |
-| `data/accounts.csv` | Base account list with verification status |
+| `data/lists/` | Account lists; `Ditjen SDA.csv` is the bundled example |
 | `tests/` | Unit tests and end-to-end flow tests with fake platform pages (`python -m pytest tests`) |

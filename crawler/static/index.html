@@ -216,6 +216,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);cursor:po
 .modal .card{width:min(600px,100%);max-height:92vh;overflow:auto;box-shadow:0 20px 50px rgba(0,0,0,.18)}
 .modal textarea{height:150px;font-family:ui-monospace,Consolas,monospace;font-size:12.5px;resize:vertical}
 .errs{margin:10px 0 0;padding-left:18px;color:var(--bad);font-size:12.5px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 .toast{position:fixed;bottom:22px;left:50%;transform:translate(-50%,16px);background:#111827;color:#fff;padding:10px 16px;border-radius:10px;font-weight:600;font-size:13px;opacity:0;transition:.25s;pointer-events:none;z-index:60}
 .toast.show{opacity:1;transform:translate(-50%,0)}
 .exports a{display:flex;align-items:center;gap:12px;padding:10px 0;color:var(--text)}
@@ -269,7 +270,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);cursor:po
 
 <div class="app">
   <aside class="sidebar">
-    <div class="ws"><div class="avatar">LC</div><div><b>Link Collector</b><small>Ditjen SDA accounts</small></div></div>
+    <div class="ws"><div class="avatar">LC</div><div><b>Link Collector</b><small id="wsList">Social media post links</small></div></div>
     <nav class="nav" id="nav">
       <div class="sep" style="padding-top:6px">Profiles</div>
       <button class="on" data-p="collect"><svg class="i"><use href="#i-play"/></svg>Collect</button>
@@ -317,7 +318,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);cursor:po
             <div class="card-bd">
               <div class="stats">
                 <div class="stat"><b id="sAcc">0</b><small>accounts</small></div>
-                <div class="stat"><b id="sUnits">0</b><small>units</small></div>
+                <div class="stat"><b id="sUnits">0</b><small>groups</small></div>
                 <div class="stat"><b id="sDays">0</b><small>days</small></div>
               </div>
               <button class="btn primary lg" id="btnStart"><svg class="i"><use href="#i-play"/></svg>Start collecting</button>
@@ -328,7 +329,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);cursor:po
                 <div class="meta"><span id="progText">0 / 0 accounts</span><span id="progLinks">0 links</span></div>
                 <div class="now" id="progNow">Preparing…</div>
               </div>
-              <p class="hint">Change which accounts are included on the <a href="#" data-go="accounts">Accounts</a> page.</p>
+              <p class="hint">Account list: <b id="runList">—</b>. Change the list or which accounts are included on the <a href="#" data-go="accounts">Accounts</a> page.</p>
             </div></div>
           <div class="card"><div class="card-hd"><h3>Before the first run</h3></div>
             <div class="card-bd"><ol class="steps">
@@ -343,12 +344,18 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);cursor:po
     <!-- ACCOUNTS -->
     <section class="page" id="p-accounts">
       <div class="pagehead">
-        <div><h1>Accounts</h1><p>Pick the accounts to collect from, or add any other profile.</p></div>
-        <div class="actions"><button class="btn primary" id="btnAdd"><svg class="i"><use href="#i-plus"/></svg>Add profiles</button></div>
+        <div><h1>Accounts</h1><p>Keep separate account lists (per client, project or topic). Pick the accounts to collect from.</p></div>
+        <div class="actions">
+          <label for="listSel" class="sr">Account list</label>
+          <select class="select" id="listSel" style="min-width:200px;font-weight:600"></select>
+          <button class="btn" id="btnNewList"><svg class="i"><use href="#i-plus"/></svg>New list</button>
+          <button class="btn danger" id="btnDelList" title="Delete this list">Delete list</button>
+          <button class="btn primary" id="btnAdd"><svg class="i"><use href="#i-plus"/></svg>Add profiles</button>
+        </div>
       </div>
       <div class="card">
         <div class="toolbar">
-          <input class="search" id="q" placeholder="Search unit or handle…" autocomplete="off">
+          <input class="search" id="q" placeholder="Search group or handle…" autocomplete="off">
           <select class="select" id="fPlat"><option value="">All platforms</option></select>
           <select class="select" id="fStatus"><option value="">All statuses</option><option>Verified</option><option>Likely</option><option>Unverified</option><option>Added</option></select>
         </div>
@@ -366,12 +373,12 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);cursor:po
         <div class="actions" id="downloads"></div></div>
       <div class="card">
         <div class="toolbar">
-          <input class="search" id="rq" placeholder="Search unit, handle or link…" autocomplete="off">
+          <input class="search" id="rq" placeholder="Search group, handle or link…" autocomplete="off">
           <select class="select" id="rPlat"><option value="">All platforms</option></select>
           <span class="tag gray" id="rCount">0 links</span>
         </div>
         <div class="tblwrap"><table class="tbl">
-          <thead><tr><th>Date</th><th>Time</th><th>Platform</th><th>Unit</th><th>Handle</th><th>Post link</th></tr></thead>
+          <thead><tr><th>Date</th><th>Time</th><th>Platform</th><th>Group</th><th>Handle</th><th>Post link</th></tr></thead>
           <tbody id="resBody"></tbody></table></div>
       </div>
     </section>
@@ -385,7 +392,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);cursor:po
           <span class="tag gray" id="sCount">0 accounts</span>
         </div>
         <div class="tblwrap"><table class="tbl">
-          <thead><tr><th>Platform</th><th>Unit</th><th>Handle</th><th>Status</th><th class="num">Links</th><th>Notes</th></tr></thead>
+          <thead><tr><th>Platform</th><th>Group</th><th>Handle</th><th>Status</th><th class="num">Links</th><th>Notes</th></tr></thead>
           <tbody id="stBody"></tbody></table></div>
       </div>
     </section>
@@ -499,13 +506,25 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);cursor:po
     <div class="card-hd"><h3 id="addTitle">Add profiles</h3><div class="tools"><button class="iconbtn" id="addClose" aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div></div>
     <div class="card-bd">
       <div class="field"><label for="addUrls">Profile URLs — one per line, any platform</label>
-        <textarea id="addUrls" placeholder="https://www.instagram.com/other_account&#10;https://x.com/other_account&#10;https://www.tiktok.com/@other_account | Unit name"></textarea></div>
-      <p class="hint" style="margin-top:6px">You can also write <code>URL | Unit name</code> per line. Saved in <code>data/custom_accounts.csv</code>; remove them any time.</p>
-      <div class="field" style="margin-top:12px"><label for="addUnit">Unit / group name (optional, applies to all lines)</label>
-        <input id="addUnit" list="unitList" placeholder="e.g. BBWS Citarum or Benchmark accounts"><datalist id="unitList"></datalist></div>
+        <textarea id="addUrls" placeholder="https://www.instagram.com/other_account&#10;https://x.com/other_account&#10;https://www.tiktok.com/@other_account | Group name"></textarea></div>
+      <p class="hint" style="margin-top:6px">Also accepted per line: <code>URL | Group</code>, or two columns (URL, Group) pasted from Excel. Added to the list <b id="addListName"></b> (<code>data/lists/</code>).</p>
+      <div class="field" style="margin-top:12px"><label for="addUnit">Group name (optional, for lines without one) — e.g. organisation, brand or person</label>
+        <input id="addUnit" list="unitList" placeholder="e.g. PLN, Competitor A, Ministry X"><datalist id="unitList"></datalist></div>
       <ul class="errs" id="addErrs"></ul>
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
         <button class="btn" id="addCancel">Cancel</button><button class="btn primary" id="addSave">Save & select</button>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="modal" id="listModal" role="dialog" aria-modal="true" aria-labelledby="listTitle">
+  <div class="card" style="width:min(440px,100%)">
+    <div class="card-hd"><h3 id="listTitle">New account list</h3><div class="tools"><button class="iconbtn" id="listClose" aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div></div>
+    <div class="card-bd">
+      <div class="field"><label for="listName">List name</label><input id="listName" placeholder="e.g. Client A, Banks, Ministries" maxlength="60"></div>
+      <ul class="errs" id="listErrs"></ul>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+        <button class="btn" id="listCancel">Cancel</button><button class="btn primary" id="listSave">Create list</button>
       </div>
     </div>
   </div>
@@ -536,8 +555,10 @@ const emptyBox = (txt, ic='i-info') => `<div class="empty">${icon(ic)}${txt}</di
 const shortHandle = a => a.platform === 'youtube' && /^UC/.test(a.handle) ? 'channel ' + a.handle.slice(0, 8) + '…' : (a.platform === 'facebook' && /^\d+$/.test(a.handle) ? 'page ' + a.handle : '@' + a.handle);
 
 let accounts = [];
-let selected = new Set(ls.get('selected', []));
-let firstLoad = ls.get('selected', null) === null;
+let listId = ls.get('list', '');
+let lists = [];
+let selected = new Set();
+let firstLoad = false;
 let platOn = new Set(ls.get('plats', PLATS.map(p => p.k)));
 let openUnits = new Set();
 let results = {links: [], statuses: [], period: null};
@@ -621,12 +642,12 @@ $('rPlat').innerHTML += PLATS.map(p => `<option value="${p.k}">${p.n}</option>`)
 function visibleAccounts(){
   const q = $('q').value.trim().toLowerCase(), st = $('fStatus').value, fp = $('fPlat').value;
   return accounts.filter(a => (!fp || a.platform === fp) && (!st || a.status === st) &&
-    (!q || (a.unit + ' ' + a.handle + ' ' + a.url).toLowerCase().includes(q)));
+    (!q || (a.group + ' ' + a.handle + ' ' + a.url).toLowerCase().includes(q)));
 }
 const runnable = () => accounts.filter(a => platOn.has(a.platform) && selected.has(a.id));
 function renderAccounts(){
   const vis = visibleAccounts(), groups = new Map();
-  vis.forEach(a => { if (!groups.has(a.unit)) groups.set(a.unit, []); groups.get(a.unit).push(a); });
+  vis.forEach(a => { if (!groups.has(a.group)) groups.set(a.group, []); groups.get(a.group).push(a); });
   $('visCount').textContent = vis.length; $('selCount').textContent = vis.filter(a => selected.has(a.id)).length;
   $('selTotal').textContent = selected.size; $('navAcc').textContent = accounts.length;
   if (!vis.length){ $('units').innerHTML = emptyBox('No accounts match the filters.', 'i-users'); return; }
@@ -647,20 +668,20 @@ function renderAccounts(){
           ${pi(a.platform, true)}
           <div class="h"><a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(shortHandle(a))}</a><small>${esc(PL[a.platform].n)}${a.note ? ' · ' + esc(a.note) : ''}</small></div>
           ${statusTag(a.status)}
-          ${a.source === 'custom' ? `<button class="iconbtn del" data-id="${a.id}" title="Remove this added profile">${icon('i-x', 'width:15px;height:15px')}</button>` : '<span></span>'}
+          <button class="iconbtn del" data-id="${a.id}" title="Remove from this list" aria-label="Remove ${esc(a.handle)}">${icon('i-x', 'width:15px;height:15px')}</button>
         </div>`).join('')}</div></div>`;
   }).join('');
   document.querySelectorAll('.ucb').forEach(cb => cb.indeterminate = cb.dataset.ind === '1');
 }
-function renderSummary(){ const r = runnable(); $('sAcc').textContent = r.length; $('sUnits').textContent = new Set(r.map(a => a.unit)).size; }
+function renderSummary(){ const r = runnable(); $('sAcc').textContent = r.length; $('sUnits').textContent = new Set(r.map(a => a.group)).size; }
 function renderAll(){ renderPlats(); renderAccounts(); renderSummary(); }
-const saveSel = () => ls.set('selected', [...selected]);
+const saveSel = () => ls.set('selected_' + listId, [...selected]);
 
 $('units').addEventListener('click', e => {
   const del = e.target.closest('.del'); if (del){ removeAccount(del.dataset.id); return; }
   const unitEl = e.target.closest('.unit'); if (!unitEl) return;
   const ucb = e.target.closest('.ucb');
-  if (ucb){ visibleAccounts().filter(a => a.unit === unitEl.dataset.unit).forEach(a => ucb.checked ? selected.add(a.id) : selected.delete(a.id)); saveSel(); renderAll(); return; }
+  if (ucb){ visibleAccounts().filter(a => a.group === unitEl.dataset.unit).forEach(a => ucb.checked ? selected.add(a.id) : selected.delete(a.id)); saveSel(); renderAll(); return; }
   const acb = e.target.closest('.acb');
   if (acb){ acb.checked ? selected.add(acb.dataset.id) : selected.delete(acb.dataset.id); saveSel(); renderAll(); return; }
   if (e.target.closest('.unit-hd')){ const u = unitEl.dataset.unit; openUnits.has(u) ? openUnits.delete(u) : openUnits.add(u); unitEl.classList.toggle('open'); }
@@ -669,20 +690,50 @@ $('units').addEventListener('click', e => {
 ['fStatus','fPlat'].forEach(id => $(id).addEventListener('change', renderAccounts));
 $('btnSelAll').onclick = () => { visibleAccounts().forEach(a => selected.add(a.id)); saveSel(); renderAll(); };
 $('btnSelNone').onclick = () => { visibleAccounts().forEach(a => selected.delete(a.id)); saveSel(); renderAll(); };
-$('btnExpand').onclick = () => { visibleAccounts().forEach(a => openUnits.add(a.unit)); renderAccounts(); };
+$('btnExpand').onclick = () => { visibleAccounts().forEach(a => openUnits.add(a.group)); renderAccounts(); };
 $('btnCollapse').onclick = () => { openUnits.clear(); renderAccounts(); };
 
-async function loadAccounts(){
-  accounts = (await api('/api/accounts')).accounts || [];
-  if (firstLoad){ accounts.forEach(a => selected.add(a.id)); firstLoad = false; saveSel(); }
-  const ids = new Set(accounts.map(a => a.id)); selected = new Set([...selected].filter(id => ids.has(id)));
-  $('unitList').innerHTML = [...new Set(accounts.map(a => a.unit))].sort().map(u => `<option value="${esc(u)}">`).join('');
-  renderAll();
+async function loadLists(){
+  lists = (await api('/api/lists')).lists || [];
+  if (!lists.some(l => l.id === listId)) listId = lists.length ? lists[0].id : '';
+  ls.set('list', listId);
+  $('listSel').innerHTML = lists.length ? lists.map(l => `<option value="${esc(l.id)}"${l.id === listId ? ' selected' : ''}>${esc(l.name)} (${l.count})</option>`).join('')
+    : '<option value="">No lists yet</option>';
+  $('btnDelList').disabled = $('btnAdd').disabled = !listId;
+  $('wsList').textContent = listId ? 'List: ' + listId : 'Social media post links';
+  $('runList').textContent = listId || 'none — create one on the Accounts page';
+  $('addListName').textContent = listId;
 }
+async function loadAccounts(){
+  accounts = listId ? ((await api('/api/accounts?list=' + encodeURIComponent(listId))).accounts || []) : [];
+  const saved = ls.get('selected_' + listId, null);
+  selected = new Set(saved || []);
+  if (saved === null){ accounts.forEach(a => selected.add(a.id)); saveSel(); }
+  const ids = new Set(accounts.map(a => a.id)); selected = new Set([...selected].filter(id => ids.has(id)));
+  $('unitList').innerHTML = [...new Set(accounts.map(a => a.group))].sort().map(u => `<option value="${esc(u)}">`).join('');
+  renderAll();
+  if (!listId) $('units').innerHTML = emptyBox('No account list yet. Click <b>New list</b> to create one, then <b>Add profiles</b>.', 'i-users');
+}
+$('listSel').onchange = async () => { listId = $('listSel').value; ls.set('list', listId); openUnits.clear(); await loadLists(); await loadAccounts(); };
+const listModal = $('listModal');
+const closeList = () => listModal.classList.remove('show');
+$('btnNewList').onclick = () => { $('listErrs').innerHTML = ''; $('listName').value = ''; listModal.classList.add('show'); setTimeout(() => $('listName').focus(), 50); };
+$('listClose').onclick = closeList; $('listCancel').onclick = closeList;
+listModal.addEventListener('click', e => { if (e.target === listModal) closeList(); });
+$('listName').addEventListener('keydown', e => { if (e.key === 'Enter') $('listSave').click(); });
+$('listSave').onclick = async () => {
+  const r = await api('/api/lists/create', {name: $('listName').value});
+  if (r.error){ $('listErrs').innerHTML = `<li>${esc(r.error)}</li>`; return; }
+  listId = r.id; ls.set('list', listId); closeList(); await loadLists(); await loadAccounts(); toast('List created — now add profiles'); openAdd();
+};
+$('btnDelList').onclick = async () => {
+  if (!listId || !confirm(`Delete the list "${listId}"? (A backup copy stays in data/lists.)`)) return;
+  await api('/api/lists/delete', {id: listId}); ls.set('selected_' + listId, null); listId = ''; await loadLists(); await loadAccounts(); toast('List deleted');
+};
 async function removeAccount(id){
   const a = accounts.find(x => x.id === id);
   if (!a || !confirm(`Remove ${shortHandle(a)} (${PL[a.platform].n}) from the list?`)) return;
-  await api('/api/accounts/remove', {ids: [id]}); selected.delete(id); saveSel(); await loadAccounts(); toast('Profile removed');
+  await api('/api/accounts/remove', {list: listId, ids: [id]}); selected.delete(id); saveSel(); await loadLists(); await loadAccounts(); toast('Profile removed');
 }
 
 /* ---------- add modal ---------- */
@@ -691,15 +742,15 @@ const openAdd = () => { $('addErrs').innerHTML = ''; modal.classList.add('show')
 const closeAdd = () => modal.classList.remove('show');
 $('btnAdd').onclick = openAdd; $('addClose').onclick = closeAdd; $('addCancel').onclick = closeAdd;
 modal.addEventListener('click', e => { if (e.target === modal) closeAdd(); });
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeAdd(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape'){ closeAdd(); closeList(); } });
 $('addSave').onclick = async () => {
   const text = $('addUrls').value; if (!text.trim()){ $('addUrls').focus(); return; }
-  const r = await api('/api/accounts/add', {text, unit: $('addUnit').value});
+  const r = await api('/api/accounts/add', {list: listId, text, group: $('addUnit').value});
   $('addErrs').innerHTML = (r.errors || []).map(e => `<li>${esc(e)}</li>`).join('');
   if (r.added && r.added.length){
-    await loadAccounts();
+    await loadLists(); await loadAccounts();
     const added = new Set(r.added.map(u => u.toLowerCase()));
-    accounts.filter(a => added.has(a.url.toLowerCase())).forEach(a => { selected.add(a.id); platOn.add(a.platform); openUnits.add(a.unit); });
+    accounts.filter(a => added.has(a.url.toLowerCase())).forEach(a => { selected.add(a.id); platOn.add(a.platform); openUnits.add(a.group); });
     ls.set('plats', [...platOn]); saveSel(); renderAll();
     toast(`${r.added.length} profile${r.added.length > 1 ? 's' : ''} added`);
     if (!(r.errors || []).length){ $('addUrls').value = ''; $('addUnit').value = ''; closeAdd(); }
@@ -712,7 +763,7 @@ $('btnStart').onclick = async () => {
   const ids = runnable().map(a => a.id);
   if (!ids.length){ alertMsg('No accounts selected on the active platforms.'); return; }
   if (!P1.start || !P1.end){ alertMsg('Choose a start and end date.'); return; }
-  const r = await api('/api/start', {ids, start: P1.start, end: P1.end, tz: P1.tz, platforms: [...platOn]});
+  const r = await api('/api/start', {list: listId, ids, start: P1.start, end: P1.end, tz: P1.tz, platforms: [...platOn]});
   if (r.error){ alertMsg(r.error); return; }
   alertMsg(''); $('log').textContent = ''; logCount = 0; toast('Collection started');
 };
@@ -730,18 +781,18 @@ function renderResults(){
   $('navRes').textContent = fmt(L.length);
   $('resPeriod').textContent = per ? `Period ${nice(per.start)} – ${nice(per.end)} (${per.tz})` : 'All post links found in the last collection.';
   const q = $('rq').value.trim().toLowerCase(), fp = $('rPlat').value;
-  const rows = L.filter(l => (!fp || l.platform === fp) && (!q || (l.unit + ' ' + l.handle + ' ' + l.url).toLowerCase().includes(q)))
+  const rows = L.filter(l => (!fp || l.platform === fp) && (!q || (l.group + ' ' + l.handle + ' ' + l.url).toLowerCase().includes(q)))
     .sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time));
   $('rCount').textContent = `${fmt(rows.length)} link${rows.length === 1 ? '' : 's'}`;
   $('resBody').innerHTML = rows.length ? rows.slice(0, 5000).map(l => `<tr><td>${esc(l.date)}</td><td>${esc(l.time)}</td>
-      <td>${pi(l.platform, true)}</td><td>${esc(l.unit)}</td><td>${esc(shortHandle(l))}</td>
+      <td>${pi(l.platform, true)}</td><td>${esc(l.group)}</td><td>${esc(shortHandle(l))}</td>
       <td class="url"><a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.url.replace(/^https?:\/\/(www\.)?/, ''))}</a></td></tr>`).join('')
     : `<tr><td colspan="6">${emptyBox(L.length ? 'Nothing matches the filters.' : (running ? 'Waiting for the first links…' : 'No links yet. Start a collection on the Collect page.'), 'i-link')}</td></tr>`;
 
   const A = results.statuses, sf = $('sFilter').value;
   const st = A.filter(a => sf === 'all' || (sf === 'zero' ? a.status === 'ok' && a.count === 0 : ['not_found','login_required','error','invalid','stopped'].includes(a.status)));
   $('sCount').textContent = `${st.length} account${st.length === 1 ? '' : 's'}`;
-  $('stBody').innerHTML = st.length ? st.map(a => `<tr><td>${pi(a.platform, true)}</td><td>${esc(a.unit)}</td>
+  $('stBody').innerHTML = st.length ? st.map(a => `<tr><td>${pi(a.platform, true)}</td><td>${esc(a.group)}</td>
       <td><a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(shortHandle(a))}</a></td>
       <td><span class="tag ${a.status === 'ok' ? 'ok' : a.status === 'login_required' ? 'unv' : 'bad'}">${a.status === 'ok' ? 'OK' : esc(ISSUE[a.status] || a.status)}</span></td>
       <td class="num">${a.count}</td><td>${esc(a.note)}</td></tr>`).join('')
@@ -900,7 +951,7 @@ async function poll(){
 }
 
 go(document.getElementById('p-' + ls.get('page', 'collect')) ? ls.get('page', 'collect') : 'collect');
-loadAccounts(); renderResults(); kwRender(); renderKw(); poll();
+loadLists().then(loadAccounts); renderResults(); kwRender(); renderKw(); poll();
 </script>
 </body>
 </html>

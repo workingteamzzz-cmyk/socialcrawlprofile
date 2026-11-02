@@ -20,5 +20,4 @@ if [ ! -f .setup_done ] || [ requirements.txt -nt .setup_done ]; then
 fi
 # Quick when already installed; retried on every start if an earlier download failed.
 python -m playwright install chromium >/dev/null 2>&1 || echo "Note: Chromium could not be downloaded - the app will use Google Chrome or Edge if installed."
-pip install -q --upgrade yt-dlp >/dev/null 2>&1 || true
 python run.py

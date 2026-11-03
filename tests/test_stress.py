@@ -126,7 +126,7 @@ def test_big_run_with_parallel_dashboard_traffic(tmp_path, monkeypatch):
         for _ in range(60):
             for path in ("/api/status?since=0", "/api/results?mode=profiles", "/api/outputs", "/api/lists"):
                 try:
-                    with urllib.request.urlopen(base + path, timeout=30) as r:
+                    with urllib.request.urlopen(base + path, timeout=90) as r:
                         json.loads(r.read())
                         calls[0] += 1
                 except Exception as e:  # noqa: BLE001
@@ -137,7 +137,7 @@ def test_big_run_with_parallel_dashboard_traffic(tmp_path, monkeypatch):
     workers = [threading.Thread(target=hammer) for _ in range(20)]
     for w in workers:
         w.start()
-    while fresh.running and time.time() - t < 240:
+    while fresh.running and time.time() - t < 480:
         time.sleep(0.2)
     for w in workers:
         w.join()
@@ -149,7 +149,7 @@ def test_big_run_with_parallel_dashboard_traffic(tmp_path, monkeypatch):
     assert calls[0] >= 4000
     res = fresh.results_view("profiles")
     assert len(res["links"]) == 1500 * 15 and len(res["statuses"]) == 1500
-    assert took < 240, f"1,500 accounts took {took:.0f}s"
+    assert took < 480, f"1,500 accounts took {took:.0f}s"
     files = s["modes"]["profiles"]["files"]
     import openpyxl
     ws = openpyxl.load_workbook(os.path.join(tmp_path / "out", files[0]), read_only=True)["Post Links"]

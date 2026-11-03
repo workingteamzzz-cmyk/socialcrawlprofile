@@ -12,7 +12,7 @@ from datetime import datetime
 from .accounts import PLATFORM_LABEL, parse_line
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-LISTS_DIR = os.path.join(ROOT, "data", "lists")
+from .paths import LISTS_DIR  # noqa: E402  (in Documents/Post Link Collector/lists — survives app updates)
 FIELDS = ["Group", "Platform", "Handle", "URL", "Status", "Source", "Notes"]
 # Files from earlier versions, migrated once into data/lists/
 LEGACY_BASE = os.path.join(ROOT, "data", "accounts.csv")

@@ -14,6 +14,7 @@ from urllib.parse import quote, urlparse
 
 from .browser import BROWSER_CLOSED, BrowserCrawler, Result, Stopped, _parse_iso
 from .media import is_media
+from .textmatch import verdict
 
 DETAIL_LEVELS = ("links", "basic", "full")
 SOURCES = ("feed", "news_tab", "all_tab")
@@ -341,6 +342,8 @@ class NewsCrawler(BrowserCrawler):
                     continue
                 if item["link"] in seen_links or _key(item["link"]) in found:
                     continue
+                if opt.exclude and verdict(item["title"], "", opt.exclude, False) == "excluded":
+                    continue                                   # Google ignored the -word for this one
                 seen_links.add(item["link"])
                 fresh.append({"url": item["link"], "google_url": item["link"], "title": item["title"], "media": item["source"],
                               "published": dt.astimezone(self.tz).strftime("%Y-%m-%d") if dt else "",
@@ -446,7 +449,7 @@ class NewsCrawler(BrowserCrawler):
         return Result(status, list(found.values()), note)
 
     def _search_pages(self, q: str, opt: NewsOptions, found: dict, tab: str = "news_tab") -> Result:
-        pages = cards = outside_period = junk = 0
+        pages = cards = outside_period = junk = excluded = 0
         snapshot = ""
         start_count = len(found)
         while pages < (60 if tab == "all_tab" else 40):     # until Google's last page
@@ -472,6 +475,9 @@ class NewsCrawler(BrowserCrawler):
                     junk += 1                                 # not an article from a news medium
                     continue
                 lines = [ln for ln in item.get("lines", []) if ln != item["title"]]
+                if opt.exclude and verdict(item["title"] + " " + " ".join(lines), "", opt.exclude, False) == "excluded":
+                    excluded += 1                             # Google ignored the -word for this one
+                    continue
                 date_txt = next((ln for ln in reversed(lines) if parse_news_date(ln, datetime.now(self.tz))), "")
                 dt = parse_news_date(date_txt, datetime.now(self.tz)) if date_txt else None
                 if dt and not self._in_period(dt, date_txt):
@@ -502,6 +508,8 @@ class NewsCrawler(BrowserCrawler):
             note += f"; {outside_period} outside the period dropped"
         if junk:
             note += f"; {junk} non-media results skipped"
+        if excluded:
+            note += f"; {excluded} with excluded words dropped"
         if len(found) == start_count and ("/sorry/" in self.page.url):
             return _with_cards(Result("error", [], "Google captcha"), cards)
         if not cards:

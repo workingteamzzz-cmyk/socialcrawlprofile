@@ -49,6 +49,15 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/status":
             since = int(parse_qs(u.query).get("since", ["0"])[0] or 0)
             return self._json(JOB.state(since))
+        if u.path == "/api/logins":
+            from .paths import LISTS_DIR, LOGINS_FILE, OUTPUT_DIR as OUT
+            info = {}
+            try:
+                with open(LOGINS_FILE, encoding="utf-8") as f:
+                    info = json.load(f)
+            except (OSError, ValueError):
+                pass
+            return self._json({**info, "lists_dir": LISTS_DIR, "outputs_dir": OUT})
         if u.path == "/api/lists":
             return self._json({"lists": store.lists()})
         if u.path == "/api/accounts":

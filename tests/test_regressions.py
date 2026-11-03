@@ -6,7 +6,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -233,3 +233,88 @@ def test_news_engine_review_fixes(tmp_path):
     finally:
         ctx.close()
         pw.stop()
+
+
+# ---------------- smart reading of results / logins kept across versions ----------------
+
+def test_textmatch_like_a_person():
+    from crawler.textmatch import verdict
+    assert verdict("Diskon token listrik #PromoAkhirTahun", "listrik", ["promo"], True) == "excluded"
+    assert verdict("PROMOSI token listrik", "listrik", ["promo"], True) == "excluded"
+    assert verdict("Jadwal #pemadamanlistrik hari ini", "pemadaman listrik", [], True) is None
+    assert verdict("Resep sambal enak", "listrik", [], True) == "off_topic"
+    assert verdict("Resep sambal enak", "listrik", [], False) is None
+    assert verdict("Info #PLNPeduli", "pln", [], True) is None
+    assert verdict("cairan pembersih", "air", [], True) == "off_topic"       # not a word that starts with "air"
+    assert verdict("", "listrik", ["promo"], True) is None                    # nothing readable: keep
+
+
+@pytest.mark.skipif(_browser_path() is None, reason="no local Chromium")
+def test_threads_search_drops_excluded_and_off_topic_posts(tmp_path):
+    from playwright.sync_api import sync_playwright
+
+    from crawler.browser import launch_context
+    from crawler.keywords import KeywordCrawler, SearchOptions
+    from tests.test_crawler import ig_code
+    d = datetime(2026, 10, 20, 5, tzinfo=UTC)
+    posts = [("u1", "Pemadaman listrik di Bekasi malam ini"), ("u2", "Token listrik murah #promo hari ini"),
+             ("u3", "Giveaway pulsa! listrik gratis"), ("u4", "Resep sambal matah"), ("u5", "Listrik padam lagi, PLN ke mana?")]
+    body = "<html><body>" + "".join(
+        f'<div data-pressable-container="true"><span>{u}</span><a href="/@{u}/post/{ig_code(d + timedelta(minutes=i))}">'
+        f'<time datetime="{(d + timedelta(minutes=i)).isoformat()}">1j</time></a><div>{txt}</div></div>'
+        for i, (u, txt) in enumerate(posts)) + "</body></html>"
+    os.environ["CRAWLER_BROWSER_PATH"] = _browser_path()
+    with sync_playwright() as pw:
+        ctx = launch_context(pw, str(tmp_path / "p"), headless=True)
+        ctx.route("**/*", lambda r: r.fulfill(status=200, content_type="text/html", body=body))
+        c = KeywordCrawler(ctx, lambda m: None, threading.Event(), datetime(2026, 10, 1, tzinfo=UTC), datetime(2026, 10, 31, tzinfo=UTC))
+        c._pause = lambda lo=0, hi=0: c.page.wait_for_timeout(100)
+        res = c.search_threads("listrik", SearchOptions(exclude=["promo", "giveaway"]))
+        assert sorted(p.author for p in res.posts) == ["u1", "u5"]
+        assert "2 with excluded words dropped" in res.note and "1 not mentioning the keyword dropped" in res.note
+        res = c.search_threads("listrik", SearchOptions(exclude=["promo"], must_mention=False))
+        assert sorted(p.author for p in res.posts) == ["u1", "u3", "u4", "u5"]
+        ctx.close()
+
+
+def test_logins_and_lists_survive_a_new_version(tmp_path, monkeypatch):
+    from crawler import paths
+    old = tmp_path / "Downloads" / "post-link-collector"
+    new = tmp_path / "Downloads" / "post-link-collector (1)"
+    for d in (old, new):
+        (d / "crawler").mkdir(parents=True)
+        (d / "run.py").write_text("")
+        (d / "data" / "lists").mkdir(parents=True)
+    (old / "browser_profile" / "Default").mkdir(parents=True)
+    (old / "browser_profile" / "Default" / "Cookies").write_text("cookie-db")
+    (old / "browser_profile" / "SingletonLock").write_text("x")
+    (old / "data" / "lists" / "Client A.csv").write_text("Group,Platform,Handle,URL\n")
+    (new / "data" / "lists" / "Ditjen SDA.csv").write_text("Group,Platform,Handle,URL\n")
+    home = tmp_path / "home"
+    monkeypatch.setattr(paths, "ROOT", str(new))
+    monkeypatch.setattr(paths, "BUNDLED_LISTS", str(new / "data" / "lists"))
+    monkeypatch.setattr(paths, "APP_DATA", str(home / "app"))
+    monkeypatch.setattr(paths, "PROFILE_DIR", str(home / "app" / "browser_profile"))
+    monkeypatch.setattr(paths, "LISTS_DIR", str(home / "docs" / "lists"))
+    monkeypatch.setattr(paths, "OUTPUT_DIR", str(home / "docs" / "outputs"))
+    logs = []
+    paths.migrate(logs.append)
+    assert (home / "app" / "browser_profile" / "Default" / "Cookies").read_text() == "cookie-db"
+    assert not (home / "app" / "browser_profile" / "SingletonLock").exists()
+    assert sorted(os.listdir(home / "docs" / "lists")) == ["Client A.csv", "Ditjen SDA.csv"]
+    assert any("do not need to log in again" in m for m in logs)
+    os.remove(home / "docs" / "lists" / "Client A.csv")                     # the user deletes a list ...
+    paths.migrate(logs.append)
+    assert sorted(os.listdir(home / "docs" / "lists")) == ["Ditjen SDA.csv"]  # ... and it does not come back
+
+
+def test_login_status_from_cookies():
+    from crawler.browser import login_status
+
+    class Ctx:
+        def cookies(self):
+            return [{"name": "sessionid", "domain": ".instagram.com", "value": "x", "expires": time.time() + 999},
+                    {"name": "auth_token", "domain": ".x.com", "value": "y", "expires": -1},
+                    {"name": "sessionid", "domain": ".tiktok.com", "value": "z", "expires": time.time() - 10},   # expired
+                    {"name": "c_user", "domain": ".facebook.com", "value": ""}]                                  # empty
+    assert login_status(Ctx()) == {"instagram": True, "x": True, "tiktok": False, "threads": False, "facebook": False}

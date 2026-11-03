@@ -145,7 +145,7 @@ def test_keyword_flow(app):
     assert call("/api/keywords/start", {"keywords": [], "start": "2026-10-01", "end": "2026-10-31",
                                         "platforms": ["x"]})["error"]
     r = call("/api/keywords/start", {"keywords": ["listrik", "Listrik", "PLN"], "start": "2026-10-01", "end": "2026-10-31",
-                                     "tz": "WIB", "platforms": ["x", "tiktok"], "options": {"cap": 2, "x_lang": "id"}})
+                                     "tz": "WIB", "platforms": ["x", "tiktok"], "options": {"cap": 2, "x_lang": "id", "must_mention": False}})
     assert r["ok"], r
     s = wait_done()
     assert s["error"] == "", s

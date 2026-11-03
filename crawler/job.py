@@ -14,13 +14,12 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 from .accounts import PLATFORM_LABEL, PLATFORMS, parse_accounts
-from .browser import BROWSER_CLOSED, LOGIN_PAGES, BrowserCrawler, Result, Stopped, launch_context
+from .browser import BROWSER_CLOSED, LOGIN_PAGES, BrowserCrawler, Result, Stopped, launch_context, login_status
 from .details import read_details
 from .output import write_keyword_outputs, write_news_outputs, write_outputs
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PROFILE_DIR = os.path.join(ROOT, "browser_profile")
-OUTPUT_DIR = os.environ.get("OUTPUT_DIR") or os.path.join(ROOT, "outputs")
+from .paths import LOGINS_FILE, OUTPUT_DIR, PROFILE_DIR  # noqa: E402  (outside the app folder — survive updates)
 
 TIMEZONES = {"WIB": 7, "WITA": 8, "WIT": 9, "UTC": 0}
 MODES = ("profiles", "keywords", "news")
@@ -196,6 +195,22 @@ class Job:
         self.log("❌ " + self.error)
         return []
 
+    def _check_logins(self, ctx, platforms) -> None:
+        """Remember which platforms are signed in (shown in the dashboard) and warn about the ones this run needs."""
+        st = login_status(ctx)
+        if not st:
+            return
+        try:
+            import json
+            with open(LOGINS_FILE, "w", encoding="utf-8") as f:
+                json.dump({"checked": datetime.now().strftime("%Y-%m-%d %H:%M"), "platforms": st}, f)
+        except OSError:
+            pass
+        missing = [PLATFORM_LABEL[p] for p in platforms if p in st and not st[p]]
+        if missing:
+            self.log(f"⚠ Not signed in to: {', '.join(missing)} — results there may be empty or limited. "
+                     "Use 'Log in to platforms' once.")
+
     def _check_or_raise(self):
         if self.stop_flag.is_set():
             raise Stopped()
@@ -230,9 +245,22 @@ class Job:
                 try:
                     if not ctx.pages:
                         break
+                    st = login_status(ctx)            # keep the latest status while the user signs in
                     ctx.pages[0].wait_for_timeout(1000)
                 except Exception:  # noqa: BLE001
                     break
+            try:
+                st = login_status(ctx) or locals().get("st") or {}
+            except Exception:  # noqa: BLE001
+                st = locals().get("st") or {}
+            if st:
+                try:
+                    import json
+                    with open(LOGINS_FILE, "w", encoding="utf-8") as f:
+                        json.dump({"checked": datetime.now().strftime("%Y-%m-%d %H:%M"), "platforms": st}, f)
+                    self.log("Signed in: " + ", ".join(f"{PLATFORM_LABEL[p]} {'✓' if ok else '✗'}" for p, ok in st.items()))
+                except OSError:
+                    pass
             try:
                 ctx.close()
             except Exception:  # noqa: BLE001
@@ -307,6 +335,7 @@ class Job:
                 ctx = launch_context(pw, PROFILE_DIR)
                 crawler = BrowserCrawler(ctx, self.log, self.stop_flag, start_utc, end_utc)
                 crawler.debug_dir = os.path.join(OUTPUT_DIR, "debug")
+                self._check_logins(ctx, {a.platform for a in accounts if a.platform != "youtube"})
             for i, acc in enumerate(accounts):
                 if self.stop_flag.is_set():
                     stopped = True
@@ -435,6 +464,7 @@ class Job:
             ctx = launch_context(pw, PROFILE_DIR)
             crawler = KeywordCrawler(ctx, self.log, self.stop_flag, start_utc, end_utc)
             crawler.debug_dir = os.path.join(OUTPUT_DIR, "debug")
+            self._check_logins(ctx, [p for p in plats if p != "youtube"])
             for i, (kw, plat) in enumerate(tasks):
                 if self.stop_flag.is_set():
                     stopped = True
@@ -449,6 +479,14 @@ class Job:
                         if self._fill_details(crawler, plat, fresh, label):
                             stopped = True
                             res.note = (res.note + "; " if res.note else "") + "stopped while reading details"
+                        # now the full caption is known: read it too (the list view may have shown no text)
+                        from .textmatch import verdict
+                        before = len(res.posts)
+                        res.posts = [p for p in res.posts if verdict(((p.details or {}).get("caption") or ""), kw, opt.exclude,
+                                                                      opt.must_mention, opt.exact) is None]
+                        if before > len(res.posts):
+                            res.note = (res.note + "; " if res.note else "") + \
+                                f"{before - len(res.posts)} dropped after reading the caption (excluded word / off-topic)"
                 except Stopped as e:
                     stopped = True
                     part = crawler._cap_trim(e.posts, opt.cap) if crawler else []

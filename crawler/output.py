@@ -152,7 +152,8 @@ def write_keyword_outputs(path_xlsx: str, path_csv: str, rows, statuses, meta: d
     for k, v in [("Period", f"{meta['start']} to {meta['end']} ({tz_name})"),
                  ("Keywords", ", ".join(meta["keywords"])),
                  ("Exact phrase", "yes" if opt.exact else "no"),
-                 ("Excluded words", ", ".join(opt.exclude) or "-"),
+                 ("Excluded words", (", ".join(opt.exclude) + " — every result's text checked") if opt.exclude else "-"),
+                 ("Only posts mentioning the keyword", "yes" if opt.must_mention else "no"),
                  ("X language", opt.x_lang or "any"),
                  ("X replies / reposts", f"{'excluded' if opt.x_no_replies else 'included'} / "
                                          f"{'excluded' if opt.x_no_reposts else 'included'}"),

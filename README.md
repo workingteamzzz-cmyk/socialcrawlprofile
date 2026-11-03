@@ -39,15 +39,22 @@ What you get is chosen per run:
 4. The first start installs the packages and a Chromium browser (a few minutes). Then http://127.0.0.1:8770 opens.
    Keep the black server window open while you use the app.
 
-## Updating to a new version
+## Where your data lives (and updating)
 
-1. Close the app (close the black server window).
-2. Download and extract the new ZIP into a **new** folder.
-3. Copy these folders from the old folder into the new one, so nothing is lost:
-   - `data/` — your account lists
-   - `browser_profile/` — your platform logins (otherwise log in again)
-   - `outputs/` — earlier Excel/CSV results
-4. Start the app from the new folder as usual.
+The app keeps your data **outside the app folder**, so a new version keeps everything:
+
+| What | Where |
+| --- | --- |
+| Account lists (CSV, open in Excel) | `Documents/Post Link Collector/lists` |
+| Results (Excel/CSV) | `Documents/Post Link Collector/outputs` |
+| Platform logins (browser profile) | Windows `%LOCALAPPDATA%\PostLinkCollector`, Mac `~/Library/Application Support/PostLinkCollector` |
+
+To update: close the app, extract the new ZIP anywhere and start it. On its first start it copies logins and lists from
+an older copy of the app found next to it (e.g. `post-link-collector` next to `post-link-collector (1)`), once.
+
+Logins are reopened with the same browser every time (Chrome, Edge or Chromium encrypt saved logins differently, so
+switching would log you out). The sidebar shows which platforms are signed in (✓/✗), checked at every login and run.
+A platform can still sign you out on its own after a while — then use *Log in to platforms* again for that one.
 
 ## Using the dashboard
 
@@ -65,7 +72,7 @@ What you get is chosen per run:
 | **Activity Log** | Live log of the current job |
 
 First time: click **Log in to platforms** (bottom left), sign in on each tab (Instagram, X, TikTok, Threads, Facebook),
-then close that browser window. Sessions are stored in `browser_profile/` on your computer (never committed).
+then close that browser window. Sessions are stored in your user folder (see above), never in the app folder.
 Use a regular account rather than a main office account.
 
 During a run, keep the browser window the app opens (it can stay in the background) and solve any captcha there
@@ -89,7 +96,10 @@ platform's search:
 Advanced options:
 - **Max links per keyword per platform** (50 / 100 / 300 / 1,000 / no limit) — keeps runs short and your accounts safe.
 - **Exact phrase** — multi-word keywords searched as one phrase (X, YouTube, Facebook).
-- **Exclude words** (X, YouTube).
+- **Exclude words** — sent to X/YouTube as `-word`, and on every platform each result's visible text is read: a post
+  with an excluded word (also as a hashtag or a longer form, e.g. `promo` → `#PromoHemat`, `promosi`) is dropped.
+- **Only posts that mention the keyword** (on): drops results whose text does not mention the keyword at all —
+  searches like Threads or TikTok add loosely related posts. With caption & engagement on, the full caption is read too.
 - **X**: language (any / Indonesian / English), exclude replies, exclude reposts. A live preview shows the exact X query.
 - **Instagram**: use the hashtag page, the keyword search page, or both.
 

@@ -46,6 +46,7 @@ class Post:
     time_utc: datetime | None
     author: str = ""
     details: dict | None = None      # caption / engagement, when requested
+    text: str = ""                   # what the result shows (post text, title) — used to drop excluded/off-topic posts
 
 
 @dataclass
@@ -89,15 +90,56 @@ def launch_context(pw, profile_dir: str, headless: bool = False):
         return pw.chromium.launch_persistent_context(executable_path=exe, **opts)
     errors = []
     # Prefer the installed Google Chrome / Edge (less often blocked), fall back to Playwright's Chromium.
-    for channel in ("chrome", "msedge", None):
+    # Always reopen a profile with the browser that created it: Chrome, Edge and Chromium encrypt saved logins
+    # differently, so switching between them makes the platforms ask for a login again.
+    marker = os.path.join(profile_dir, ".collector_browser")
+    try:
+        with open(marker, encoding="utf-8") as f:
+            used = f.read().strip()
+    except OSError:
+        used = ""
+    order = ["chrome", "msedge", "chromium"]
+    if used in order:
+        order.remove(used)
+        order.insert(0, used)
+    for channel in order:
         try:
-            if channel:
-                return pw.chromium.launch_persistent_context(channel=channel, **opts)
-            return pw.chromium.launch_persistent_context(**opts)
+            if channel != "chromium":
+                ctx = pw.chromium.launch_persistent_context(channel=channel, **opts)
+            else:
+                ctx = pw.chromium.launch_persistent_context(**opts)
         except Exception as e:  # noqa: BLE001
-            errors.append(f"{channel or 'chromium'}: {str(e).splitlines()[0]}")
+            errors.append(f"{channel}: {str(e).splitlines()[0]}")
+            continue
+        if channel != used:
+            try:
+                with open(marker, "w", encoding="utf-8") as f:
+                    f.write(channel)
+            except OSError:
+                pass
+        return ctx
     raise RuntimeError("Could not open a browser. Install Google Chrome (or Microsoft Edge), or start the app again "
                        "with internet access so it can download Chromium. Details: " + " | ".join(errors))
+
+
+# Cookies that exist only while signed in.
+LOGIN_COOKIES = {"instagram": ("instagram.com", "sessionid"), "x": ("x.com", "auth_token"),
+                 "tiktok": ("tiktok.com", "sessionid"), "threads": ("threads.", "sessionid"),
+                 "facebook": ("facebook.com", "c_user")}
+
+
+def login_status(ctx) -> dict:
+    """{platform: True/False} from the browser profile's cookies (YouTube needs no login)."""
+    try:
+        cookies = ctx.cookies()
+    except Exception:  # noqa: BLE001
+        return {}
+    now = time.time()
+    out = {}
+    for plat, (domain, name) in LOGIN_COOKIES.items():
+        out[plat] = any(c.get("name") == name and domain in (c.get("domain") or "") and c.get("value")
+                        and (c.get("expires", -1) in (-1, None) or c.get("expires", 0) > now) for c in cookies)
+    return out
 
 
 class BrowserCrawler:
@@ -189,28 +231,32 @@ class BrowserCrawler:
             pass
 
     def _scroll_collect(self, extract: Callable[[], list[Post]], older_needed: int = 4,
-                        idle_limit: int = 5, max_rounds: int = 400, cap: int = 0) -> list[Post]:
+                        idle_limit: int = 5, max_rounds: int = 400, cap: int = 0, keep=None) -> list[Post]:
         """Scroll until enough posts older than the start date are seen (newest-first feeds),
         or nothing new loads. older_needed > 1 so pinned old posts at the top don't stop it early;
         older_needed=0 for feeds that are not in date order. cap>0 stops after that many in-range posts."""
         found: dict[str, Post] = {}
         try:
-            return self._scroll_loop(found, extract, older_needed, idle_limit, max_rounds, cap)
+            return self._scroll_loop(found, extract, older_needed, idle_limit, max_rounds, cap, keep)
         except Stopped as e:
             raise Stopped(list(found.values()) or e.posts) from None
 
-    def _scroll_loop(self, found, extract, older_needed, idle_limit, max_rounds, cap):
+    def _scroll_loop(self, found, extract, older_needed, idle_limit, max_rounds, cap, keep=None):
         idle = 0
         for _ in range(max_rounds):
             self._check_stop()
             before = len(found)
             for p in extract():
-                if p.url not in found or (found[p.url].time_utc is None and p.time_utc):
+                old = found.get(p.url)
+                if old is None or (old.time_utc is None and p.time_utc) or len(p.text) > len(old.text):
+                    if old is not None and p.time_utc is None:
+                        p.time_utc = old.time_utc
                     found[p.url] = p
             older = sum(1 for p in found.values() if p.time_utc and p.time_utc < self.start)
             if older_needed and older >= older_needed:
                 break
-            if cap and sum(1 for p in found.values() if p.time_utc and self.start <= p.time_utc <= self.end) >= cap:
+            if cap and sum(1 for p in found.values() if p.time_utc and self.start <= p.time_utc <= self.end
+                           and (keep is None or keep(p))) >= cap:      # count only posts that will be kept
                 break
             idle = idle + 1 if len(found) == before else 0
             if idle >= idle_limit:
@@ -383,27 +429,30 @@ class BrowserCrawler:
         fails = self.__dict__.get("_yt_fail", {})
         return {i: cache.get(i) or fails.pop(i, (None, "")) for i in ids}
 
-    def _yt_collect(self, selector: str, older_needed: int, cap: int = 0, max_rounds: int = 200) -> list[Post]:
+    def _yt_collect(self, selector: str, older_needed: int, cap: int = 0, max_rounds: int = 200, keep=None) -> list[Post]:
         rx = re.compile(r"(?:/watch\?v=|/shorts/)([A-Za-z0-9_-]{11})")
 
         def extract():
             try:
-                hrefs = self.page.eval_on_selector_all(selector, "els => els.map(e => e.getAttribute('href'))")
+                pairs = self.page.eval_on_selector_all(selector, """els => els.map(e => [e.getAttribute('href'),
+                    ((e.closest('ytd-video-renderer, ytd-rich-item-renderer, ytd-grid-video-renderer') || {}).innerText || '')])""")
             except Exception:  # noqa: BLE001
-                hrefs = []
-            if not hrefs:                       # layout changed: fall back to every link on the page
-                hrefs = self._hrefs()
-            order, kind = [], {}
-            for h in hrefs:
+                pairs = []
+            if not pairs:                       # layout changed: fall back to every link on the page
+                pairs = [[h, ""] for h in self._hrefs()]
+            order, kind, texts = [], {}, {}
+            for h, txt in pairs:
                 m = rx.search(h or "")
                 if m and m.group(1) not in kind:
                     order.append(m.group(1))
                     kind[m.group(1)] = "shorts" if "/shorts/" in h else "watch"
+                if m and txt and len(txt) > len(texts.get(m.group(1), "")):
+                    texts[m.group(1)] = txt[:2000]
             dates = self._yt_dates(order)
             return [Post(f"https://www.youtube.com/shorts/{v}" if kind[v] == "shorts" else f"https://www.youtube.com/watch?v={v}",
-                         dates[v][0], dates[v][1]) for v in order]
+                         dates[v][0], dates[v][1], text=texts.get(v, "")) for v in order]
 
-        return self._scroll_collect(extract, older_needed=older_needed, idle_limit=4, max_rounds=max_rounds, cap=cap)
+        return self._scroll_collect(extract, older_needed=older_needed, idle_limit=4, max_rounds=max_rounds, cap=cap, keep=keep)
 
     _YT_CHANNEL_JS = r"""() => {
       const m = (document.querySelector('meta[itemprop="identifier"]') || {}).content

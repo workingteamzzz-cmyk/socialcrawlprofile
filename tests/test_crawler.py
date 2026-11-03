@@ -160,8 +160,9 @@ def test_label_and_facebook_id_urls():
     assert y.url == "https://www.youtube.com/channel/UCk0AIb2JDyz8VSPkaNq0OWQ"
 
 
-def test_bundled_list_is_clean():
-    from crawler import store
+def test_bundled_list_is_clean(monkeypatch):
+    from crawler import paths, store
+    monkeypatch.setattr(store, "LISTS_DIR", paths.BUNDLED_LISTS)
     accs = store.load("Ditjen SDA")
     assert len(accs) > 250
     assert [a["url"] for a in accs if a["problem"]] == []
@@ -258,7 +259,7 @@ def test_keyword_search_with_fake_pages(tmp_path):
         ctx.route("**/*", route)
         c = KeywordCrawler(ctx, lambda m: None, threading.Event(), start, end)
         c._pause = lambda lo=0, hi=0: c.page.wait_for_timeout(250)
-        opt = SearchOptions()
+        opt = SearchOptions(must_mention=False)
         want = {d.date() for d in inr}
 
         res = c.search_x("listrik", opt)
@@ -270,7 +271,7 @@ def test_keyword_search_with_fake_pages(tmp_path):
         assert {p.time_utc.date() for p in res.posts} == want
         res = c.search_tiktok("listrik", opt)
         assert {p.time_utc.date() for p in res.posts} == want and len(res.posts) == 4
-        res = c.search_tiktok("listrik", SearchOptions(cap=2))
+        res = c.search_tiktok("listrik", SearchOptions(cap=2, must_mention=False))
         assert len(res.posts) == 2 and res.posts[0].time_utc == inr[0]
         ctx.close()
 
@@ -336,7 +337,7 @@ def test_youtube_channel_and_search_in_browser(tmp_path):
 
         k = KeywordCrawler(ctx, lambda m: None, threading.Event(), start, end)
         k._pause = lambda lo=0, hi=0: k.page.wait_for_timeout(200)
-        res = k.search_youtube("listrik", SearchOptions())
+        res = k.search_youtube("listrik", SearchOptions(must_mention=False))
         assert {p.time_utc.date() for p in res.posts} == {d.date() for d in vids[1:4]}
         assert {p.author for p in res.posts} == {"owner_01", "owner_02", "owner_03"}
         assert "after:2026-09-30 before:2026-11-01" in res.note

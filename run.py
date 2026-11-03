@@ -5,12 +5,15 @@ import threading
 import webbrowser
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from crawler import paths  # noqa: E402
 from crawler.server import serve  # noqa: E402
 
 PORT = int(os.environ.get("PORT", "8770"))
 
 if __name__ == "__main__":
     url = f"http://127.0.0.1:{PORT}"
+    paths.migrate()
+    print(f"Account lists and results: {os.path.dirname(paths.LISTS_DIR)}")
     print(f"App running at {url}  (keep this window open; close it to stop)")
     if "--no-browser" not in sys.argv:
         threading.Timer(1.5, lambda: webbrowser.open(url)).start()

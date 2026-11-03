@@ -19,6 +19,7 @@ from urllib.parse import quote
 
 from .browser import BrowserCrawler, Post, Result, Stopped
 from .idtime import instagram_shortcode_time, tiktok_id_time, x_status_time
+from .textmatch import verdict
 
 KEYWORD_PLATFORMS = ["x", "youtube", "threads", "instagram", "tiktok", "facebook"]
 
@@ -30,7 +31,8 @@ _RESERVED_X = {"i", "home", "search", "explore", "settings", "hashtag", "notific
 @dataclass
 class SearchOptions:
     exact: bool = False                 # wrap multi-word keywords in quotes (X, YouTube, Facebook)
-    exclude: list[str] = field(default_factory=list)   # words to exclude (X, YouTube)
+    exclude: list[str] = field(default_factory=list)   # words to exclude (all platforms: query + reading each result)
+    must_mention: bool = True           # drop results whose text does not mention the keyword at all
     x_lang: str = ""                    # "", "id", "en"
     x_no_replies: bool = True
     x_no_reposts: bool = True
@@ -58,6 +60,7 @@ class SearchOptions:
             ig_keyword=bool(d.get("ig_keyword", True)),
             cap=max(0, int(d.get("cap") or 0)),
             detail="full" if d.get("detail") == "full" else "links",
+            must_mention=bool(d.get("must_mention", True)),
         )
 
 
@@ -95,6 +98,10 @@ class KeywordCrawler(BrowserCrawler):
         inr = sorted(self._in_range(posts), key=lambda p: p.time_utc, reverse=True)
         return inr[:cap] if cap else inr
 
+    def _keep(self, opt):
+        kw = getattr(self, "_kw", "")
+        return lambda p: verdict(p.text, kw, opt.exclude, opt.must_mention, opt.exact) is None
+
     def _done(self, posts, opt, login_markers, note="") -> Result:
         if not posts:
             url = self.page.url.lower()
@@ -102,12 +109,29 @@ class KeywordCrawler(BrowserCrawler):
                 return Result("login_required", [], "Login required — use 'Log in to platforms'")
             return Result("ok", [], self._empty_note((note + "; " if note else "") + "search returned no posts",
                                                      "search_" + (self.page.url.split("//")[-1])[:50]))
-        kept = self._cap_trim(posts, opt.cap)
-        extra = f"{len(posts) - len(self._in_range(posts))} results outside the period dropped"
-        return Result("ok", kept, "; ".join(x for x in (note, extra) if x))
+        inr = self._in_range(posts)
+        kw = getattr(self, "_kw", "")
+        excluded = off = 0
+        good = []
+        for p in inr:                     # read each result like a person: skip excluded words and off-topic posts
+            v = verdict(p.text, kw, opt.exclude, opt.must_mention, opt.exact)
+            if v == "excluded":
+                excluded += 1
+            elif v == "off_topic":
+                off += 1
+            else:
+                good.append(p)
+        kept = self._cap_trim(good, opt.cap)
+        notes = [note, f"{len(posts) - len(inr)} results outside the period dropped"]
+        if excluded:
+            notes.append(f"{excluded} with excluded words dropped")
+        if off:
+            notes.append(f"{off} not mentioning the keyword dropped")
+        return Result("ok", kept, "; ".join(x for x in notes if x))
 
     # ---------- X ----------
     def search_x(self, kw: str, opt: SearchOptions) -> Result:
+        self._kw = kw
         since = self.start.strftime("%Y-%m-%d")
         until = (self.end + timedelta(days=1)).strftime("%Y-%m-%d")
         q = x_query(kw, opt, since, until)
@@ -117,30 +141,35 @@ class KeywordCrawler(BrowserCrawler):
         def extract():
             # Only each tweet's own permalink (the link wrapping its timestamp), not quoted tweets.
             try:
-                hrefs = self.page.eval_on_selector_all(
-                    "article a[href*='/status/']", "els => els.filter(e => e.querySelector('time')).map(e => e.getAttribute('href'))")
+                rows = self.page.evaluate("""() => [...document.querySelectorAll('article')].map(a => {
+                    const l = [...a.querySelectorAll("a[href*='/status/']")].find(e => e.querySelector('time'));
+                    const t = a.querySelector('[data-testid="tweetText"]');
+                    return l ? [l.getAttribute('href'), t ? t.innerText : a.innerText] : null; }).filter(Boolean)""")
             except Exception:  # noqa: BLE001
-                hrefs = []
+                rows = []
             out = []
-            for h in hrefs:
+            for h, txt in rows:
                 m = rx.match(h or "")
                 if m and m.group(1).lower() not in _RESERVED_X:
-                    out.append(Post(f"https://x.com/{m.group(1)}/status/{m.group(2)}", x_status_time(m.group(2)), m.group(1)))
+                    out.append(Post(f"https://x.com/{m.group(1)}/status/{m.group(2)}", x_status_time(m.group(2)), m.group(1),
+                                    text=txt or ""))
             return out
 
-        posts = self._scroll_collect(extract, older_needed=0, idle_limit=5, max_rounds=600, cap=opt.cap)
+        posts = self._scroll_collect(extract, older_needed=0, idle_limit=5, max_rounds=600, cap=opt.cap, keep=self._keep(opt))
         return self._done(posts, opt, ("/login", "/i/flow/login"), f"query: {q}")
 
     # ---------- YouTube ----------
     def search_youtube(self, kw: str, opt: SearchOptions) -> Result:
+        self._kw = kw
         q = youtube_query(kw, opt, self.start, self.end)
         self._goto(f"https://www.youtube.com/results?search_query={quote(q)}&sp=CAI%253D")   # sort: upload date
         # after:/before: narrow the results; the date sort may be ignored by YouTube, so don't stop on older videos
-        posts = self._yt_collect("ytd-video-renderer a[href]", older_needed=0, cap=opt.cap, max_rounds=60)
+        posts = self._yt_collect("ytd-video-renderer a[href]", older_needed=0, cap=opt.cap, max_rounds=60, keep=self._keep(opt))
         return self._done(posts, opt, ("consent.youtube.com",), f"query: {q}")
 
     # ---------- Threads ----------
     def search_threads(self, kw: str, opt: SearchOptions) -> Result:
+        self._kw = kw
         self._goto(f"https://www.threads.com/search?q={quote(kw.strip())}&serp_type=default&filter=recent")
         rx = re.compile(r"^/@([^/]+)/post/([A-Za-z0-9_-]+)/?$")
 
@@ -148,11 +177,21 @@ class KeywordCrawler(BrowserCrawler):
             try:
                 pairs = self.page.eval_on_selector_all(
                     "a[href*='/post/']",
-                    "els => els.map(e => [e.getAttribute('href'), (e.querySelector('time') || {}).dateTime || ''])")
+                    """els => els.map(e => {
+                      // the post's own box: Threads wraps each post in a pressable container
+                      let c = e.closest('[data-pressable-container="true"]');
+                      if (!c) { c = e; for (let i = 0; i < 6 && c.parentElement; i++) { c = c.parentElement;
+                                  if (c.querySelectorAll("a[href*='/post/'] time").length > 1) { c = null; break; } } }
+                      return [e.getAttribute('href'), (e.querySelector('time') || {}).dateTime || '', c ? c.innerText : ''];
+                    })""")
             except Exception:  # noqa: BLE001
                 pairs = []
-            out = []
-            for href, dt in pairs:
+            out, texts = [], {}
+            for href, dt, txt in pairs:
+                m = rx.match(href or "")
+                if m and txt and len(txt) > len(texts.get(m.group(2), "")):
+                    texts[m.group(2)] = txt[:3000]
+            for href, dt, _txt in pairs:
                 m = rx.match(href or "")
                 if not m:
                     continue
@@ -163,14 +202,15 @@ class KeywordCrawler(BrowserCrawler):
                     except ValueError:
                         t = None
                 out.append(Post(f"https://www.threads.com/@{m.group(1)}/post/{m.group(2)}",
-                                t or instagram_shortcode_time(m.group(2)), m.group(1)))
+                                t or instagram_shortcode_time(m.group(2)), m.group(1), text=texts.get(m.group(2), "")))
             return out
 
-        posts = self._scroll_collect(extract, older_needed=6, idle_limit=5, max_rounds=300, cap=opt.cap)
+        posts = self._scroll_collect(extract, older_needed=6, idle_limit=5, max_rounds=300, cap=opt.cap, keep=self._keep(opt))
         return self._done(posts, opt, ("/login",))
 
     # ---------- Instagram ----------
     def search_instagram(self, kw: str, opt: SearchOptions) -> Result:
+        self._kw = kw
         rx = re.compile(r"^/(?:([A-Za-z0-9._]+)/)?(p|reel|tv)/([A-Za-z0-9_-]{5,})")
         found: dict[str, Post] = {}
         sources = []
@@ -184,18 +224,23 @@ class KeywordCrawler(BrowserCrawler):
 
         def extract():
             out = []
-            for h in self._hrefs():
+            try:   # Instagram puts the caption in the thumbnail's alt text
+                rows = self.page.eval_on_selector_all("a[href]", "els => els.map(a => [a.getAttribute('href'), "
+                                                                  "[...a.querySelectorAll('img')].map(i => i.alt || '').join(' ')])")
+            except Exception:  # noqa: BLE001
+                rows = [[h, ""] for h in self._hrefs()]
+            for h, alt in rows:
                 m = rx.match(h or "")
                 if m:
                     kind = "reel" if m.group(2) == "reel" else "p"
                     out.append(Post(f"https://www.instagram.com/{kind}/{m.group(3)}/",
-                                    instagram_shortcode_time(m.group(3)), m.group(1) or ""))
+                                    instagram_shortcode_time(m.group(3)), m.group(1) or "", text=alt or ""))
             return out
 
         for _name, url in sources:
             try:
                 self._goto(url)
-                got = self._scroll_collect(extract, older_needed=0, idle_limit=4, max_rounds=40, cap=opt.cap)
+                got = self._scroll_collect(extract, older_needed=0, idle_limit=4, max_rounds=40, cap=opt.cap, keep=self._keep(opt))
             except Stopped as e:              # keep the source already read
                 raise Stopped(list(found.values()) + e.posts) from None
             for p in got:
@@ -206,6 +251,7 @@ class KeywordCrawler(BrowserCrawler):
 
     # ---------- TikTok ----------
     def search_tiktok(self, kw: str, opt: SearchOptions) -> Result:
+        self._kw = kw
         self._goto(f"https://www.tiktok.com/search/video?q={quote(kw.strip())}")
         self._wait_captcha()
         rx = re.compile(r"/@([^/?#]+)/(video|photo)/(\d+)")
@@ -213,18 +259,26 @@ class KeywordCrawler(BrowserCrawler):
         def extract():
             self._wait_captcha()
             out = []
-            for h in self._hrefs():
+            try:   # the result card's description (+ the thumbnail's alt text)
+                rows = self.page.eval_on_selector_all("a[href*='/video/'], a[href*='/photo/']", """els => els.map(a => {
+                    let c = a.closest('[data-e2e*="search"], [class*="ItemContainer"]') || a.parentElement && a.parentElement.parentElement;
+                    const alt = [...a.querySelectorAll('img')].map(i => i.alt || '').join(' ');
+                    return [a.getAttribute('href'), ((c && c.innerText) || '') + ' ' + alt]; })""")
+            except Exception:  # noqa: BLE001
+                rows = [[h, ""] for h in self._hrefs()]
+            for h, txt in rows:
                 m = rx.search(h or "")
                 if m:
                     out.append(Post(f"https://www.tiktok.com/@{m.group(1)}/{m.group(2)}/{m.group(3)}",
-                                    tiktok_id_time(m.group(3)), m.group(1)))
+                                    tiktok_id_time(m.group(3)), m.group(1), text=(txt or "").strip()[:2000]))
             return out
 
-        posts = self._scroll_collect(extract, older_needed=0, idle_limit=4, max_rounds=60, cap=opt.cap)
+        posts = self._scroll_collect(extract, older_needed=0, idle_limit=4, max_rounds=60, cap=opt.cap, keep=self._keep(opt))
         return self._done(posts, opt, ("/login",), "TikTok search is ranked by relevance, not date")
 
     # ---------- Facebook ----------
     def search_facebook(self, kw: str, opt: SearchOptions) -> Result:
+        self._kw = kw
         url = f"https://www.facebook.com/search/posts?q={quote(phrase(kw, opt.exact))}&filters={_FB_RECENT}"
         posts = self._fb_collect(url, older_needed=8, idle_limit=6, max_rounds=200, cap=opt.cap)
         return self._done(posts, opt, ("/login", "checkpoint"), "Facebook search is best effort")

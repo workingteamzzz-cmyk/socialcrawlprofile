@@ -38,6 +38,11 @@ svg.i{width:18px;height:18px;flex:none;stroke:currentColor;fill:none;stroke-widt
 .btn-block{all:unset;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px;border:1px solid var(--line);border-radius:12px;font-weight:600;cursor:pointer;background:var(--panel);box-shadow:0 1px 2px rgba(16,24,40,.04)}
 .btn-block:hover{border-color:#cfd5df}
 .btn-block[disabled]{opacity:.5;cursor:not-allowed}
+.logins{display:flex;flex-wrap:wrap;gap:4px;padding:0 2px}
+.logins .lg{font-size:11px;font-weight:600;padding:2px 7px;border-radius:99px;background:var(--soft);color:var(--muted)}
+.logins .lg.on{background:var(--ok-soft);color:var(--ok)}
+.logins .lg.off{background:var(--warn-soft);color:var(--warn)}
+.logins small{width:100%;color:var(--faint);font-size:11px;margin-top:2px}
 .status-row{display:flex;align-items:center;gap:10px;padding:4px 4px 0}
 .status-row b{display:block;font-size:13px}
 .status-row small{color:var(--muted);font-size:11.5px}
@@ -300,6 +305,7 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
     </nav>
     <div class="side-foot">
       <button class="btn-block" id="btnLogin" title="Open a browser to sign in to each platform (once)"><svg class="i"><use href="#i-login"/></svg>Log in to platforms</button>
+      <div class="logins" id="logins" title="Sign-in status from the browser profile (checked at the last login or run)"></div>
       <div class="status-row"><span class="dot" id="stDot"></span><div><b id="stTitle">Ready</b><small id="stSub">No job running</small></div></div>
     </div>
   </aside>
@@ -469,8 +475,10 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
                 <select id="oCap"><option value="50">50</option><option value="100">100</option><option value="300" selected>300</option><option value="1000">1,000</option><option value="0">No limit</option></select></div>
               <div class="opt-row"><div class="t"><b>Exact phrase</b><small>Multi-word keywords are searched as one phrase (X, YouTube, Facebook)</small></div>
                 <label class="switch"><input type="checkbox" id="oExact"><span></span></label></div>
-              <div class="opt-row"><div class="t"><b>Exclude words</b><small>Comma-separated, e.g. <i>giveaway, promo</i> (X, YouTube)</small></div>
+              <div class="opt-row"><div class="t"><b>Exclude words</b><small>Comma-separated, e.g. <i>giveaway, promo</i>. Every result's text is read: posts with these words (also as #hashtags or longer forms like "promosi") are dropped on all platforms</small></div>
                 <input type="text" id="oExclude" placeholder="word, word"></div>
+              <div class="opt-row"><div class="t"><b>Only posts that mention the keyword</b><small>Drops results whose visible text doesn't mention the keyword at all (search engines add loosely related posts). Posts with no readable text are kept</small></div>
+                <label class="switch"><input type="checkbox" id="oMention" checked><span></span></label></div>
               <div class="opt-group">X / Twitter</div>
               <div class="opt-row"><div class="t"><b>Language</b><small>Only posts X detects in this language</small></div>
                 <select id="oLang"><option value="">Any language</option><option value="id">Indonesian</option><option value="en">English</option></select></div>
@@ -613,7 +621,7 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
 
     <!-- EXPORTS -->
     <section class="page" id="p-exports">
-      <div class="pagehead"><div><h1>Exports</h1><p>Excel files from earlier collections (folder <b>outputs</b>).</p></div></div>
+      <div class="pagehead"><div><h1>Exports</h1><p>Excel files from earlier collections — saved in <b id="outDir">Documents/Post Link Collector/outputs</b>.</p></div></div>
       <div class="card"><div class="card-bd exports" id="exports" style="padding-top:14px"></div></div>
     </section>
 
@@ -998,15 +1006,15 @@ function kwRender(){
   $('qPrev').innerHTML = `<small>X query preview${keywords.length > 1 ? ' (first keyword)' : ''}</small>${esc(parts.join(' '))}`;
 }
 function kwOptions(){
-  return { detail: $('oDetail').value, cap: +$('oCap').value, exact: $('oExact').checked,
+  return { detail: $('oDetail').value, cap: +$('oCap').value, exact: $('oExact').checked, must_mention: $('oMention').checked,
     exclude: $('oExclude').value.split(',').map(w => w.trim().replace(/^-/, '')).filter(Boolean),
     x_lang: $('oLang').value, x_no_replies: $('oNoReplies').checked, x_no_reposts: $('oNoReposts').checked,
     ig_hashtag: $('oIgTag').checked, ig_keyword: $('oIgKw').checked };
 }
-(function(){ const o = ls.get('kw_opts', null); if (o){ $('oDetail').value = o.detail || 'links'; $('oCap').value = o.cap; $('oExact').checked = o.exact; $('oExclude').value = (o.exclude || []).join(', ');
+(function(){ const o = ls.get('kw_opts', null); if (o){ $('oDetail').value = o.detail || 'links'; $('oMention').checked = o.must_mention !== false; $('oCap').value = o.cap; $('oExact').checked = o.exact; $('oExclude').value = (o.exclude || []).join(', ');
   $('oLang').value = o.x_lang || ''; $('oNoReplies').checked = o.x_no_replies; $('oNoReposts').checked = o.x_no_reposts;
   $('oIgTag').checked = o.ig_hashtag; $('oIgKw').checked = o.ig_keyword; } })();
-['oDetail','oCap','oExact','oExclude','oLang','oNoReplies','oNoReposts','oIgTag','oIgKw'].forEach(id =>
+['oDetail','oCap','oExact','oMention','oExclude','oLang','oNoReplies','oNoReposts','oIgTag','oIgKw'].forEach(id =>
   $(id).addEventListener(id === 'oExclude' ? 'input' : 'change', () => { ls.set('kw_opts', kwOptions()); kwRender(); }));
 $('kwInput').addEventListener('keydown', e => {
   if ((e.key === 'Enter' || e.key === ',') && $('kwInput').value.trim()){ e.preventDefault(); kwAdd($('kwInput').value); $('kwInput').value = ''; }
@@ -1158,6 +1166,18 @@ $('nq').addEventListener('input', renderNews);
 $('nFilterKw').addEventListener('change', renderNews);
 async function refreshNews(){ nwResults = await api('/api/results?mode=news'); renderNews(); }
 
+/* ---------- sign-in status ---------- */
+async function loadLogins(){
+  const d = await api('/api/logins');
+  if (d.outputs_dir) $('outDir').textContent = d.outputs_dir;
+  const st = d.platforms || {};
+  const names = {instagram: 'IG', x: 'X', tiktok: 'TikTok', threads: 'Threads', facebook: 'FB'};
+  $('logins').innerHTML = Object.keys(st).length
+    ? Object.entries(names).map(([k, n]) => `<span class="lg ${st[k] ? 'on' : 'off'}">${n} ${st[k] ? '✓' : '✗'}</span>`).join('')
+      + `<small>Signed-in status · ${esc(d.checked || '')}</small>`
+    : '<small>Sign-in status appears after the first login</small>';
+}
+
 /* ---------- polling ---------- */
 let pollTimer = null, polling = false, shownErrJob = null;
 function started(){   // a job was accepted: reflect it at once instead of waiting for the next poll
@@ -1208,7 +1228,7 @@ async function poll(){
     if (!running && s.error && s.job_id !== shownErrJob){           // also catches jobs that failed within a second
       shownErrJob = s.job_id; (isKw ? kwAlert : isNews ? nwAlert : alertMsg)(s.error); if (s.kind === 'login') toast(s.error);
     }
-    if (was && !running){ refreshResults(); refreshKw(); refreshNews(); loadExports();
+    if (was && !running){ refreshResults(); refreshKw(); refreshNews(); loadExports(); loadLogins();
       if (!s.error) toast(s.kind === 'login' ? 'Login sessions saved' : isKw ? 'Keyword search finished — results saved'
         : isNews ? 'News search finished — results saved' : 'Collection finished — results saved'); }
   } catch(e){}
@@ -1218,7 +1238,7 @@ async function poll(){
 }
 
 go(document.getElementById('p-' + ls.get('page', 'collect')) ? ls.get('page', 'collect') : 'collect');
-loadLists().then(loadAccounts); renderResults(); kwRender(); renderKw(); nwRender(); renderNews(); poll();
+loadLists().then(loadAccounts); loadLogins(); renderResults(); kwRender(); renderKw(); nwRender(); renderNews(); poll();
 </script>
 </body>
 </html>

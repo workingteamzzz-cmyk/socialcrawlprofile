@@ -183,6 +183,81 @@ def _key(url: str) -> str:
     return f"{host}{path}" + (f"?{query}" if query else "")
 
 
+def _gnews_id(url: str) -> str:
+    m = re.search(r"/(?:rss/)?articles/([A-Za-z0-9_-]+)", url or "")
+    return m.group(1) if m else ""
+
+
+def decode_gnews_offline(url: str) -> str:
+    """Older Google News ids are base64 of a small record that contains the article URL itself."""
+    import base64
+    gid = _gnews_id(url)
+    if not gid:
+        return ""
+    try:
+        raw = base64.urlsafe_b64decode(gid + "=" * (-len(gid) % 4))
+    except (ValueError, TypeError):
+        return ""
+    m = re.search(rb"https?://[\x21-\x7e]+", raw)
+    if not m or raw[4:10] == b"AU_yqL":
+        return ""
+    found = m.group(0).decode("ascii", "ignore")
+    # the record may continue straight after the URL with another length-prefixed field
+    found = re.split(r"[\x00-\x1f]|\xd2\x01", found)[0]
+    return found if "." in urlparse(found).netloc else ""
+
+
+def _parse_batchexecute(text: str) -> str:
+    """Pull the article URL out of Google's batchexecute answer: )]}'  [["wrb.fr","Fbv4je","[\"garturlres\",\"URL\",1]",...]]"""
+    import json as _json
+    if not text:
+        return ""
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith("["):
+            continue
+        try:
+            data = _json.loads(line)
+        except ValueError:
+            continue
+        for el in data if isinstance(data, list) else []:
+            if isinstance(el, list) and len(el) > 2 and el[0] == "wrb.fr" and isinstance(el[2], str):
+                try:
+                    inner = _json.loads(el[2])
+                except ValueError:
+                    continue
+                if isinstance(inner, list) and len(inner) > 1 and isinstance(inner[1], str) and inner[1].startswith("http"):
+                    return inner[1]
+    m = re.search(r'garturlres\\",\\"(https?://[^"\\]+)', text)
+    return m.group(1) if m else ""
+
+
+_GNEWS_DECODE_JS = r"""async (ids) => {
+  // Same two steps Google News's own redirect page takes: read the article's signature, then ask for its URL.
+  const out = {};
+  const one = async (id) => {
+    const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 20000);
+    try {
+      let h = await (await fetch('/rss/articles/' + id, {credentials: 'include', signal: ctl.signal})).text();
+      let sg = (h.match(/data-n-a-sg="([^"]+)"/) || [])[1], ts = (h.match(/data-n-a-ts="([^"]+)"/) || [])[1];
+      if (!sg || !ts) {
+        h = await (await fetch('/articles/' + id, {credentials: 'include', signal: ctl.signal})).text();
+        sg = (h.match(/data-n-a-sg="([^"]+)"/) || [])[1]; ts = (h.match(/data-n-a-ts="([^"]+)"/) || [])[1];
+      }
+      if (!sg || !ts) { out[id] = ''; return; }
+      const inner = JSON.stringify(["garturlreq", [["X", "X", ["X", "X"], null, null, 1, 1, "US:en", null, 1, null, null, null,
+        null, null, 0, 1], "X", "X", 1, [1, 1, 1], 1, 1, null, 0, 0, null, 0], id, Number(ts), sg]);
+      const body = 'f.req=' + encodeURIComponent(JSON.stringify([[["Fbv4je", inner, null, "generic"]]]));
+      const r = await fetch('/_/DotsSplashUi/data/batchexecute', {method: 'POST', credentials: 'include', signal: ctl.signal,
+        headers: {'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'}, body});
+      out[id] = r.ok ? await r.text() : '';
+    } catch (e) { out[id] = ''; } finally { clearTimeout(t); }
+  };
+  for (let i = 0; i < ids.length; i += 4) await Promise.all(ids.slice(i, i + 4).filter(Boolean).map(one));
+  return out;
+}"""
+
+
 def _parse_rss(xml: str) -> list[dict]:
     """Items of a Google News RSS feed: link, title (without the ' - Media' suffix), source, publish time."""
     import xml.etree.ElementTree as ET
@@ -354,12 +429,7 @@ class NewsCrawler(BrowserCrawler):
         n_fresh = len(fresh)
         resolved = 0
         if opt.resolve and opt.detail != "full":        # full mode opens each article anyway
-            for j, r in enumerate(fresh):
-                self._check_stop()
-                real = self._resolve(r["google_url"])
-                if real:
-                    r["url"] = real
-                    resolved += 1
+            resolved = self._resolve_all(fresh)
         junk = 0
         for r in fresh:
             if opt.media_only and is_media(r["url"], opt.extra_media) is False and "news.google." not in r["url"]:
@@ -378,7 +448,49 @@ class NewsCrawler(BrowserCrawler):
             note += f"; {junk} non-media links skipped"
         return Result("error" if failed == len(windows) else "ok", [], note)
 
-    def _resolve(self, gnews_url: str) -> str:
+    def _resolve_all(self, rows: list) -> int:
+        """Turn Google News article links into the media's own links, without opening them:
+        1. older links carry the article URL inside their id (decoded offline);
+        2. newer ids ("AU_yqL...") are translated by Google News itself — the same request its own redirect page
+           makes — sent from the open news.google.com tab, a few at a time;
+        3. only if both fail, open the link briefly and catch where it goes."""
+        done = 0
+        todo = []
+        for r in rows:
+            real = decode_gnews_offline(r["google_url"])
+            if real:
+                r["url"] = real
+                done += 1
+            else:
+                todo.append(r)
+        for k in range(0, len(todo), 8):
+            self._check_stop()
+            batch = todo[k:k + 8]
+            ids = [_gnews_id(r["google_url"]) for r in batch]
+            try:
+                raw = self.page.evaluate(_GNEWS_DECODE_JS, ids) or {}
+            except Exception as e:  # noqa: BLE001
+                if BROWSER_CLOSED in str(e):
+                    raise
+                raw = {}
+            for r, gid in zip(batch, ids):
+                real = _parse_batchexecute(raw.get(gid, "")) if gid else ""
+                if real:
+                    r["url"] = real
+                    done += 1
+                    r["_ok"] = True
+            if k + 8 < len(todo):
+                self._pause(0.8, 1.6)
+        leftovers = [r for r in todo if not r.pop("_ok", False)]
+        for r in leftovers[:20]:              # last resort, capped so a blocked decoder can't stall the run
+            self._check_stop()
+            real = self._resolve(r["google_url"], wait_s=6)
+            if real:
+                r["url"] = real
+                done += 1
+        return done
+
+    def _resolve(self, gnews_url: str, wait_s: float = 10) -> str:
         """Open a news.google.com article link and catch where it sends the browser (the media's own URL),
         without loading the whole article page."""
         target = {}
@@ -399,7 +511,7 @@ class NewsCrawler(BrowserCrawler):
             except Exception as e:  # noqa: BLE001
                 if BROWSER_CLOSED in str(e):
                     raise
-            for _ in range(40):                       # the Google page redirects with a short delay
+            for _ in range(int(wait_s * 4)):          # the Google page redirects with a short delay
                 if "url" in target:
                     break
                 self._check_stop()

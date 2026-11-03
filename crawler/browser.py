@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import random
 import re
 import time
@@ -82,8 +83,11 @@ def launch_context(pw, profile_dir: str, headless: bool = False):
         headless=headless,
         viewport={"width": 1280, "height": 900},
         locale="id-ID",
-        args=["--disable-blink-features=AutomationControlled"],
+        args=["--disable-blink-features=AutomationControlled", "--disable-features=Translate,TranslateUI"],
         ignore_default_args=["--enable-automation"],
+        # Playwright turns Chrome's sandbox off by default, which shows a "--no-sandbox" warning bar; Mac and
+        # Windows run fine with it on (Linux as root does not).
+        chromium_sandbox=sys.platform in ("darwin", "win32"),
     )
     exe = os.environ.get("CRAWLER_BROWSER_PATH")
     if exe:

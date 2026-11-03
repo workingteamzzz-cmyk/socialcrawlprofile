@@ -1,5 +1,6 @@
 """Caption/engagement readers and the Google News collector, against fake pages."""
 import json
+import time
 import os
 import sys
 import threading
@@ -396,3 +397,62 @@ def test_google_all_results_media_only_to_the_last_page(tmp_path):
     assert NO.from_dict({"source": "both"}).sources == ["feed", "news_tab"]               # older settings still work
     assert NO.from_dict({}).sources == ["feed", "news_tab", "all_tab"]
     assert NO.from_dict({"sources": ["all_tab", "bogus"]}).sources == ["all_tab"]
+
+
+def test_google_news_links_decoded_without_opening_them(tmp_path):
+    """New-style ids (AU_yqL...) are translated through Google News's own batchexecute call; old-style ids are
+    decoded offline. No article page is navigated to."""
+    if _browser_path() is None:
+        pytest.skip("no local Chromium")
+    import base64
+    import json as _json
+    from urllib.parse import parse_qs, unquote
+
+    from playwright.sync_api import sync_playwright
+
+    from crawler.browser import launch_context
+    from crawler.news import NewsCrawler, NewsOptions
+    new_id = "CBMixAFBVV95cUxNelNQSl85YjhGM0pxczU3djNwcm9WMW1fd19ZLU1ldEJjdVZBXy1ORzZMT3F5RDFJYnFuSS1BcD"
+    old_id = base64.urlsafe_b64encode(b"\x08\x13\x22\x2ahttps://www.kompas.com/read/2026/10/20/abc\xd2\x01\x00").decode().rstrip("=")
+    feed = ('<?xml version="1.0"?><rss><channel>'
+            f'<item><title>Baru - Detik</title><link>https://news.google.com/rss/articles/{new_id}?oc=5</link>'
+            '<pubDate>Tue, 20 Oct 2026 03:00:00 GMT</pubDate><source url="https://detik.com">Detik</source></item>'
+            f'<item><title>Lama - Kompas</title><link>https://news.google.com/rss/articles/{old_id}?oc=5</link>'
+            '<pubDate>Tue, 20 Oct 2026 04:00:00 GMT</pubDate><source url="https://kompas.com">Kompas</source></item>'
+            '</channel></rss>')
+    navigations, posts = [], []
+
+    def route(r):
+        req = r.request
+        url = req.url
+        if req.is_navigation_request():
+            navigations.append(url)
+        if "/rss/search" in url:
+            return r.fulfill(status=200, content_type="application/xml", body=feed)
+        if "/rss/articles/" in url and not req.is_navigation_request():
+            return r.fulfill(status=200, content_type="text/html",
+                             body='<c-wiz><div jscontroller="x" data-n-a-sg="SIG123" data-n-a-ts="1730000000"></div></c-wiz>')
+        if "batchexecute" in url:
+            freq = _json.loads(unquote(parse_qs(req.post_data)["f.req"][0]))
+            inner = _json.loads(freq[0][0][1])
+            posts.append(inner)
+            answer = _json.dumps([["wrb.fr", "Fbv4je", _json.dumps(["garturlres", "https://news.detik.com/berita/d-1/baru", 1]),
+                                   None, None, None, "generic"]])
+            return r.fulfill(status=200, content_type="application/json", body=")]}'\n\n" + answer)
+        r.fulfill(status=200, content_type="text/html", body="<html><body>news home</body></html>")
+    os.environ["CRAWLER_BROWSER_PATH"] = _browser_path()
+    with sync_playwright() as pw:
+        ctx = launch_context(pw, str(tmp_path / "profile"), headless=True)
+        ctx.route("**/*", route)
+        c = _fast(NewsCrawler(ctx, lambda m: None, threading.Event(), datetime(2026, 10, 19, 17, tzinfo=UTC),
+                              datetime(2026, 10, 20, 16, 59, tzinfo=UTC), tz=WIB))
+        t = time.time()
+        res = c.search("listrik", NewsOptions(sources=["feed"], by_day=False), datetime(2026, 10, 20), datetime(2026, 10, 20))
+        took = time.time() - t
+        ctx.close()
+    assert sorted(p["url"] for p in res.posts) == ["https://news.detik.com/berita/d-1/baru",
+                                                  "https://www.kompas.com/read/2026/10/20/abc"]
+    assert "2/2 media links resolved" in res.note
+    assert posts and posts[0][0] == "garturlreq" and posts[0][2:] == [new_id, 1730000000, "SIG123"]
+    assert not any("/rss/articles/" in u for u in navigations)        # no blank Google News tab opened
+    assert took < 15, took

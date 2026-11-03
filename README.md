@@ -131,9 +131,11 @@ not show that number. The Excel gets extra columns Caption, Likes, Comments, Sha
 Three sources, all on by default (*Advanced options → Sources*); an article found by several appears once:
 
 - **Google News feed** (most reliable): the browser asks news.google.com for the keyword per day and gets a
-  structured list (title, media, exact publish time — up to 100 articles per search). Each Google News link is then
-  opened once to catch the media's own article URL (*Get the media's own link*; about 1–3 s each — turn it off to keep
-  the news.google.com links, which still open the article).
+  structured list (title, media, exact publish time — up to 100 articles per search). The feed only gives
+  news.google.com links, so *Get the media's own link* turns them into the media's own URL without opening them: older
+  links contain the URL in their id; newer ones are translated by Google News itself in the background (the same request
+  its redirect page makes), a few at a time. Only if that fails is the link opened briefly. Turn it off to keep the
+  news.google.com links (they still open the article).
 - **Google Search · News tab**: Google with the keyword and a custom date range, sorted by date, page by page.
 - **Google Search · All results**: the regular "All" tab with the same date range, read **to the last page**. Only
   articles from news media are kept: a built-in list of Indonesian and international media, plus sites that clearly

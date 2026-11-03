@@ -219,12 +219,12 @@ def test_news_engine_review_fixes(tmp_path):
         real = c2._resolve
         calls = {"n": 0}
 
-        def resolve(u):
+        def resolve(u, wait_s=10):
             calls["n"] += 1
             if calls["n"] == 3:
                 stop.set()
                 c2._check_stop()
-            return real(u)
+            return real(u, wait_s=wait_s)
         c2._resolve = resolve
         with pytest.raises(Stopped) as e:
             c2.search("x", NewsOptions(sources=["feed"], by_day=False), datetime(2026, 10, 20), datetime(2026, 10, 20))

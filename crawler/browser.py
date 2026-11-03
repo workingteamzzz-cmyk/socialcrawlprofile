@@ -83,7 +83,8 @@ def launch_context(pw, profile_dir: str, headless: bool = False):
         headless=headless,
         viewport={"width": 1280, "height": 900},
         locale="id-ID",
-        args=["--disable-blink-features=AutomationControlled", "--disable-features=Translate,TranslateUI"],
+        # (no --disable-blink-features: real Chrome shows an "unsupported command-line flag" bar for it)
+        args=["--disable-features=Translate,TranslateUI"],
         ignore_default_args=["--enable-automation"],
         # Playwright turns Chrome's sandbox off by default, which shows a "--no-sandbox" warning bar; Mac and
         # Windows run fine with it on (Linux as root does not).
@@ -115,6 +116,10 @@ def launch_context(pw, profile_dir: str, headless: bool = False):
         except Exception as e:  # noqa: BLE001
             errors.append(f"{channel}: {str(e).splitlines()[0]}")
             continue
+        try:   # what the removed flag did: don't advertise the automation to pages
+            ctx.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        except Exception:  # noqa: BLE001
+            pass
         if channel != used:
             try:
                 with open(marker, "w", encoding="utf-8") as f:

@@ -495,3 +495,36 @@ def test_instagram_details_when_logged_in(tmp_path):
         d = read_details(c, "instagram", "https://www.instagram.com/p/NOTHING/")
         assert d["caption"] == "" and len(os.listdir(tmp_path / "debug")) == 1      # one page copy for diagnosis
         ctx.close()
+
+
+def test_google_news_decode_failure_is_explained_and_saved(tmp_path):
+    if _browser_path() is None:
+        pytest.skip("no local Chromium")
+    from playwright.sync_api import sync_playwright
+
+    from crawler.browser import launch_context
+    from crawler.news import NewsCrawler, NewsOptions
+    gid = "CBMixAFBVV95cUxNelNQSl85YjhGM0pxczU3djNwcm9WMW1fd19ZLU1ldEJjdVZBXy1ORzZMT3F5RDFJYnFuSS1BcD"
+    feed = ('<?xml version="1.0"?><rss><channel><item><title>A - Detik</title>'
+            f'<link>https://news.google.com/rss/articles/{gid}?oc=5</link><pubDate>Tue, 20 Oct 2026 03:00:00 GMT</pubDate>'
+            '<source url="https://detik.com">Detik</source></item></channel></rss>')
+
+    def route(r):
+        u = r.request.url
+        if "/rss/search" in u:
+            return r.fulfill(status=200, content_type="application/xml", body=feed)
+        r.fulfill(status=200, content_type="text/html", body="<html><body>consent or something else</body></html>")
+    logs = []
+    os.environ["CRAWLER_BROWSER_PATH"] = _browser_path()
+    with sync_playwright() as pw:
+        ctx = launch_context(pw, str(tmp_path / "profile"), headless=True)
+        ctx.route("**/*", route)
+        c = _fast(NewsCrawler(ctx, logs.append, threading.Event(), datetime(2026, 10, 19, 17, tzinfo=UTC),
+                              datetime(2026, 10, 20, 16, 59, tzinfo=UTC), tz=WIB, debug_dir=str(tmp_path / "debug")))
+        c._resolve = lambda u, wait_s=10: ""
+        res = c.search("x", NewsOptions(sources=["feed"], by_day=False), datetime(2026, 10, 20), datetime(2026, 10, 20))
+        ctx.close()
+    assert res.posts[0]["url"].startswith("https://news.google.com/")          # kept, still opens the article
+    assert any("0/1 links decoded" in m and "no signature (HTTP 200" in m for m in logs), logs
+    saved = os.listdir(tmp_path / "debug")
+    assert len(saved) == 1 and saved[0].startswith("google_news_decode_")

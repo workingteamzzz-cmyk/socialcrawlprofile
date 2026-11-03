@@ -207,12 +207,29 @@ def decode_gnews_offline(url: str) -> str:
     return found if "." in urlparse(found).netloc else ""
 
 
+def _decode_failure_reason(failures) -> str:
+    if not failures:
+        return "no answer"
+    f = failures[0]
+    if f.get("error"):
+        return "request failed: " + str(f["error"])[:80]
+    pages = f.get("pages") or []
+    if pages and not any(p.get("sig") for p in pages):
+        st = ",".join(str(p.get("status")) for p in pages)
+        return f"article page gave no signature (HTTP {st})"
+    if f.get("status") and f.get("status") != 200:
+        return f"Google refused the request (HTTP {f.get('status')})"
+    return "Google's answer had no link"
+
+
 def _parse_batchexecute(text: str) -> str:
     """Pull the article URL out of Google's batchexecute answer: )]}'  [["wrb.fr","Fbv4je","[\"garturlres\",\"URL\",1]",...]]"""
     import json as _json
     if not text:
         return ""
-    for line in text.splitlines():
+    rest = text.split("\n", 1)[1] if text.startswith(")]}'") else text
+    chunks = [rest.strip()] + text.splitlines()
+    for line in chunks:
         line = line.strip()
         if not line.startswith("["):
             continue
@@ -232,26 +249,32 @@ def _parse_batchexecute(text: str) -> str:
     return m.group(1) if m else ""
 
 
-_GNEWS_DECODE_JS = r"""async (ids) => {
+_GNEWS_DECODE_JS = r"""async (args) => {
   // Same two steps Google News's own redirect page takes: read the article's signature, then ask for its URL.
+  const [ids, loc] = args;
   const out = {};
+  const grab = (h, name) => (h.match(new RegExp(name + '="([^"]+)"')) || h.match(new RegExp(name + '\\\\?":\\\\?"([^"\\\\]+)')) || [])[1];
   const one = async (id) => {
-    const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 20000);
+    const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 25000);
+    const info = {id, pages: [], body: ''};
     try {
-      let h = await (await fetch('/rss/articles/' + id, {credentials: 'include', signal: ctl.signal})).text();
-      let sg = (h.match(/data-n-a-sg="([^"]+)"/) || [])[1], ts = (h.match(/data-n-a-ts="([^"]+)"/) || [])[1];
-      if (!sg || !ts) {
-        h = await (await fetch('/articles/' + id, {credentials: 'include', signal: ctl.signal})).text();
-        sg = (h.match(/data-n-a-sg="([^"]+)"/) || [])[1]; ts = (h.match(/data-n-a-ts="([^"]+)"/) || [])[1];
+      let sg, ts;
+      for (const path of ['/rss/articles/' + id + '?' + loc, '/articles/' + id + '?' + loc, '/rss/articles/' + id, '/articles/' + id]) {
+        const r = await fetch(path, {credentials: 'include', signal: ctl.signal});
+        const h = await r.text();
+        sg = grab(h, 'data-n-a-sg'); ts = grab(h, 'data-n-a-ts');
+        info.pages.push({path, status: r.status, size: h.length, sig: !!(sg && ts), head: sg && ts ? '' : h.slice(0, 1500)});
+        if (sg && ts) break;
       }
-      if (!sg || !ts) { out[id] = ''; return; }
+      if (!sg || !ts) { out[id] = info; return; }
       const inner = JSON.stringify(["garturlreq", [["X", "X", ["X", "X"], null, null, 1, 1, "US:en", null, 1, null, null, null,
         null, null, 0, 1], "X", "X", 1, [1, 1, 1], 1, 1, null, 0, 0, null, 0], id, Number(ts), sg]);
       const body = 'f.req=' + encodeURIComponent(JSON.stringify([[["Fbv4je", inner, null, "generic"]]]));
-      const r = await fetch('/_/DotsSplashUi/data/batchexecute', {method: 'POST', credentials: 'include', signal: ctl.signal,
-        headers: {'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'}, body});
-      out[id] = r.ok ? await r.text() : '';
-    } catch (e) { out[id] = ''; } finally { clearTimeout(t); }
+      const r = await fetch('/_/DotsSplashUi/data/batchexecute?rpcids=Fbv4je', {method: 'POST', credentials: 'include',
+        signal: ctl.signal, headers: {'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'}, body});
+      info.status = r.status; info.body = await r.text();
+    } catch (e) { info.error = String(e); } finally { clearTimeout(t); }
+    out[id] = info;
   };
   for (let i = 0; i < ids.length; i += 4) await Promise.all(ids.slice(i, i + 4).filter(Boolean).map(one));
   return out;
@@ -382,7 +405,8 @@ class NewsCrawler(BrowserCrawler):
         windows = [(end_local - timedelta(days=i), end_local - timedelta(days=i)) for i in range(days)] \
             if opt.by_day and days > 1 else [(start_local, end_local)]
         loc = {"hl": "id", "gl": "ID", "ceid": "ID:id"} if opt.region == "id" else {"hl": "en-US", "gl": "US", "ceid": "US:en"}
-        self._goto(f"https://news.google.com/?hl={loc['hl']}&gl={loc['gl']}&ceid={loc['ceid']}")
+        self._gnews_loc = f"hl={loc['hl']}&gl={loc['gl']}&ceid={loc['ceid']}"
+        self._goto(f"https://news.google.com/?{self._gnews_loc}")
         self._accept_consent()
         q = google_query(kw, opt)
         fresh, read, outside, failed = [], 0, 0, 0
@@ -463,32 +487,56 @@ class NewsCrawler(BrowserCrawler):
                 done += 1
             else:
                 todo.append(r)
+        loc = getattr(self, "_gnews_loc", "hl=id&gl=ID&ceid=ID:id")
+        failures = []
         for k in range(0, len(todo), 8):
             self._check_stop()
             batch = todo[k:k + 8]
             ids = [_gnews_id(r["google_url"]) for r in batch]
             try:
-                raw = self.page.evaluate(_GNEWS_DECODE_JS, ids) or {}
+                raw = self.page.evaluate(_GNEWS_DECODE_JS, [ids, loc]) or {}
             except Exception as e:  # noqa: BLE001
                 if BROWSER_CLOSED in str(e):
                     raise
                 raw = {}
+                failures.append({"error": str(e)[:300]})
             for r, gid in zip(batch, ids):
-                real = _parse_batchexecute(raw.get(gid, "")) if gid else ""
+                info = raw.get(gid) or {}
+                real = _parse_batchexecute(info.get("body", "")) if gid else ""
                 if real:
                     r["url"] = real
                     done += 1
                     r["_ok"] = True
+                elif info:
+                    failures.append(info)
             if k + 8 < len(todo):
                 self._pause(0.8, 1.6)
         leftovers = [r for r in todo if not r.pop("_ok", False)]
-        for r in leftovers[:20]:              # last resort, capped so a blocked decoder can't stall the run
+        if leftovers:
+            why = _decode_failure_reason(failures)
+            self.log(f"   ⚠ Google News: {len(todo) - len(leftovers)}/{len(todo)} links decoded in the background ({why})")
+            self._save_decode_debug(failures)
+        for r in leftovers[:8]:               # last resort, capped so a blocked decoder can't stall the run
             self._check_stop()
             real = self._resolve(r["google_url"], wait_s=6)
             if real:
                 r["url"] = real
                 done += 1
         return done
+
+    def _save_decode_debug(self, failures):
+        if not failures or not self.debug_dir or self.__dict__.get("_decode_debug_saved"):
+            return
+        self._decode_debug_saved = True
+        try:
+            import json as _json
+            os.makedirs(self.debug_dir, exist_ok=True)
+            name = f"google_news_decode_{datetime.now():%H%M%S}.json"
+            with open(os.path.join(self.debug_dir, name), "w", encoding="utf-8") as f:
+                _json.dump(failures[:3], f, ensure_ascii=False, indent=1)
+            self.log(f"   (details saved to outputs/debug/{name} — please send it in)")
+        except OSError:
+            pass
 
     def _resolve(self, gnews_url: str, wait_s: float = 10) -> str:
         """Open a news.google.com article link and catch where it sends the browser (the media's own URL),

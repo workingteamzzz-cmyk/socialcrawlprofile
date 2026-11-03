@@ -277,6 +277,31 @@ def test_threads_search_drops_excluded_and_off_topic_posts(tmp_path):
         ctx.close()
 
 
+@pytest.mark.skipif(_browser_path() is None, reason="no local Chromium")
+def test_tiktok_search_keeps_cards_without_the_keyword(tmp_path):
+    """TikTok matches hashtags/speech the card does not show: such cards stay; excluded words still drop a card,
+    and one excluded word on one card must not drop every card of the list. The page sees no webdriver flag."""
+    from playwright.sync_api import sync_playwright
+
+    from crawler.browser import launch_context
+    from crawler.keywords import KeywordCrawler, SearchOptions
+    d = datetime(2026, 10, 20, 5, tzinfo=UTC)
+    cards = [("u1", "Pemadaman listrik malam ini"), ("u2", "lagi viral 😂"), ("u3", "promo token murah"), ("u4", "")]
+    body = '<html><body><div data-e2e="search_video-item-list">' + "".join(
+        f'<div data-e2e="search_video-item"><a href="/@{u}/video/{tt_id(d + timedelta(minutes=i))}"><img alt=""></a>'
+        f'<div>{txt}</div></div>' for i, (u, txt) in enumerate(cards)) + "</div></body></html>"
+    os.environ["CRAWLER_BROWSER_PATH"] = _browser_path()
+    with sync_playwright() as pw:
+        ctx = launch_context(pw, str(tmp_path / "p"), headless=True)
+        ctx.route("**/*", lambda r: r.fulfill(status=200, content_type="text/html", body=body))
+        c = KeywordCrawler(ctx, lambda m: None, threading.Event(), datetime(2026, 10, 1, tzinfo=UTC), datetime(2026, 10, 31, tzinfo=UTC))
+        c._pause = lambda lo=0, hi=0: c.page.wait_for_timeout(100)
+        res = c.search_tiktok("listrik", SearchOptions(exclude=["promo"]))
+        assert sorted(p.author for p in res.posts) == ["u1", "u2", "u4"]
+        assert c.page.evaluate("navigator.webdriver") is False
+        ctx.close()
+
+
 def test_logins_and_lists_survive_a_new_version(tmp_path, monkeypatch):
     from crawler import paths
     old = tmp_path / "Downloads" / "post-link-collector"

@@ -98,11 +98,11 @@ class KeywordCrawler(BrowserCrawler):
         inr = sorted(self._in_range(posts), key=lambda p: p.time_utc, reverse=True)
         return inr[:cap] if cap else inr
 
-    def _keep(self, opt):
+    def _keep(self, opt, mention=True):
         kw = getattr(self, "_kw", "")
-        return lambda p: verdict(p.text, kw, opt.exclude, opt.must_mention, opt.exact) is None
+        return lambda p: verdict(p.text, kw, opt.exclude, opt.must_mention and mention, opt.exact) is None
 
-    def _done(self, posts, opt, login_markers, note="") -> Result:
+    def _done(self, posts, opt, login_markers, note="", mention=True) -> Result:
         if not posts:
             url = self.page.url.lower()
             if any(m in url for m in login_markers):
@@ -114,7 +114,7 @@ class KeywordCrawler(BrowserCrawler):
         excluded = off = 0
         good = []
         for p in inr:                     # read each result like a person: skip excluded words and off-topic posts
-            v = verdict(p.text, kw, opt.exclude, opt.must_mention, opt.exact)
+            v = verdict(p.text, kw, opt.exclude, opt.must_mention and mention, opt.exact)
             if v == "excluded":
                 excluded += 1
             elif v == "off_topic":
@@ -262,6 +262,8 @@ class KeywordCrawler(BrowserCrawler):
             try:   # the result card's description (+ the thumbnail's alt text)
                 rows = self.page.eval_on_selector_all("a[href*='/video/'], a[href*='/photo/']", """els => els.map(a => {
                     let c = a.closest('[data-e2e*="search"], [class*="ItemContainer"]') || a.parentElement && a.parentElement.parentElement;
+                    // a container holding several videos is the whole list, not this card: use the link's own text
+                    if (c && c.querySelectorAll('a[href*="/video/"], a[href*="/photo/"]').length > 2) c = a;
                     const alt = [...a.querySelectorAll('img')].map(i => i.alt || '').join(' ');
                     return [a.getAttribute('href'), ((c && c.innerText) || '') + ' ' + alt]; })""")
             except Exception:  # noqa: BLE001
@@ -273,8 +275,10 @@ class KeywordCrawler(BrowserCrawler):
                                     tiktok_id_time(m.group(3)), m.group(1), text=(txt or "").strip()[:2000]))
             return out
 
-        posts = self._scroll_collect(extract, older_needed=0, idle_limit=4, max_rounds=60, cap=opt.cap, keep=self._keep(opt))
-        return self._done(posts, opt, ("/login",), "TikTok search is ranked by relevance, not date")
+        posts = self._scroll_collect(extract, older_needed=0, idle_limit=4, max_rounds=60, cap=opt.cap, keep=self._keep(opt, mention=False))
+        # TikTok also matches hashtags, spoken words and on-screen text that the result card does not show, so a
+        # card without the keyword is kept (excluded words still drop it; with details on, the caption is checked)
+        return self._done(posts, opt, ("/login",), "TikTok search is ranked by relevance, not date", mention=False)
 
     # ---------- Facebook ----------
     def search_facebook(self, kw: str, opt: SearchOptions) -> Result:

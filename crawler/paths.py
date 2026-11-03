@@ -29,11 +29,27 @@ def _app_data() -> str:
     return os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "PostLinkCollector")
 
 
+def _writable(folder: str) -> bool:
+    try:
+        os.makedirs(folder, exist_ok=True)
+        test = os.path.join(folder, ".write_test")
+        with open(test, "w", encoding="utf-8") as f:
+            f.write("ok")
+        os.remove(test)
+        return True
+    except OSError:
+        return False
+
+
 def _documents() -> str:
+    """Documents/Post Link Collector — or, when that cannot be written (e.g. macOS has not given Terminal access
+    to Documents), ~/Post Link Collector, and finally the app-data folder."""
     if os.environ.get("CRAWLER_HOME"):
         return os.environ["CRAWLER_HOME"]
-    docs = os.path.expanduser("~/Documents")
-    return os.path.join(docs if os.path.isdir(docs) else os.path.expanduser("~"), "Post Link Collector")
+    for base in (os.path.expanduser("~/Documents"), os.path.expanduser("~")):
+        if os.path.isdir(base) and _writable(os.path.join(base, "Post Link Collector")):
+            return os.path.join(base, "Post Link Collector")
+    return _app_data()
 
 
 APP_DATA = _app_data()

@@ -56,11 +56,23 @@ _META_JS = """() => { const m = n => (document.querySelector(`meta[property="${n
 
 
 def read_details(crawler, platform: str, url: str) -> dict:
-    """Open the post and read caption + engagement. crawler is a BrowserCrawler (uses its page)."""
+    """Open the post and read caption + engagement (and the author when the list did not show it).
+    crawler is a BrowserCrawler (uses its page). When nothing at all could be read, one copy of such a page per
+    platform is kept in outputs/debug/ so the reader can be adjusted."""
     crawler._goto(url)
     fn = globals().get(f"_read_{platform}")
     out = fn(crawler) if fn else {}
-    return {k: out.get(k) for k in DETAIL_FIELDS} | {"caption": _clean(out.get("caption") or "")}
+    res = {k: out.get(k) for k in DETAIL_FIELDS} | {"caption": _clean(out.get("caption") or "")}
+    if out.get("author"):
+        res["author"] = str(out["author"]).lstrip("@")[:80]
+    if not res["caption"] and all(res.get(k) is None for k in ("likes", "comments", "shares", "views")):
+        saved = crawler.__dict__.setdefault("_detail_snapshots", set())
+        if platform not in saved:
+            saved.add(platform)
+            name = crawler._snapshot(f"details_{platform}") if hasattr(crawler, "_snapshot") else ""
+            if name:
+                crawler.log(f"   ⚠ Could not read caption/engagement from {url} — page copy saved to outputs/debug/{name}")
+    return res
 
 
 # ---------- per platform ----------
@@ -89,20 +101,69 @@ def _read_x(c) -> dict:
 
 
 def _read_instagram(c) -> dict:
-    meta = c.page.evaluate(_META_JS) or {}
-    desc = meta.get("desc", "")
-    # '1,234 likes, 56 comments - user on October 5, 2026: "caption"'  /  '1.234 suka, 56 komentar - user pada ...: "..."'
-    caption = ""
+    """Three ways, like a person: the page summary (meta), the post data the page carries, then what is on screen."""
+    page = c.page
+    try:
+        page.wait_for_selector("article, main h1, main ul", timeout=8000)
+    except Exception:  # noqa: BLE001
+        pass
+    meta = page.evaluate(_META_JS) or {}
+    desc = meta.get("desc", "") or ""
+    out = {}
+    # 1. '1,234 likes, 56 comments - user on October 5, 2026: "caption"' / '1.234 suka, 56 komentar - user pada ...: "..."'
     m = re.search(r':\s*"(.*)"\s*\.?\s*$', desc, re.S)
     if m:
-        caption = m.group(1)
-    body = _body(c)
-    return {
-        "caption": caption or desc,
-        "likes": _count_near(desc, ["likes", "like", "suka"]),
-        "comments": _count_near(desc, ["comments", "comment", "komentar"]),
-        "views": _count_near(body, ["views", "plays", "tayangan", "kali diputar"]),
-    }
+        out["caption"] = m.group(1)
+    out["likes"] = _count_near(desc, ["likes", "like", "suka"])
+    out["comments"] = _count_near(desc, ["comments", "comment", "komentar"])
+    m = re.search(r"-\s*([A-Za-z0-9._]{1,30})\s+(?:on|pada)\s", desc)
+    if m:
+        out["author"] = m.group(1)
+    # 2. the post's own data in the page (logged-in pages often have no summary)
+    code = re.search(r"/(?:p|reel|tv)/([A-Za-z0-9_-]+)", page.url)
+    html = page.content()
+    win = ""
+    if code:
+        i = max(html.find(f'"code":"{code.group(1)}"'), html.find(f'"shortcode":"{code.group(1)}"'))
+        win = html[max(0, i - 15000): i + 15000] if i >= 0 else ""
+
+    def num(*keys):
+        for k in keys:
+            mm = re.search(rf'"{k}":\s*(\d+)', win)
+            if mm:
+                return int(mm.group(1))
+        return None
+    if win:
+        out["likes"] = out["likes"] if out["likes"] is not None else num("like_count")
+        out["comments"] = out["comments"] if out["comments"] is not None else num("comment_count")
+        out["views"] = num("play_count", "ig_play_count", "view_count", "video_view_count")
+        if not out.get("caption"):
+            mm = re.search(r'"caption":\{[^{}]*?"text":"((?:[^"\\]|\\.)*)"', win)
+            out["caption"] = _unescape(mm.group(1)) if mm else ""
+        if not out.get("author"):
+            mm = re.search(r'"(?:owner|user)":\{[^{}]*?"username":"([A-Za-z0-9._]{1,30})"', win)
+            out["author"] = mm.group(1) if mm else None
+    # 3. what the page shows
+    dom = page.evaluate(r"""() => {
+      const main = document.querySelector('article') || document.querySelector('main') || document.body;
+      const h1 = main.querySelector('h1');
+      const head = main.querySelector('header a[href^="/"]:not([href*="/explore/"])');
+      return {caption: h1 ? h1.innerText : '', author: head ? head.getAttribute('href').split('/').filter(Boolean)[0] : '',
+              text: (main.innerText || '').slice(0, 6000)};
+    }""") or {}
+    if not out.get("caption"):
+        out["caption"] = dom.get("caption", "")
+    if not out.get("author") and dom.get("author"):
+        out["author"] = dom["author"]
+    text = dom.get("text", "")
+    if out["likes"] is None:
+        mm = re.search(r"(?:dan|and)\s+([\d.,]+\s*(?:rb|jt|K|M)?)\s+(?:lainnya|others)", text)   # "Disukai oleh x dan 1.234 lainnya"
+        out["likes"] = (parse_count(mm.group(1)) + 1) if mm else _count_near(text, ["suka", "likes", "like"])
+    if out["comments"] is None:
+        out["comments"] = _count_near(text, ["komentar", "comments"])
+    if out.get("views") is None:
+        out["views"] = _count_near(text, ["views", "plays", "tayangan", "kali diputar"])
+    return out
 
 
 def _read_tiktok(c) -> dict:

@@ -148,6 +148,8 @@ class Job:
             self.current = f"{label} — details {j + 1}/{len(posts)}"
             try:
                 p.details = read_details(crawler, platform, p.url)
+                if p.details.get("author") and not p.author:
+                    p.author = p.details["author"]          # e.g. Instagram's search grid shows no account name
             except Stopped:
                 return True
             except Exception as e:  # noqa: BLE001

@@ -456,3 +456,42 @@ def test_google_news_links_decoded_without_opening_them(tmp_path):
     assert posts and posts[0][0] == "garturlreq" and posts[0][2:] == [new_id, 1730000000, "SIG123"]
     assert not any("/rss/articles/" in u for u in navigations)        # no blank Google News tab opened
     assert took < 15, took
+
+
+IG_LOGGED_IN_JSON = ('<html><head><meta property="og:title" content="Instagram"></head><body><main><article><header>'
+                     '<a href="/pln_123/">pln_123</a></header><h1>caption from screen</h1></article></main><script type="application/json">'
+                     '{"items":[{"code":"DfR8OCzNf","caption":{"created_at":1,"text":"Listrik kembali normal \\u2705 #PLN"},'
+                     '"like_count":4321,"comment_count":87,"play_count":120000,"user":{"pk":"1","username":"pln_123"}}]}'
+                     '</script></body></html>')
+IG_LOGGED_IN_SCREEN = ('<html><body><main><article><header><a href="/bbws_citarum/">bbws_citarum</a></header>'
+                       '<h1>Normalisasi sungai selesai</h1><section>Disukai oleh warga_1 dan 1.234 lainnya</section>'
+                       '<div>Lihat semua 56 komentar</div></article></main></body></html>')
+
+
+def test_instagram_details_when_logged_in(tmp_path):
+    """Logged-in Instagram pages often carry no summary meta tag; read the page's post data, then the screen."""
+    if _browser_path() is None:
+        pytest.skip("no local Chromium")
+    from playwright.sync_api import sync_playwright
+
+    from crawler.browser import BrowserCrawler, launch_context
+    from crawler.details import read_details
+    pages = {"/p/DfR8OCzNf/": IG_LOGGED_IN_JSON, "/p/SCREEN1/": IG_LOGGED_IN_SCREEN,
+             "/p/NOTHING/": "<html><body><main>Sorry, something went wrong</main></body></html>"}
+    os.environ["CRAWLER_BROWSER_PATH"] = _browser_path()
+    with sync_playwright() as pw:
+        ctx = launch_context(pw, str(tmp_path / "profile"), headless=True)
+        ctx.route("**/*", lambda r: r.fulfill(status=200, content_type="text/html",
+                                              body=next((v for k, v in pages.items() if k in r.request.url), "<html></html>")))
+        c = _fast(BrowserCrawler(ctx, lambda m: None, threading.Event(), datetime(2026, 10, 1, tzinfo=UTC),
+                                 datetime(2026, 10, 31, tzinfo=UTC)))
+        c.page.wait_for_selector = lambda *a, **k: None
+        c.debug_dir = str(tmp_path / "debug")
+        d = read_details(c, "instagram", "https://www.instagram.com/p/DfR8OCzNf/")
+        assert d == {"caption": "Listrik kembali normal ✅ #PLN", "likes": 4321, "comments": 87, "shares": None,
+                     "views": 120000, "author": "pln_123"}
+        d = read_details(c, "instagram", "https://www.instagram.com/p/SCREEN1/")
+        assert (d["caption"], d["likes"], d["comments"], d["author"]) == ("Normalisasi sungai selesai", 1235, 56, "bbws_citarum")
+        d = read_details(c, "instagram", "https://www.instagram.com/p/NOTHING/")
+        assert d["caption"] == "" and len(os.listdir(tmp_path / "debug")) == 1      # one page copy for diagnosis
+        ctx.close()

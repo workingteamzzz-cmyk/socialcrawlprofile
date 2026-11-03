@@ -7,3 +7,4 @@ outputs/
 *.migrated
 *.deleted
 *.tmp
+startup_error.log

@@ -361,3 +361,49 @@ def test_logins_found_elsewhere_and_imported_over_an_unused_profile(tmp_path, mo
     assert paths.import_profile(str(old)) == ""
     assert (app / "browser_profile" / "Default" / "Network" / "Cookies").read_text() == "other"
     assert "No logins found" in paths.import_profile(str(tmp_path / "nothing"))
+
+
+def test_documents_not_writable_falls_back(tmp_path, monkeypatch):
+    """macOS can refuse Terminal access to Documents; the app must still start (it used to crash -> 'refused to connect')."""
+    from crawler import paths
+    home = tmp_path / "home"
+    (home / "Documents").mkdir(parents=True)
+    monkeypatch.delenv("CRAWLER_HOME", raising=False)
+    monkeypatch.setattr(os.path, "expanduser", lambda p: str(home) + p[1:] if p.startswith("~") else p)
+    real = paths._writable
+    monkeypatch.setattr(paths, "_writable", lambda f: False if "Documents" in f else real(f))
+    assert paths._documents() == str(home / "Post Link Collector")
+    monkeypatch.setattr(paths, "_writable", lambda f: False)
+    assert paths._documents() == paths._app_data()
+
+
+def test_app_starts_and_reports_a_busy_port(tmp_path):
+    import socket
+    import subprocess
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    env = dict(os.environ, PORT=str(port), CRAWLER_HOME=str(tmp_path / "home"))
+    app = subprocess.Popen([sys.executable, os.path.join(root, "run.py"), "--no-browser"], env=env,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, text=True)
+    try:
+        for _ in range(60):
+            try:
+                with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/status", timeout=2) as r:
+                    assert json.loads(r.read())["running"] is False
+                    break
+            except (urllib.error.URLError, ConnectionError):
+                time.sleep(0.25)
+        else:
+            raise AssertionError("app did not start")
+        second = subprocess.run([sys.executable, os.path.join(root, "run.py"), "--no-browser"], env=env, cwd=str(tmp_path),
+                                capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=60)
+        assert "Could not start on port" in second.stdout and "already running" in second.stdout
+    finally:
+        app.terminate()
+        app.wait(10)
+    log = os.path.join(root, "startup_error.log")
+    if os.path.exists(log):
+        os.remove(log)

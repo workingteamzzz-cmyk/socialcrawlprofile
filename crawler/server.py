@@ -139,6 +139,9 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"ok": err is None, "error": err})
 
 
+def make_server(port: int) -> ThreadingHTTPServer:
+    return ThreadingHTTPServer(("127.0.0.1", port), Handler)
+
+
 def serve(port: int):
-    httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    httpd.serve_forever()
+    make_server(port).serve_forever()

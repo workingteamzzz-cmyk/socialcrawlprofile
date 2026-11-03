@@ -297,6 +297,7 @@ def test_logins_and_lists_survive_a_new_version(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "PROFILE_DIR", str(home / "app" / "browser_profile"))
     monkeypatch.setattr(paths, "LISTS_DIR", str(home / "docs" / "lists"))
     monkeypatch.setattr(paths, "OUTPUT_DIR", str(home / "docs" / "outputs"))
+    monkeypatch.setattr(paths, "LOGINS_FILE", str(home / "app" / "logins.json"))
     logs = []
     paths.migrate(logs.append)
     assert (home / "app" / "browser_profile" / "Default" / "Cookies").read_text() == "cookie-db"
@@ -318,3 +319,45 @@ def test_login_status_from_cookies():
                     {"name": "sessionid", "domain": ".tiktok.com", "value": "z", "expires": time.time() - 10},   # expired
                     {"name": "c_user", "domain": ".facebook.com", "value": ""}]                                  # empty
     assert login_status(Ctx()) == {"instagram": True, "x": True, "tiktok": False, "threads": False, "facebook": False}
+
+
+
+def test_logins_found_elsewhere_and_imported_over_an_unused_profile(tmp_path, monkeypatch):
+    """The case from the field: the new version already created an (unsigned) profile, and the old copy sits on the
+    Desktop instead of next to the new one."""
+    from crawler import paths
+    home = tmp_path / "home"
+    new = home / "Downloads" / "post-link-collector-HEAD" / "post-link-collector"
+    old = home / "Desktop" / "post-link-collector"
+    for d in (new, old):
+        (d / "crawler").mkdir(parents=True)
+        (d / "run.py").write_text("")
+    (old / "browser_profile" / "Default" / "Network").mkdir(parents=True)
+    (old / "browser_profile" / "Default" / "Network" / "Cookies").write_text("signed-in")
+    app = home / "app"
+    (app / "browser_profile" / "Default").mkdir(parents=True)
+    (app / "browser_profile" / "Default" / "Preferences").write_text("{}")       # used once, never signed in
+    monkeypatch.setattr(paths, "ROOT", str(new))
+    monkeypatch.setattr(paths, "BUNDLED_LISTS", str(new / "data" / "lists"))
+    monkeypatch.setattr(paths, "APP_DATA", str(app))
+    monkeypatch.setattr(paths, "PROFILE_DIR", str(app / "browser_profile"))
+    monkeypatch.setattr(paths, "LOGINS_FILE", str(app / "logins.json"))
+    monkeypatch.setattr(paths, "LISTS_DIR", str(home / "docs" / "lists"))
+    monkeypatch.setattr(paths, "OUTPUT_DIR", str(home / "docs" / "outputs"))
+    monkeypatch.setattr(os.path, "expanduser", lambda p: str(home) + p[1:] if p.startswith("~") else p)
+    found = paths.find_old_profiles()
+    assert [f["app"] for f in found] == [str(old)] and found[0]["last_used"] > 0
+    logs = []
+    paths.migrate(logs.append)
+    assert (app / "browser_profile" / "Default" / "Network" / "Cookies").read_text() == "signed-in"
+    assert any(n.startswith("browser_profile_backup_") for n in os.listdir(app))   # the unused profile is kept aside
+    # once this copy is signed in, start-up never replaces its logins
+    (app / "logins.json").write_text('{"platforms": {"instagram": true}}')
+    (old / "browser_profile" / "Default" / "Network" / "Cookies").write_text("other")
+    os.utime(old / "browser_profile" / "Default" / "Network" / "Cookies", (time.time() + 100, time.time() + 100))
+    paths.migrate(logs.append)
+    assert (app / "browser_profile" / "Default" / "Network" / "Cookies").read_text() == "signed-in"
+    # manual import (dashboard button): app folder or its browser_profile folder; bad paths explained
+    assert paths.import_profile(str(old)) == ""
+    assert (app / "browser_profile" / "Default" / "Network" / "Cookies").read_text() == "other"
+    assert "No logins found" in paths.import_profile(str(tmp_path / "nothing"))

@@ -58,6 +58,9 @@ class Handler(BaseHTTPRequestHandler):
             except (OSError, ValueError):
                 pass
             return self._json({**info, "lists_dir": LISTS_DIR, "outputs_dir": OUT})
+        if u.path == "/api/old-profiles":
+            from .paths import find_old_profiles
+            return self._json({"profiles": find_old_profiles()[:10]})
         if u.path == "/api/lists":
             return self._json({"lists": store.lists()})
         if u.path == "/api/accounts":
@@ -123,6 +126,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": False, "error": str(e)})
             except OSError:
                 return self._json({"ok": False, "error": "Could not change the list file — is it open in Excel? Close it and try again."})
+        elif u.path == "/api/logins/import":
+            if JOB.running:
+                return self._json({"ok": False, "error": "Wait until the current job has finished (or Stop it) and try again."})
+            from .paths import import_profile
+            err = import_profile(data.get("path", ""), JOB.log) or None
         elif u.path == "/api/stop":
             JOB.stop()
             err = None

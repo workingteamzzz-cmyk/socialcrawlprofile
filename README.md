@@ -49,8 +49,12 @@ The app keeps your data **outside the app folder**, so a new version keeps every
 | Results (Excel/CSV) | `Documents/Post Link Collector/outputs` |
 | Platform logins (browser profile) | Windows `%LOCALAPPDATA%\PostLinkCollector`, Mac `~/Library/Application Support/PostLinkCollector` |
 
-To update: close the app, extract the new ZIP anywhere and start it. On its first start it copies logins and lists from
-an older copy of the app found next to it (e.g. `post-link-collector` next to `post-link-collector (1)`), once.
+To update: close the app, extract the new ZIP anywhere and start it. While this copy has not been signed in yet, it
+looks for an older copy of the app (next to it, or in Downloads, Desktop, Documents or your home folder) and copies its
+logins — the current profile is kept as a backup. Lists are copied once the same way.
+
+If the old copy is somewhere else, use **Import logins from an older copy…** (sidebar): pick a copy that was found,
+or paste the old app folder (the one with `run.py`) or its `browser_profile` folder.
 
 Logins are reopened with the same browser every time (Chrome, Edge or Chromium encrypt saved logins differently, so
 switching would log you out). The sidebar shows which platforms are signed in (✓/✗), checked at every login and run.

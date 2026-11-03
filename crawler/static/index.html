@@ -306,6 +306,7 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
     <div class="side-foot">
       <button class="btn-block" id="btnLogin" title="Open a browser to sign in to each platform (once)"><svg class="i"><use href="#i-login"/></svg>Log in to platforms</button>
       <div class="logins" id="logins" title="Sign-in status from the browser profile (checked at the last login or run)"></div>
+      <button class="btn sm ghost" id="btnImport" style="justify-content:center;color:var(--accent)">Import logins from an older copy…</button>
       <div class="status-row"><span class="dot" id="stDot"></span><div><b id="stTitle">Ready</b><small id="stSub">No job running</small></div></div>
     </div>
   </aside>
@@ -661,6 +662,21 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
     </div>
   </div>
 </div>
+<div class="modal" id="impModal" role="dialog" aria-modal="true" aria-labelledby="impTitle">
+  <div class="card" style="width:min(640px,100%)">
+    <div class="card-hd"><h3 id="impTitle">Import logins from an older copy</h3><div class="tools"><button class="iconbtn" id="impClose" aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div></div>
+    <div class="card-bd">
+      <p class="hint" style="margin-top:0">Copies the signed-in browser profile of an older copy of this app, so you don't have to log in again. The current profile is kept as a backup.</p>
+      <div id="impList" style="margin:10px 0"></div>
+      <div class="field"><label for="impPath">Or paste the old app folder (the one with <code>run.py</code>) or its <code>browser_profile</code> folder</label>
+        <input id="impPath" placeholder="e.g. C:\Users\you\Downloads\post-link-collector  or  /Users/you/Downloads/post-link-collector"></div>
+      <ul class="errs" id="impErrs"></ul>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+        <button class="btn" id="impCancel">Cancel</button><button class="btn primary" id="impGo">Import from this folder</button>
+      </div>
+    </div>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -883,7 +899,7 @@ const openAdd = () => { $('addErrs').innerHTML = ''; modal.classList.add('show')
 const closeAdd = () => modal.classList.remove('show');
 $('btnAdd').onclick = openAdd; $('addClose').onclick = closeAdd; $('addCancel').onclick = closeAdd;
 modal.addEventListener('click', e => { if (e.target === modal) closeAdd(); });
-document.addEventListener('keydown', e => { if (e.key === 'Escape'){ closeAdd(); closeList(); } });
+document.addEventListener('keydown', e => { if (e.key === 'Escape'){ closeAdd(); closeList(); if (typeof closeImp === 'function') closeImp(); } });
 $('addSave').onclick = async () => {
   const text = $('addUrls').value; if (!text.trim()){ $('addUrls').focus(); return; }
   const r = await api('/api/accounts/add', {list: listId, text, group: $('addUnit').value});
@@ -1165,6 +1181,29 @@ function renderNews(){
 $('nq').addEventListener('input', renderNews);
 $('nFilterKw').addEventListener('change', renderNews);
 async function refreshNews(){ nwResults = await api('/api/results?mode=news'); renderNews(); }
+
+/* ---------- import logins ---------- */
+const impModal = $('impModal');
+const closeImp = () => impModal.classList.remove('show');
+$('impClose').onclick = closeImp; $('impCancel').onclick = closeImp;
+impModal.addEventListener('click', e => { if (e.target === impModal) closeImp(); });
+async function doImport(path){
+  $('impErrs').innerHTML = '';
+  const r = await api('/api/logins/import', {path});
+  if (r.error){ $('impErrs').innerHTML = `<li>${esc(r.error)}</li>`; return; }
+  closeImp(); toast('Logins imported — no need to log in again'); loadLogins();
+}
+$('btnImport').onclick = async () => {
+  $('impErrs').innerHTML = ''; $('impList').innerHTML = '<div class="hint">Looking for older copies…</div>'; impModal.classList.add('show');
+  const d = await api('/api/old-profiles');
+  const list = d.profiles || [];
+  $('impList').innerHTML = list.length ? list.map((p, i) => `<div class="lrow"><span class="pin">${icon('i-file', 'width:16px;height:16px')}</span>
+      <div class="t"><b>${esc(p.app)}</b><small>${p.last_used ? 'last used ' + new Date(p.last_used * 1000).toLocaleString('en-GB', {day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit'}) : 'never signed in'}</small></div>
+      <button class="btn sm primary" data-imp="${i}">Import</button></div>`).join('')
+    : '<div class="hint">No older copy found in Downloads, Desktop, Documents or next to this app. Paste its folder below.</div>';
+  $('impList').querySelectorAll('[data-imp]').forEach(b => b.onclick = () => doImport(list[+b.dataset.imp].path));
+};
+$('impGo').onclick = () => { const v = $('impPath').value.trim(); if (!v){ $('impPath').focus(); return; } doImport(v); };
 
 /* ---------- sign-in status ---------- */
 async function loadLogins(){

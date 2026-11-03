@@ -137,7 +137,7 @@ def test_google_news_search_and_article(browser_ctx):
     from crawler.news import NewsCrawler, NewsOptions
     start, end = datetime(2026, 9, 30, 17, tzinfo=UTC), datetime(2026, 10, 31, 16, 59, tzinfo=UTC)
     c = _fast(NewsCrawler(browser_ctx, lambda m: None, threading.Event(), start, end, tz=WIB))
-    res = c.search("listrik", NewsOptions(by_day=False, source="search"), datetime(2026, 10, 1), datetime(2026, 10, 31))
+    res = c.search("listrik", NewsOptions(by_day=False, sources=["news_tab"]), datetime(2026, 10, 1), datetime(2026, 10, 31))
     assert res.status == "ok", res
     got = {r["url"]: r for r in res.posts}
     assert set(got) == {"https://www.kompas.com/a1", "https://news.detik.com/a2", "https://www.cnnindonesia.com/a3"}
@@ -145,7 +145,7 @@ def test_google_news_search_and_article(browser_ctx):
     assert got["https://www.kompas.com/a1"]["title"] == "Tarif listrik naik"
     assert got["https://www.cnnindonesia.com/a3"]["published"] == "2026-10-20"
     assert "2 result pages" in res.note
-    res = c.search("listrik", NewsOptions(cap=2, by_day=False, source="search"), datetime(2026, 10, 1), datetime(2026, 10, 31))
+    res = c.search("listrik", NewsOptions(cap=2, by_day=False, sources=["news_tab"]), datetime(2026, 10, 1), datetime(2026, 10, 31))
     assert len(res.posts) == 2
 
     a = c.article("https://www.kompas.com/a1")
@@ -212,7 +212,7 @@ def test_google_layout_variants(tmp_path, page, expect):
         c = _fast(NewsCrawler(ctx, lambda m: None, threading.Event(), datetime(2026, 9, 30, 17, tzinfo=UTC),
                               datetime(2026, 10, 31, 16, 59, tzinfo=UTC), tz=WIB, debug_dir=str(tmp_path / "debug")))
         c.page.wait_for_selector = lambda *a, **k: None
-        res = c.search("listrik pln", NewsOptions(by_day=False, source="search"), datetime(2026, 10, 1), datetime(2026, 10, 31))
+        res = c.search("listrik pln", NewsOptions(by_day=False, sources=["news_tab"]), datetime(2026, 10, 1), datetime(2026, 10, 31))
         ctx.close()
     if expect == "ok":
         got = {r["url"]: r for r in res.posts}
@@ -256,11 +256,11 @@ def test_google_news_day_by_day(tmp_path):
         ctx.route("**/*", route)
         c = _fast(NewsCrawler(ctx, lambda m: None, threading.Event(), datetime(2026, 10, 9, 17, tzinfo=UTC),
                               datetime(2026, 10, 12, 16, 59, tzinfo=UTC), tz=WIB))
-        res = c.search("listrik", NewsOptions(cap=0, source="search"), datetime(2026, 10, 10), datetime(2026, 10, 12))
+        res = c.search("listrik", NewsOptions(cap=0, sources=["news_tab"]), datetime(2026, 10, 10), datetime(2026, 10, 12))
         assert asked == ["10/12/2026", "10/11/2026", "10/10/2026"]          # newest day first
         assert len(res.posts) == 6 and "day by day (3 days)" in res.note
         asked.clear()
-        res = c.search("listrik", NewsOptions(cap=3, source="search"), datetime(2026, 10, 10), datetime(2026, 10, 12))
+        res = c.search("listrik", NewsOptions(cap=3, sources=["news_tab"]), datetime(2026, 10, 10), datetime(2026, 10, 12))
         assert len(res.posts) == 3 and asked == ["10/12/2026", "10/11/2026"]   # stops once the cap is reached
         ctx.close()
 
@@ -306,7 +306,7 @@ def test_google_news_feed_with_media_links(tmp_path):
         ctx.route("**/*", route)
         c = _fast(NewsCrawler(ctx, lambda m: None, threading.Event(), datetime(2026, 9, 30, 17, tzinfo=UTC),
                               datetime(2026, 10, 31, 16, 59, tzinfo=UTC), tz=WIB))
-        res = c.search("listrik", NewsOptions(source="news", by_day=False, exact=True), datetime(2026, 10, 1), datetime(2026, 10, 31))
+        res = c.search("listrik", NewsOptions(sources=["feed"], by_day=False, exact=True), datetime(2026, 10, 1), datetime(2026, 10, 31))
         got = {r["title"]: r for r in res.posts}
         assert set(got) == {"PLN pulihkan listrik", "Pemadaman bergilir & jadwal", "Tanpa redirect"}
         assert got["PLN pulihkan listrik"]["url"] == "https://media.example/A1" and got["PLN pulihkan listrik"]["media"] == "Kompas"
@@ -315,11 +315,84 @@ def test_google_news_feed_with_media_links(tmp_path):
         assert "after:2026-09-29 before:2026-11-01" in feeds[0] and "hl=id" in feeds[0]
         assert "2/3 media links resolved" in res.note and "1 outside the period dropped" in res.note
         feeds.clear()
-        res = c.search("listrik", NewsOptions(source="news", cap=0, resolve=False), datetime(2026, 10, 20), datetime(2026, 10, 22))
+        res = c.search("listrik", NewsOptions(sources=["feed"], cap=0, resolve=False), datetime(2026, 10, 20), datetime(2026, 10, 22))
         assert len(feeds) == 3 and len(res.posts) == 3                                         # one feed per day, merged
         assert all(p["url"].startswith("https://news.google.com/") for p in res.posts)          # resolve off
         feeds.clear()
-        res = c.search("listrik", NewsOptions(source="news", cap=2, resolve=False), datetime(2026, 10, 20), datetime(2026, 10, 22))
+        res = c.search("listrik", NewsOptions(sources=["feed"], cap=2, resolve=False), datetime(2026, 10, 20), datetime(2026, 10, 22))
         assert len(feeds) == 1 and len(res.posts) == 2                                         # stops once the cap is met
         assert [p["published"] for p in res.posts] == ["2026-10-22", "2026-10-21"]               # newest kept
         ctx.close()
+
+
+def test_media_filter():
+    from crawler.media import is_media
+    assert is_media("https://www.kompas.com/read/2026/10/20/x") is True
+    assert is_media("https://regional.kompas.com/read/2026/10/20/x") is True
+    assert is_media("https://radarcirebon.com/2026/10/20/pln-listrik") is True
+    for junk in ("https://id.wikipedia.org/wiki/PLN", "https://www.youtube.com/watch?v=abc", "https://www.tokopedia.com/x",
+                 "https://www.kompas.com/", "https://a.com/laporan.pdf", "https://www.facebook.com/pln/posts/1",
+                 "https://www.kompasiana.com/x/123"):
+        assert is_media(junk) is False, junk
+    assert is_media("https://www.pln.co.id/media/siaran-pers") is None          # company site: not media
+    assert is_media("https://www.pln.co.id/media/siaran-pers", ["pln.co.id"]) is True
+
+
+GOOGLE_ALL_P1 = """<html><body><div id="rso">
+<div data-hveid="1"><a href="https://www.kompas.com/read/2026/10/20/pln-listrik"><h3>PLN pulihkan listrik di Jawa</h3>
+  <div>Kompas.com</div><div>https://www.kompas.com › read</div></a><div>20 Okt 2026 — PLN memulihkan ...</div></div>
+<div data-hveid="2"><a href="https://id.wikipedia.org/wiki/Perusahaan_Listrik_Negara"><h3>Perusahaan Listrik Negara - Wikipedia</h3></a></div>
+<div data-hveid="3"><a href="https://www.youtube.com/watch?v=abcdefghijk"><h3>Video PLN terbaru hari ini</h3></a></div>
+<div data-hveid="4"><a href="https://www.tokopedia.com/token-listrik"><h3>Token listrik murah - Tokopedia</h3></a></div>
+<div data-hveid="5"><a href="https://www.pln.co.id/media/siaran-pers/2026/10/x"><h3>Siaran pers PLN Oktober 2026</h3></a></div>
+</div><a id="pnnext" href="/search?q=x&start=10">Next</a></body></html>"""
+GOOGLE_ALL_P2 = """<html><body><div id="rso">
+<div data-hveid="6"><a href="https://radarcirebon.com/2026/10/20/pemadaman-listrik-bergilir"><h3>Pemadaman listrik bergilir di Cirebon</h3>
+  <div>Radar Cirebon</div></a><div>20 Okt 2026 — Jadwal ...</div></div>
+<div data-hveid="7"><a href="https://www.facebook.com/plnindonesia/posts/123"><h3>PLN Indonesia - Facebook</h3></a></div>
+</div><a id="pnnext" href="/search?q=x&start=20">Next</a></body></html>"""
+GOOGLE_ALL_P3 = """<html><body><div id="rso">
+<div data-hveid="8"><a href="https://news.detik.com/berita/d-7000000/listrik-padam"><h3>Listrik padam, warga mengeluh</h3>
+  <div>detikNews</div></a><div>20 Okt 2026</div></div></div></body></html>"""
+
+
+def test_google_all_results_media_only_to_the_last_page(tmp_path):
+    if _browser_path() is None:
+        pytest.skip("no local Chromium")
+    from playwright.sync_api import sync_playwright
+
+    from crawler.browser import launch_context
+    from crawler.news import NewsCrawler, NewsOptions
+    asked = []
+
+    def route(r):
+        url = r.request.url
+        if "google.com/search" in url:
+            asked.append(url)
+            body = GOOGLE_ALL_P3 if "start=20" in url else GOOGLE_ALL_P2 if "start=10" in url else GOOGLE_ALL_P1
+            return r.fulfill(status=200, content_type="text/html", body=body)
+        r.fulfill(status=200, content_type="text/html", body="<html></html>")
+    os.environ["CRAWLER_BROWSER_PATH"] = _browser_path()
+    with sync_playwright() as pw:
+        ctx = launch_context(pw, str(tmp_path / "profile"), headless=True)
+        ctx.route("**/*", route)
+        c = _fast(NewsCrawler(ctx, lambda m: None, threading.Event(), datetime(2026, 10, 19, 17, tzinfo=UTC),
+                              datetime(2026, 10, 20, 16, 59, tzinfo=UTC), tz=WIB))
+        res = c.search("listrik", NewsOptions(sources=["all_tab"], by_day=False, cap=0), datetime(2026, 10, 20), datetime(2026, 10, 20))
+        urls = sorted(p["url"] for p in res.posts)
+        assert urls == ["https://news.detik.com/berita/d-7000000/listrik-padam",
+                        "https://radarcirebon.com/2026/10/20/pemadaman-listrik-bergilir",
+                        "https://www.kompas.com/read/2026/10/20/pln-listrik"]
+        assert "tbm=nws" not in asked[0] and len(asked) == 3                  # All tab, read to the last page
+        assert "4 non-media results skipped" in res.note and "3 result pages" in res.note
+        k = next(p for p in res.posts if "kompas" in p["url"])
+        assert k["media"] == "Kompas.com" and k["published"] == "2026-10-20" and k["title"] == "PLN pulihkan listrik di Jawa"
+        # the company's own site counts once the user adds it as a medium
+        res = c.search("listrik", NewsOptions(sources=["all_tab"], by_day=False, cap=0, extra_media=["pln.co.id"]),
+                       datetime(2026, 10, 20), datetime(2026, 10, 20))
+        assert any("pln.co.id" in p["url"] for p in res.posts)
+        ctx.close()
+    from crawler.news import NewsOptions as NO
+    assert NO.from_dict({"source": "both"}).sources == ["feed", "news_tab"]               # older settings still work
+    assert NO.from_dict({}).sources == ["feed", "news_tab", "all_tab"]
+    assert NO.from_dict({"sources": ["all_tab", "bogus"]}).sources == ["all_tab"]

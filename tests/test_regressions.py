@@ -207,11 +207,11 @@ def test_news_engine_review_fixes(tmp_path):
         c = _news_crawler(ctx)
         # ordinary traffic news is not a captcha; an absolute date the day before the period is dropped
         t = time.time()
-        res = c.search("lalu lintas", NewsOptions(source="search", by_day=False), datetime(2026, 10, 20), datetime(2026, 10, 20))
+        res = c.search("lalu lintas", NewsOptions(sources=["news_tab"], by_day=False), datetime(2026, 10, 20), datetime(2026, 10, 20))
         assert time.time() - t < 30 and [p["url"] for p in res.posts] == ["https://a.example/1"]
         assert "1 outside the period dropped" in res.note
         # the article's own link, not the ad iframe
-        res = c.search("x", NewsOptions(source="news", by_day=False, cap=1), datetime(2026, 10, 20), datetime(2026, 10, 20))
+        res = c.search("x", NewsOptions(sources=["feed"], by_day=False, cap=1), datetime(2026, 10, 20), datetime(2026, 10, 20))
         assert res.posts[0]["url"] == "https://media.example/G4"
         # Stop while links are being resolved keeps the whole batch
         stop = threading.Event()
@@ -227,7 +227,7 @@ def test_news_engine_review_fixes(tmp_path):
             return real(u)
         c2._resolve = resolve
         with pytest.raises(Stopped) as e:
-            c2.search("x", NewsOptions(source="news", by_day=False), datetime(2026, 10, 20), datetime(2026, 10, 20))
+            c2.search("x", NewsOptions(sources=["feed"], by_day=False), datetime(2026, 10, 20), datetime(2026, 10, 20))
         urls = [p["url"] for p in e.value.posts]
         assert len(urls) == 5 and sum(u.startswith("https://media.example/") for u in urls) == 2
     finally:

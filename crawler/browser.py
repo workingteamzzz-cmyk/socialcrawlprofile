@@ -14,7 +14,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Callable
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 from .accounts import Account
 from .idtime import instagram_shortcode_time, tiktok_id_time, x_status_time
@@ -108,6 +108,25 @@ class BrowserCrawler:
         self.start = start_utc
         self.end = end_utc
         self.page = context.pages[0] if context.pages else context.new_page()
+        self.debug_dir: str | None = None     # set by the job: where to keep a copy of a page that gave no links
+
+    def _snapshot(self, tag: str) -> str:
+        """Save the current page's HTML for diagnosis (returns the file name, or "")."""
+        if not self.debug_dir:
+            return ""
+        try:
+            os.makedirs(self.debug_dir, exist_ok=True)
+            name = re.sub(r"[^\w-]+", "_", tag)[:60] + f"_{datetime.now():%H%M%S}.html"
+            with open(os.path.join(self.debug_dir, name), "w", encoding="utf-8") as f:
+                f.write(f"<!-- {self.page.url} -->\n" + self.page.content())
+            return name
+        except Exception:  # noqa: BLE001
+            return ""
+
+    def _empty_note(self, base: str, tag: str) -> str:
+        name = self._snapshot(tag)
+        return base + (f" — a copy of the page was saved to outputs/debug/{name} (check it, then send it in if this "
+                       "account does have posts)" if name else "")
 
     # ---------- helpers ----------
     def _check_stop(self):
@@ -210,7 +229,8 @@ class BrowserCrawler:
                 return Result("login_required", [], "Login required — click 'Log in to platforms' and sign in to this platform")
             if state == "not_found":
                 return Result("not_found", [], "Account not found / unavailable")
-            return Result("ok", [], "No posts could be read from the profile")
+            return Result("ok", [], self._empty_note("No posts could be read from the profile",
+                                                     urlparse(self.page.url).netloc + urlparse(self.page.url).path))
         notes = []
         undated = sum(1 for p in posts if p.time_utc is None)
         if undated:
@@ -385,28 +405,78 @@ class BrowserCrawler:
 
         return self._scroll_collect(extract, older_needed=older_needed, idle_limit=4, max_rounds=max_rounds, cap=cap)
 
+    _YT_CHANNEL_JS = r"""() => {
+      const m = (document.querySelector('meta[itemprop="identifier"]') || {}).content
+             || ((document.querySelector('link[rel="canonical"]') || {}).href || '').split('/channel/')[1]
+             || (document.documentElement.innerHTML.match(/"(?:externalId|browseId|channelId)":"(UC[\w-]{22})"/) || [])[1];
+      return m || '';
+    }"""
+
+    def _yt_feed(self) -> dict:
+        """YouTube's own channel feed: the ~15 newest uploads with exact publish times. Reliable even when the
+        channel page layout changes. {video_id: Post}"""
+        try:
+            cid = self.page.evaluate(self._YT_CHANNEL_JS) or ""
+            if not re.fullmatch(r"UC[\w-]{22}", cid):
+                return {}
+            xml = self.page.evaluate(_FETCH_TEXT_JS, f"/feeds/videos.xml?channel_id={cid}") or ""
+        except Exception as e:  # noqa: BLE001
+            if BROWSER_CLOSED in str(e):
+                raise
+            return {}
+        import xml.etree.ElementTree as ET
+        ns = {"a": "http://www.w3.org/2005/Atom", "yt": "http://www.youtube.com/xml/schemas/2015"}
+        try:
+            root = ET.fromstring(xml.encode("utf-8"))
+        except ET.ParseError:
+            return {}
+        out = {}
+        for e in root.findall("a:entry", ns):
+            vid = (e.findtext("yt:videoId", "", ns) or "").strip()
+            dt = _parse_iso(e.findtext("a:published", "", ns) or "")
+            link = (e.find("a:link", ns).get("href") if e.find("a:link", ns) is not None else "") or ""
+            if not re.fullmatch(r"[\w-]{11}", vid):
+                continue
+            url = f"https://www.youtube.com/shorts/{vid}" if "/shorts/" in link else f"https://www.youtube.com/watch?v={vid}"
+            author = (e.findtext("a:author/a:name", "", ns) or "").strip()
+            out[vid] = Post(url, dt, author)
+        return out
+
     def youtube(self, acc: Account) -> Result:
         base = acc.url.rstrip("/")
-        found: dict[str, Post] = {}
+        found: dict[str, Post] = {}            # by video id
         tabs_seen = 0
+        feed = {}
         for tab in ("videos", "shorts", "streams"):
             self._goto(f"{base}/{tab}")
-            if tabs_seen == 0 and self._page_state(("consent.youtube.com",)) == "not_found":
+            if tabs_seen == 0 and not feed and self._page_state(("consent.youtube.com",)) == "not_found":
                 return Result("not_found", [], "Channel not found")
+            if not feed:
+                feed = self._yt_feed()
+                cache = self.__dict__.setdefault("_yt_cache", {})
+                for vid, p in feed.items():        # exact dates without opening those videos
+                    cache.setdefault(vid, (p.time_utc, p.author))
             if f"/{tab}" not in self.page.url:   # channel has no such tab (YouTube redirects to the home tab)
                 continue
             tabs_seen += 1
             try:
                 tab_posts = self._yt_collect("ytd-rich-item-renderer a[href], ytd-grid-video-renderer a[href]", older_needed=2)
             except Stopped as e:              # keep the tabs already read
-                raise Stopped(list(found.values()) + e.posts) from None
+                raise Stopped(list(found.values()) + e.posts + list(feed.values())) from None
             for p in tab_posts:
-                found.setdefault(p.url, p)
-        if not tabs_seen:
-            return self._finish([], ("consent.youtube.com",))
+                found.setdefault(_yt_id(p.url), p)
+        for vid, p in feed.items():
+            found.setdefault(vid, p)
         posts = list(found.values())
+        if not posts:
+            if not tabs_seen:
+                return self._finish([], ("consent.youtube.com",))
+            return Result("ok", [], self._empty_note("No videos could be read from the channel", "youtube_" + acc.handle))
         undated = sum(1 for p in posts if p.time_utc is None)
-        return Result("ok", self._in_range(posts), f"{undated} videos without a readable date skipped" if undated else "")
+        notes = [f"{len(feed)} newest videos from the channel feed"] if feed else ["channel feed not available"]
+        if undated:
+            notes.append(f"{undated} videos without a readable date skipped")
+        return Result("ok", self._in_range(posts), "; ".join(notes))
 
     def facebook(self, acc: Account) -> Result:
         posts = self._fb_collect(acc.url, older_needed=3, idle_limit=6)
@@ -464,6 +534,18 @@ class BrowserCrawler:
                 self.page.remove_listener("response", on_response)
             except Exception:  # noqa: BLE001
                 pass
+
+
+_FETCH_TEXT_JS = r"""async (url) => {
+  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 20000);
+  try { const r = await fetch(url, {credentials: 'include', signal: ctl.signal}); return r.ok ? await r.text() : ''; }
+  catch (e) { return ''; } finally { clearTimeout(t); }
+}"""
+
+
+def _yt_id(url: str) -> str:
+    m = re.search(r"(?:v=|/shorts/)([\w-]{11})", url)
+    return m.group(1) if m else url
 
 
 def _parse_iso(value: str) -> datetime | None:

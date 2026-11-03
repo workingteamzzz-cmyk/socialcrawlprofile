@@ -22,8 +22,8 @@ What you get is chosen per run:
   - Instagram & Threads: the `/p/…`, `/reel/…`, `/post/…` shortcode
   - X: the status ID (snowflake), plus X search `from:user since:… until:…` to narrow to the period
   - TikTok: the video/photo ID
-  - YouTube: video IDs carry no date, so each video's publish date is read from its page by the same browser
-    (Videos, Shorts and Live tabs). No login needed.
+  - YouTube: the channel's own feed gives the ~15 newest uploads with exact dates; older ones come from the
+    Videos, Shorts and Live tabs, each video's date read from its page by the same browser. No login needed.
   - Facebook: read from the data the page loads while scrolling. The most fragile platform — best effort.
 - Scrolling stops on its own once it passes the start date; pinned (old) posts don't stop it early.
 
@@ -118,25 +118,28 @@ not show that number. The Excel gets extra columns Caption, Likes, Comments, Sha
 
 ## News from Google
 
-Two sources, used together by default (*Source* option):
+Three sources, all on by default (*Advanced options → Sources*); an article found by several appears once:
 
 - **Google News feed** (most reliable): the browser asks news.google.com for the keyword per day and gets a
   structured list (title, media, exact publish time — up to 100 articles per search). Each Google News link is then
   opened once to catch the media's own article URL (*Get the media's own link*; about 1–3 s each — turn it off to keep
   the news.google.com links, which still open the article).
-- **Google Search, News tab**: opens Google with the keyword and a custom date range (sorted by date), reads the
-  result cards and clicks *Next* page after page, pausing like a reader. Results Google hides as "very similar" are
-  included. If Google asks for a captcha ("unusual traffic"), solve it in the browser window — the run waits up to
-  5 minutes.
+- **Google Search · News tab**: Google with the keyword and a custom date range, sorted by date, page by page.
+- **Google Search · All results**: the regular "All" tab with the same date range, read **to the last page**. Only
+  articles from news media are kept: a built-in list of Indonesian and international media, plus sites that clearly
+  look like a news portal's article (e.g. `radarxyz.com/2026/10/20/...`). Social media, video sites, forums,
+  marketplaces, wikis, company/government pages and files are skipped. Add a portal that is not recognised under
+  *Also count as media*.
+
+*Media only* (on) applies the same junk filter to the other two sources. Search status notes how many results were
+read, skipped as non-media, or outside the period.
 
 Google shows a limited number of results per search, so with **Search day by day** (on by default) a longer period is
-searched one day at a time, newest day first. Links found by both sources appear once.
+searched one day at a time, newest day first. All three sources × every day means many Google searches — for long
+periods start with a few keywords; if Google asks for a captcha ("unusual traffic"), solve it in the browser window
+(the run waits up to 5 minutes).
 
-If a Google Search results page cannot be read at all (Google changed its layout), a copy of the page is saved in
-`outputs/debug/` — send it in so the reader can be updated. (Check it first: it can contain the name of the Google
-account you are signed in with.)
-
-Options: source, get the media's own link, search day by day, max links per keyword (50 / 100 / 300 / 1,000 / no limit), region (Indonesia / global English), exact phrase, excluded words, only these
+Options: sources, media only, also count as media, get the media's own link, search day by day, max links per keyword (50 / 100 / 300 / 1,000 / no limit), region (Indonesia / global English), exact phrase, excluded words, only these
 sites (e.g. `kompas.com, detik.com`), and the output level:
 - **Links only** — keyword + link.
 - **Links + title, media & date** — read from the result cards, no extra time.
@@ -177,6 +180,12 @@ while a run is going, the app keeps collecting and saves again after the next ac
 
 - Lists from earlier versions (`data/accounts.csv`, `data/custom_accounts.csv`) are moved into `data/lists/Ditjen SDA.csv`
   automatically on first start.
+
+## When something returns 0 links
+
+If a profile, keyword search or Google page loads but gives no links, the app keeps a copy of that page in
+`outputs/debug/` and says so in the status notes. Send that file (with the Excel file) so the reader can be adjusted to
+the site's current layout. Check it first — it can show the name of the account you are signed in with.
 
 ## Limitations
 

@@ -341,3 +341,46 @@ def test_youtube_channel_and_search_in_browser(tmp_path):
         assert {p.author for p in res.posts} == {"owner_01", "owner_02", "owner_03"}
         assert "after:2026-09-30 before:2026-11-01" in res.note
         ctx.close()
+
+
+@pytest.mark.skipif(_browser_path() is None, reason="no local Chromium")
+def test_youtube_channel_feed_when_the_page_has_no_readable_videos(tmp_path):
+    from playwright.sync_api import sync_playwright
+
+    from crawler.accounts import parse_line
+    from crawler.browser import BrowserCrawler, launch_context
+    cid = "UC" + "a" * 22
+    feed = ('<?xml version="1.0" encoding="UTF-8"?><feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" '
+            'xmlns="http://www.w3.org/2005/Atom">' + "".join(
+                f'<entry><yt:videoId>{vid}</yt:videoId><title>t</title><link rel="alternate" href="https://www.youtube.com/'
+                f'{"shorts/" if i == 1 else "watch?v="}{vid}"/><author><name>Chan</name></author>'
+                f'<published>{pub}</published></entry>'
+                for i, (vid, pub) in enumerate([("feedvid0001", "2026-10-25T03:00:00+00:00"), ("feedvid0002", "2026-10-10T03:00:00+00:00"),
+                                                ("feedvid0003", "2026-09-01T03:00:00+00:00")])) + "</feed>")
+    page = f'<html><head><meta itemprop="identifier" content="{cid}"></head><body>channel with an unknown layout</body></html>'
+    fetched = []
+
+    def route(r):
+        url = r.request.url
+        if "/feeds/videos.xml" in url:
+            fetched.append(url)
+            return r.fulfill(status=200, content_type="application/xml", body=feed)
+        if "/watch?v=" in url:
+            fetched.append(url)
+        r.fulfill(status=200, content_type="text/html", body=page)
+    os.environ["CRAWLER_BROWSER_PATH"] = _browser_path()
+    with sync_playwright() as pw:
+        ctx = launch_context(pw, str(tmp_path / "profile"), headless=True)
+        ctx.route("**/*", route)
+        c = BrowserCrawler(ctx, lambda m: None, threading.Event(), datetime(2026, 10, 1, tzinfo=UTC), datetime(2026, 10, 31, tzinfo=UTC))
+        c._pause = lambda lo=0, hi=0: c.page.wait_for_timeout(100)
+        c.debug_dir = str(tmp_path / "debug")
+        res = c.youtube(parse_line("https://www.youtube.com/@chan"))
+        assert sorted(p.url for p in res.posts) == ["https://www.youtube.com/shorts/feedvid0002",
+                                                   "https://www.youtube.com/watch?v=feedvid0001"]
+        assert f"channel_id={cid}" in fetched[0] and "3 newest videos from the channel feed" in res.note
+        assert not any("/watch?v=" in u for u in fetched)               # feed dates: no video page opened
+        # a profile page with nothing readable keeps a copy for diagnosis
+        res = c.instagram(parse_line("https://www.instagram.com/someone"))
+        assert "outputs/debug/" in res.note and len(os.listdir(tmp_path / "debug")) == 1
+        ctx.close()

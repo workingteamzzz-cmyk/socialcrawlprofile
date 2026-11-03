@@ -13,9 +13,12 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, urlparse
 
 from .browser import BROWSER_CLOSED, BrowserCrawler, Result, Stopped, _parse_iso
+from .media import is_media
 
 DETAIL_LEVELS = ("links", "basic", "full")
-SOURCES = ("news", "search", "both")
+SOURCES = ("feed", "news_tab", "all_tab")
+SOURCE_LABEL = {"feed": "Google News feed", "news_tab": "Google Search · News tab", "all_tab": "Google Search · All results (media only)"}
+_LEGACY_SOURCE = {"news": ["feed"], "search": ["news_tab"], "both": ["feed", "news_tab"]}
 _MAX_TEXT = 30000
 
 _MONTHS = {m: i + 1 for i, names in enumerate([
@@ -38,8 +41,10 @@ class NewsOptions:
     exclude: list[str] = field(default_factory=list)
     sites: list[str] = field(default_factory=list)
     detail: str = "basic"          # links | basic (title, media, date) | full (+ article text)
-    source: str = "both"           # news = Google News feed, search = Google Search News tab, both
+    sources: list[str] = field(default_factory=lambda: list(SOURCES))   # feed / news_tab / all_tab
     resolve: bool = True           # open Google News links to get each media's own article link
+    media_only: bool = True        # skip non-media links (social media, forums, shops, wikis, files)
+    extra_media: list[str] = field(default_factory=list)   # more domains to treat as media
 
     @classmethod
     def from_dict(cls, d: dict) -> "NewsOptions":
@@ -47,19 +52,30 @@ class NewsOptions:
         def split(v):
             items = re.split(r"[,\n]+", v) if isinstance(v, str) else (v if isinstance(v, list) else [])
             return [str(w).strip() for w in items if str(w).strip()]
-        sites = []
-        for s in split(d.get("sites")):
-            host = urlparse(s if "://" in s else "https://" + s).netloc.lower().removeprefix("www.")
-            if re.fullmatch(r"[a-z0-9.-]+\.[a-z]{2,}", host):
-                sites.append(host)
+        def hosts(v):
+            out = []
+            for s in split(v):
+                try:
+                    host = urlparse(s if "://" in s else "https://" + s).netloc.lower().removeprefix("www.")
+                except ValueError:
+                    continue
+                if re.fullmatch(r"[a-z0-9.-]+\.[a-z]{2,}", host):
+                    out.append(host)
+            return out
+        sites = hosts(d.get("sites"))
+        srcs = d.get("sources")
+        if isinstance(srcs, list):
+            srcs = [x for x in SOURCES if x in srcs]
+        else:
+            srcs = _LEGACY_SOURCE.get(d.get("source"), list(SOURCES))
         detail = d.get("detail") if d.get("detail") in DETAIL_LEVELS else "basic"
         cap = d.get("cap", 100)
         return cls(cap=max(0, int(cap if cap not in (None, "") else 100)), by_day=bool(d.get("by_day", True)),
                    region="any" if d.get("region") == "any" else "id",
                    exact=bool(d.get("exact")), exclude=[w.lstrip("-") for w in split(d.get("exclude"))],
                    sites=sites[:20], detail=detail,
-                   source=d.get("source") if d.get("source") in SOURCES else "both",
-                   resolve=bool(d.get("resolve", True)))
+                   sources=srcs or ["feed"], resolve=bool(d.get("resolve", True)),
+                   media_only=bool(d.get("media_only", True)), extra_media=hosts(d.get("extra_media"))[:200])
 
 
 def google_query(kw: str, opt: NewsOptions) -> str:
@@ -71,11 +87,13 @@ def google_query(kw: str, opt: NewsOptions) -> str:
     return " ".join(parts)
 
 
-def google_news_url(q: str, start_local: datetime, end_local: datetime, region: str) -> str:
-    rng = f"cdr:1,cd_min:{start_local:%m/%d/%Y},cd_max:{end_local:%m/%d/%Y},sbd:1"
+def google_news_url(q: str, start_local: datetime, end_local: datetime, region: str, tab: str = "news_tab") -> str:
+    """Google Search with a custom date range. tab="news_tab" = the News tab (sorted by date); "all_tab" = All results."""
+    rng = f"cdr:1,cd_min:{start_local:%m/%d/%Y},cd_max:{end_local:%m/%d/%Y}" + (",sbd:1" if tab == "news_tab" else "")
     loc = "&hl=id&gl=ID" if region == "id" else "&hl=en&gl=US"
+    nws = "&tbm=nws" if tab == "news_tab" else ""
     # filter=0: include the results Google hides as "very similar to the ones shown"
-    return f"https://www.google.com/search?q={quote(q)}&tbm=nws&tbs={quote(rng, safe=':,')}{loc}&filter=0"
+    return f"https://www.google.com/search?q={quote(q)}{nws}&tbs={quote(rng, safe=':,')}{loc}&filter=0"
 
 
 def parse_news_date(text: str, now: datetime) -> datetime | None:
@@ -261,12 +279,14 @@ class NewsCrawler(BrowserCrawler):
         found: dict[str, dict] = {}
         notes, statuses = [], []
         try:
-            for src in (("news", "search") if opt.source == "both" else (opt.source,)):
+            for src in opt.sources:
                 if opt.cap and len(found) >= opt.cap:
                     break
-                fn = self._search_feed if src == "news" else self._search_google
-                res = fn(kw, opt, start_local, end_local, found)
-                notes.append(("Google News: " if src == "news" else "Google Search: ") + res.note)
+                if src == "feed":
+                    res = self._search_feed(kw, opt, start_local, end_local, found)
+                else:
+                    res = self._search_google(kw, opt, start_local, end_local, found, tab=src)
+                notes.append(f"{SOURCE_LABEL[src]}: {res.note}")
                 statuses.append(res.status)
         except Stopped:
             raise Stopped(list(found.values())) from None
@@ -337,7 +357,11 @@ class NewsCrawler(BrowserCrawler):
                 if real:
                     r["url"] = real
                     resolved += 1
+        junk = 0
         for r in fresh:
+            if opt.media_only and is_media(r["url"], opt.extra_media) is False and "news.google." not in r["url"]:
+                junk += 1
+                continue
             found.setdefault(_key(r["url"]), r)
         fresh.clear()
         note = f"query: {q}; {len(windows)} search{'es' if len(windows) != 1 else ''}; {read} articles read"
@@ -347,6 +371,8 @@ class NewsCrawler(BrowserCrawler):
             note += f"; {resolved}/{n_fresh} media links resolved"
         if failed:
             note += f"; {failed} feed request(s) failed"
+        if junk:
+            note += f"; {junk} non-media links skipped"
         return Result("error" if failed == len(windows) else "ok", [], note)
 
     def _resolve(self, gnews_url: str) -> str:
@@ -383,7 +409,8 @@ class NewsCrawler(BrowserCrawler):
         return target.get("url", "")
 
     # ---------- Google Search, News tab ----------
-    def _search_google(self, kw: str, opt: NewsOptions, start_local: datetime, end_local: datetime, found: dict) -> Result:
+    def _search_google(self, kw: str, opt: NewsOptions, start_local: datetime, end_local: datetime, found: dict,
+                       tab: str = "news_tab") -> Result:
         """Google stops at ~300 results per search, so a longer period is searched day by day (newest first)
         when opt.by_day is on; results are merged and capped at opt.cap."""
         days = (end_local.date() - start_local.date()).days + 1
@@ -399,9 +426,9 @@ class NewsCrawler(BrowserCrawler):
                     self.log(f"   · {a:%d %b %Y} ({i + 1}/{len(windows)})")
                     if i:
                         self._pause(3, 6)        # a person moving on to the next day
-                self._goto(google_news_url(q, a, b, opt.region))
+                self._goto(google_news_url(q, a, b, opt.region, tab))
                 self._accept_consent()
-                res = self._search_pages(q, opt, found)
+                res = self._search_pages(q, opt, found, tab)
                 cards += res.cards
                 if res.status == "error":
                     errors.append(res.note)
@@ -418,11 +445,11 @@ class NewsCrawler(BrowserCrawler):
         status = "error" if errors and not found else "ok"
         return Result(status, list(found.values()), note)
 
-    def _search_pages(self, q: str, opt: NewsOptions, found: dict) -> Result:
-        pages = cards = outside_period = 0
+    def _search_pages(self, q: str, opt: NewsOptions, found: dict, tab: str = "news_tab") -> Result:
+        pages = cards = outside_period = junk = 0
         snapshot = ""
         start_count = len(found)
-        while pages < 40:
+        while pages < (60 if tab == "all_tab" else 40):     # until Google's last page
             self._check_stop()
             if not self._wait_google_captcha():
                 return _with_cards(Result("error", list(found.values()), "Google captcha was not solved in time"), cards)
@@ -440,13 +467,18 @@ class NewsCrawler(BrowserCrawler):
                 url = item["url"]
                 if _key(url) in found:
                     continue
+                medium = is_media(url, opt.extra_media)
+                if (tab == "all_tab" and medium is not True) or (opt.media_only and medium is False):
+                    junk += 1                                 # not an article from a news medium
+                    continue
                 lines = [ln for ln in item.get("lines", []) if ln != item["title"]]
                 date_txt = next((ln for ln in reversed(lines) if parse_news_date(ln, datetime.now(self.tz))), "")
                 dt = parse_news_date(date_txt, datetime.now(self.tz)) if date_txt else None
                 if dt and not self._in_period(dt, date_txt):
                     outside_period += 1
                     continue                                  # outside the period (Google's filter is approximate)
-                media = next((ln for ln in lines if ln != date_txt and len(ln) < 60), "") or urlparse(url).netloc.removeprefix("www.")
+                media = next((ln for ln in lines if ln != date_txt and len(ln) < 60 and not ln.lower().startswith("http")
+                              and "›" not in ln), "") or urlparse(url).netloc.removeprefix("www.")
                 found[_key(url)] = {"url": url, "title": item["title"], "media": media,
                               "published": dt.astimezone(self.tz).strftime("%Y-%m-%d") if dt else "", "ts": dt.timestamp() if dt else 0}
                 if opt.cap and len(found) >= opt.cap:
@@ -468,6 +500,8 @@ class NewsCrawler(BrowserCrawler):
         note = f"query: {q}; {pages} result page{'s' if pages != 1 else ''}; {cards} results read"
         if outside_period:
             note += f"; {outside_period} outside the period dropped"
+        if junk:
+            note += f"; {junk} non-media results skipped"
         if len(found) == start_count and ("/sorry/" in self.page.url):
             return _with_cards(Result("error", [], "Google captcha"), cards)
         if not cards:

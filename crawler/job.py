@@ -306,6 +306,7 @@ class Job:
                 pw = sync_playwright().start()
                 ctx = launch_context(pw, PROFILE_DIR)
                 crawler = BrowserCrawler(ctx, self.log, self.stop_flag, start_utc, end_utc)
+                crawler.debug_dir = os.path.join(OUTPUT_DIR, "debug")
             for i, acc in enumerate(accounts):
                 if self.stop_flag.is_set():
                     stopped = True
@@ -433,6 +434,7 @@ class Job:
             pw = sync_playwright().start()
             ctx = launch_context(pw, PROFILE_DIR)
             crawler = KeywordCrawler(ctx, self.log, self.stop_flag, start_utc, end_utc)
+            crawler.debug_dir = os.path.join(OUTPUT_DIR, "debug")
             for i, (kw, plat) in enumerate(tasks):
                 if self.stop_flag.is_set():
                     stopped = True

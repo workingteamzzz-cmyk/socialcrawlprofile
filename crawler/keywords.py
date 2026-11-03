@@ -100,7 +100,8 @@ class KeywordCrawler(BrowserCrawler):
             url = self.page.url.lower()
             if any(m in url for m in login_markers):
                 return Result("login_required", [], "Login required — use 'Log in to platforms'")
-            return Result("ok", [], note or "Search returned no posts")
+            return Result("ok", [], self._empty_note((note + "; " if note else "") + "search returned no posts",
+                                                     "search_" + (self.page.url.split("//")[-1])[:50]))
         kept = self._cap_trim(posts, opt.cap)
         extra = f"{len(posts) - len(self._in_range(posts))} results outside the period dropped"
         return Result("ok", kept, "; ".join(x for x in (note, extra) if x))

@@ -85,6 +85,8 @@ def launch_context(pw, profile_dir: str, headless: bool = False):
         locale="id-ID",
         # AutomationControlled off: without it TikTok (and others) spot the automated browser and show nothing.
         # Real Chrome shows a harmless "unsupported command-line flag" bar for it — just close the bar.
+        # No script tweaks on top: the flag already makes navigator.webdriver false natively, while a patched getter
+        # is itself a giveaway (X then shows an empty or "Something went wrong" timeline).
         args=["--disable-blink-features=AutomationControlled", "--disable-features=Translate,TranslateUI"],
         ignore_default_args=["--enable-automation"],
         # Playwright turns Chrome's sandbox off by default, which shows a "--no-sandbox" warning bar; Mac and
@@ -117,11 +119,6 @@ def launch_context(pw, profile_dir: str, headless: bool = False):
         except Exception as e:  # noqa: BLE001
             errors.append(f"{channel}: {str(e).splitlines()[0]}")
             continue
-        try:   # belt and braces: don't advertise the automation to pages
-            ctx.add_init_script("try { Object.defineProperty(Navigator.prototype, 'webdriver', "
-                                "{get: () => false, configurable: true}); } catch (e) {}")
-        except Exception:  # noqa: BLE001
-            pass
         if channel != used:
             try:
                 with open(marker, "w", encoding="utf-8") as f:
@@ -369,6 +366,7 @@ class BrowserCrawler:
         until = (self.end + timedelta(days=1)).strftime("%Y-%m-%d")
         q = f"from:{acc.handle} since:{since} until:{until}"
         self._goto(f"https://x.com/search?q={quote(q)}&src=typed_query&f=live")
+        self._x_wait()
         rx = re.compile(r"^/([A-Za-z0-9_]+)/status/(\d+)")
         handle = acc.handle.lower()
 
@@ -387,15 +385,50 @@ class BrowserCrawler:
 
         posts = self._scroll_collect(extract, older_needed=1, idle_limit=4)
         if not posts:
-            # Search shows nothing for both "no posts in period" and "account missing": check the profile.
+            # Search shows nothing for "no posts in period", "account missing" and when X's search is having a bad
+            # day: read the profile itself (newest first, scroll until older posts show up).
             self._goto(acc.url)
+            self._x_wait()
             state = self._page_state(("/login", "/i/flow/login"))
             if state == "not_found":
                 return Result("not_found", [], "Account not found / suspended")
             if state == "login_required":
                 return Result("login_required", [], "Login to X required")
-            return Result("ok", [], "")
+            posts = self._scroll_collect(extract, older_needed=3, idle_limit=4, max_rounds=150)
+            if not posts:
+                return self._finish(posts, ("/login", "/i/flow/login"))
+            res = self._finish(posts, ("/login", "/i/flow/login"))
+            res.note = "; ".join(n for n in ("read from the profile (X search showed nothing)", res.note) if n)
+            return res
         return self._finish(posts, ("/login", "/i/flow/login"))
+
+    def _x_wait(self, timeout_s: float = 15):
+        """Wait until X has drawn its tweets (it loads them after the page); press X's own "Retry" when it shows
+        "Something went wrong" — up to three times, like a person would."""
+        end = time.time() + timeout_s
+        retries = 0
+        while time.time() < end:
+            self._check_stop()
+            try:
+                st = self.page.evaluate("""() => {
+                    if (document.querySelector('article')) return 'ok';
+                    const b = [...document.querySelectorAll('[role=button], button')].find(e =>
+                        /^(retry|coba lagi|ulangi|muat ulang)$/i.test((e.innerText || '').trim()));
+                    if (b) { b.click(); return 'retry'; }
+                    const t = document.body ? document.body.innerText : '';
+                    return /no results for|tidak ada hasil|hasil tidak ditemukan/i.test(t) ? 'empty' : 'wait'; }""")
+            except Exception:  # noqa: BLE001  (page still navigating)
+                st = "wait"
+            if st in ("ok", "empty"):
+                return
+            if st == "retry":
+                retries += 1
+                self.log("  X showed 'Something went wrong' — pressing Retry")
+                if retries >= 3:
+                    return
+                self._pause(2, 4)
+                continue
+            self.page.wait_for_timeout(500)
 
     # ---------- YouTube ----------
     # Video IDs carry no date, so each new video's publish date is read from its watch page with a

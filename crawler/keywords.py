@@ -136,6 +136,7 @@ class KeywordCrawler(BrowserCrawler):
         until = (self.end + timedelta(days=1)).strftime("%Y-%m-%d")
         q = x_query(kw, opt, since, until)
         self._goto(f"https://x.com/search?q={quote(q)}&src=typed_query&f=live")
+        self._x_wait()
         rx = re.compile(r"^/([A-Za-z0-9_]{1,15})/status/(\d+)")
 
         def extract():

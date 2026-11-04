@@ -299,6 +299,40 @@ def test_tiktok_search_keeps_cards_without_the_keyword(tmp_path):
         res = c.search_tiktok("listrik", SearchOptions(exclude=["promo"]))
         assert sorted(p.author for p in res.posts) == ["u1", "u2", "u4"]
         assert c.page.evaluate("navigator.webdriver") is False
+        # natively so — no patched getter for sites to spot
+        assert c.page.evaluate("Object.getOwnPropertyDescriptor(Navigator.prototype, 'webdriver').get.toString()").find("native code") > 0
+        ctx.close()
+
+
+@pytest.mark.skipif(_browser_path() is None, reason="no local Chromium")
+def test_x_retry_and_profile_fallback(tmp_path):
+    """X sometimes shows "Something went wrong · Retry" or an empty search: press Retry; if search stays empty,
+    read the profile timeline instead."""
+    from playwright.sync_api import sync_playwright
+
+    from crawler.accounts import parse_line
+    from crawler.browser import BrowserCrawler, launch_context
+    from tests.test_crawler import x_id
+    dates = [datetime(2026, 10, 25 - i, 5, tzinfo=UTC) for i in range(8)] + [datetime(2026, 9, 1 + i, tzinfo=UTC) for i in range(4)]
+    arts = "".join(f'<article><a href="/abc/status/{x_id(d)}"><time>t</time></a></article>' for d in dates)
+    retry = ('<html><body><div id="r"><span>Something went wrong.</span><div role="button" onclick="'
+             "document.getElementById('r').outerHTML=document.getElementById('t').innerHTML\">Retry</div></div>"
+             f'<template id="t">{arts}</template></body></html>')
+    profile = f"<html><body>{arts}</body></html>"
+    empty = "<html><body><div>No results for this search</div></body></html>"
+    os.environ["CRAWLER_BROWSER_PATH"] = _browser_path()
+    with sync_playwright() as pw:
+        ctx = launch_context(pw, str(tmp_path / "p"), headless=True)
+        mode = {"search": retry}
+        ctx.route("**/*", lambda r: r.fulfill(status=200, content_type="text/html",
+                                              body=mode["search"] if "/search" in r.request.url else profile))
+        c = BrowserCrawler(ctx, lambda m: None, threading.Event(), datetime(2026, 10, 1, tzinfo=UTC), datetime(2026, 10, 31, tzinfo=UTC))
+        c._pause = lambda lo=0, hi=0: c.page.wait_for_timeout(100)
+        res = c.x(parse_line("https://x.com/abc"))
+        assert len(res.posts) == 8, res.note
+        mode["search"] = empty
+        res = c.x(parse_line("https://x.com/abc"))
+        assert len(res.posts) == 8 and "read from the profile" in res.note
         ctx.close()
 
 

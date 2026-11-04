@@ -333,6 +333,46 @@ def test_x_retry_and_profile_fallback(tmp_path):
         mode["search"] = empty
         res = c.x(parse_line("https://x.com/abc"))
         assert len(res.posts) == 8 and "read from the profile" in res.note
+        holder = {"p": profile}
+        ctx.unroute("**/*")
+        ctx.route("**/*", lambda r: r.fulfill(status=200, content_type="text/html",
+                                              body=empty if "/search" in r.request.url else holder["p"]))
+        holder["p"] = "<html><body>Sorry, you are rate limited. Please wait a few moments then try again.</body></html>"
+        res = c.x(parse_line("https://x.com/abc"))
+        assert not res.posts and "rate limited" in res.note
+        ctx.close()
+
+
+@pytest.mark.skipif(_browser_path() is None, reason="no local Chromium")
+def test_x_new_layout_without_article_tags(tmp_path):
+    """X's 2026 layout: no <article>, no <time>; one tweet quotes another; the sidebar links a trending tweet."""
+    from playwright.sync_api import sync_playwright
+
+    from crawler.browser import launch_context
+    from crawler.keywords import KeywordCrawler, SearchOptions
+    from tests.test_crawler import x_id
+    d = datetime(2026, 11, 4, 3, tzinfo=UTC)
+    tw = [("pltdkayumerah", "Tarif listrik Triwulan IV 2026 tetap, tidak naik. #PLN", None),
+          ("warga1", "Kok tagihan listrik naik terus ya", ("detikcom", "Ramai keluhan tagihan listrik naik")),
+          ("warga2", "Resep sambal matah", None)]
+    cells = ""
+    for i, (u, txt, q) in enumerate(tw):
+        quote = (f'<div><a href="/{q[0]}/status/{x_id(d - timedelta(minutes=50))}"><span>{q[0]}</span></a>'
+                 f'<div>{q[1]}</div></div>') if q else ""
+        cells += (f'<div class="cell"><div><a href="/{u}"><span>{u}</span></a> '
+                  f'<a href="/{u}/status/{x_id(d + timedelta(minutes=i))}"><span>1h</span></a></div>'
+                  f'<div>{txt}</div>{quote}<a href="/{u}/status/{x_id(d + timedelta(minutes=i))}/analytics">38</a></div>')
+    body = (f'<html><body><main><div class="timeline">{cells}</div></main>'
+            f'<aside><a href="/news/status/{x_id(d)}">Trending</a></aside></body></html>')
+    os.environ["CRAWLER_BROWSER_PATH"] = _browser_path()
+    with sync_playwright() as pw:
+        ctx = launch_context(pw, str(tmp_path / "p"), headless=True)
+        ctx.route("**/*", lambda r: r.fulfill(status=200, content_type="text/html", body=body))
+        c = KeywordCrawler(ctx, lambda m: None, threading.Event(), datetime(2026, 11, 3, 17, tzinfo=UTC),
+                           datetime(2026, 11, 4, 16, 59, tzinfo=UTC))
+        c._pause = lambda lo=0, hi=0: c.page.wait_for_timeout(100)
+        res = c.search_x("listrik naik", SearchOptions())
+        assert sorted(p.author for p in res.posts) == ["pltdkayumerah", "warga1"], res.note
         ctx.close()
 
 

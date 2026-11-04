@@ -141,13 +141,7 @@ class KeywordCrawler(BrowserCrawler):
 
         def extract():
             # Only each tweet's own permalink (the link wrapping its timestamp), not quoted tweets.
-            try:
-                rows = self.page.evaluate("""() => [...document.querySelectorAll('article')].map(a => {
-                    const l = [...a.querySelectorAll("a[href*='/status/']")].find(e => e.querySelector('time'));
-                    const t = a.querySelector('[data-testid="tweetText"]');
-                    return l ? [l.getAttribute('href'), t ? t.innerText : a.innerText] : null; }).filter(Boolean)""")
-            except Exception:  # noqa: BLE001
-                rows = []
+            rows = self._x_rows()           # old and new X layouts
             out = []
             for h, txt in rows:
                 m = rx.match(h or "")
@@ -157,7 +151,10 @@ class KeywordCrawler(BrowserCrawler):
             return out
 
         posts = self._scroll_collect(extract, older_needed=0, idle_limit=5, max_rounds=600, cap=opt.cap, keep=self._keep(opt))
-        return self._done(posts, opt, ("/login", "/i/flow/login"), f"query: {q}")
+        why = "" if posts else self._x_reason()
+        if why:
+            self.log(f"   ⚠ X: {why}")
+        return self._done(posts, opt, ("/login", "/i/flow/login"), "; ".join(n for n in (why, f"query: {q}") if n))
 
     # ---------- YouTube ----------
     def search_youtube(self, kw: str, opt: SearchOptions) -> Result:

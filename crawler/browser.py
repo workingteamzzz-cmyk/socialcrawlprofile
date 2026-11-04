@@ -372,12 +372,7 @@ class BrowserCrawler:
 
         def extract():
             out = []
-            try:   # each tweet's own permalink is the link around its timestamp; quoted (older) tweets are not
-                hrefs = self.page.eval_on_selector_all(
-                    "article a[href*='/status/']", "els => els.filter(e => e.querySelector('time')).map(e => e.getAttribute('href'))")
-            except Exception:  # noqa: BLE001
-                hrefs = []
-            for h in hrefs or self._hrefs():
+            for h, _txt in self._x_rows():      # each tweet's own permalink; quoted tweets are not taken
                 m = rx.match(h or "")
                 if m and m.group(1).lower() == handle:
                     out.append(Post(f"https://x.com/{m.group(1)}/status/{m.group(2)}", x_status_time(m.group(2))))
@@ -396,11 +391,69 @@ class BrowserCrawler:
                 return Result("login_required", [], "Login to X required")
             posts = self._scroll_collect(extract, older_needed=3, idle_limit=4, max_rounds=150)
             if not posts:
+                why = self._x_reason()
+                if why:
+                    self.log(f"   ⚠ X: {why}")
+                    return Result("login_required" if "log in" in why.lower() else "ok", [],
+                                  self._empty_note(why, "x_" + acc.handle))
                 return self._finish(posts, ("/login", "/i/flow/login"))
             res = self._finish(posts, ("/login", "/i/flow/login"))
             res.note = "; ".join(n for n in ("read from the profile (X search showed nothing)", res.note) if n)
             return res
         return self._finish(posts, ("/login", "/i/flow/login"))
+
+    # Every tweet on the page as [own permalink, text] — for X's older layout (one <article> per tweet) and its newer
+    # one: there the tweets are the blocks directly under the lowest element that holds all of the timeline's status
+    # links. A tweet's own permalink is the one around its timestamp, or else its first one; quoted tweets inside
+    # a tweet are not taken. The sidebar (trends, "who to follow") is ignored.
+    _X_JS = r"""() => {
+      const rx = /^\/([A-Za-z0-9_]{1,15})\/status\/(\d+)/;
+      const ok = a => rx.test(a.getAttribute('href') || '') && !a.closest('aside, [data-testid="sidebarColumn"]');
+      const links = [...document.querySelectorAll("a[href*='/status/']")].filter(ok);
+      if (!links.length) return [];
+      let cards = [...new Set(links.map(a => a.closest('article, [data-testid="tweet"]')).filter(Boolean))];
+      cards = cards.filter(c => !cards.some(o => o !== c && o.contains(c)));
+      const loose = links.filter(a => !a.closest('article, [data-testid="tweet"]'));
+      if (loose.length) {
+        let lca = loose[0].parentElement;
+        while (lca && !loose.every(l => lca.contains(l))) lca = lca.parentElement;
+        const ids = new Set(loose.map(a => a.getAttribute('href').match(rx)[2]));
+        const kids = lca ? [...lca.children].filter(ch => ch.matches("a[href*='/status/']") || ch.querySelector("a[href*='/status/']")) : [];
+        if (ids.size > 1 && kids.length > 1) cards.push(...kids.filter(k => !cards.some(c => c.contains(k) || k.contains(c))));
+        else if (lca) cards.push(lca.closest('[data-testid="cellInnerDiv"]') || lca);
+      }
+      return cards.map(c => {
+        const ls = [...(c.matches("a[href*='/status/']") ? [c] : []), ...c.querySelectorAll("a[href*='/status/']")].filter(ok);
+        if (!ls.length) return null;
+        const own = ls.find(l => l.querySelector('time')) || ls[0];
+        const t = c.querySelector('[data-testid="tweetText"]');
+        return [own.getAttribute('href'), (t ? t.innerText : c.innerText) || ''];
+      }).filter(Boolean);
+    }"""
+
+    def _x_rows(self) -> list:
+        try:
+            return self.page.evaluate(self._X_JS) or []
+        except Exception:  # noqa: BLE001
+            return []
+
+    def _x_reason(self) -> str:
+        """Why X showed no tweets, in plain words ("" when the page looks normal)."""
+        url = self.page.url.lower()
+        txt = self._body_text()
+        if "/account/access" in url or "account is locked" in txt or "akun anda dikunci" in txt:
+            return ("X has locked/limited your account for a check — open x.com in the app's browser window, "
+                    "finish X's check, then run again")
+        if any(m in url for m in ("/login", "/i/flow/login")) or ("sign in to x" in txt) or ("masuk ke x" in txt):
+            return "X is asking to log in — use 'Log in to platforms' and sign in to X again"
+        if "rate limit" in txt or "batas" in txt and "tercapai" in txt:
+            return "X says 'rate limited' (too many views in a short time) — wait 15–30 minutes and run again"
+        if "something went wrong" in txt or "terjadi kesalahan" in txt:
+            return ("X keeps showing 'Something went wrong' — X is refusing this browser for now; "
+                    "wait a while, or open x.com in the app's window and scroll a bit by hand, then run again")
+        if not txt.strip():
+            return "X's page stayed blank (it did not load) — check the internet connection / open x.com in the window"
+        return ""
 
     def _x_wait(self, timeout_s: float = 15):
         """Wait until X has drawn its tweets (it loads them after the page); press X's own "Retry" when it shows
@@ -411,7 +464,9 @@ class BrowserCrawler:
             self._check_stop()
             try:
                 st = self.page.evaluate("""() => {
-                    if (document.querySelector('article')) return 'ok';
+                    if (document.querySelector('article') || [...document.querySelectorAll("a[href*='/status/']")]
+                        .some(a => /^\\/[A-Za-z0-9_]{1,15}\\/status\\/\\d+/.test(a.getAttribute('href') || '')
+                                   && !a.closest('aside, [data-testid="sidebarColumn"]'))) return 'ok';
                     const b = [...document.querySelectorAll('[role=button], button')].find(e =>
                         /^(retry|coba lagi|ulangi|muat ulang)$/i.test((e.innerText || '').trim()));
                     if (b) { b.click(); return 'retry'; }

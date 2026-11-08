@@ -188,6 +188,12 @@ def _gnews_id(url: str) -> str:
     return m.group(1) if m else ""
 
 
+def gnews_open_url(url: str) -> str:
+    """The form of a Google News link that forwards to the media when opened: /rss/articles/ID only shows a blank
+    page, /articles/ID sends the browser on to the article."""
+    return re.sub(r"(news\.google\.[a-z.]+)/rss/articles/", r"\1/articles/", url or "")
+
+
 def decode_gnews_offline(url: str) -> str:
     """Older Google News ids are base64 of a small record that contains the article URL itself."""
     import base64
@@ -452,7 +458,7 @@ class NewsCrawler(BrowserCrawler):
             del fresh[max(0, opt.cap - len(found)):]
         n_fresh = len(fresh)
         resolved = 0
-        if opt.resolve and opt.detail != "full":        # full mode opens each article anyway
+        if opt.resolve or opt.detail == "full":      # full mode needs the media's link too, to open the article
             resolved = self._resolve_all(fresh)
         junk = 0
         for r in fresh:
@@ -464,7 +470,7 @@ class NewsCrawler(BrowserCrawler):
         note = f"query: {q}; {len(windows)} search{'es' if len(windows) != 1 else ''}; {read} articles read"
         if outside:
             note += f"; {outside} outside the period dropped"
-        if opt.resolve and n_fresh and opt.detail != "full":
+        if (opt.resolve or opt.detail == "full") and n_fresh:
             note += f"; {resolved}/{n_fresh} media links resolved"
         if failed:
             note += f"; {failed} feed request(s) failed"
@@ -555,7 +561,7 @@ class NewsCrawler(BrowserCrawler):
         self.page.route("**/*", handler)
         try:
             try:
-                self.page.goto(gnews_url, wait_until="commit", timeout=20000)
+                self.page.goto(gnews_open_url(gnews_url), wait_until="commit", timeout=20000)
             except Exception as e:  # noqa: BLE001
                 if BROWSER_CLOSED in str(e):
                     raise
@@ -706,10 +712,16 @@ class NewsCrawler(BrowserCrawler):
             return ""
 
     def article(self, url: str) -> dict:
-        self._goto(url)
+        self._check_stop()
+        try:                                        # a slow media site must not hold the run: 25 s, then read what loaded
+            self.page.goto(gnews_open_url(url), wait_until="domcontentloaded", timeout=25000)
+        except Exception as e:  # noqa: BLE001
+            if "Timeout" not in str(e):
+                raise
+        self._pause(0.8, 1.6)
         if "news.google." in self.page.url:          # Google News link: wait for it to send us on to the media
             try:
-                self.page.wait_for_url(lambda u: "news.google." not in u and "consent.google." not in u, timeout=20000)
+                self.page.wait_for_url(lambda u: "news.google." not in u and "consent.google." not in u, timeout=12000)
                 self.page.wait_for_load_state("domcontentloaded", timeout=30000)
                 self._pause(1, 2)
             except Exception as e:  # noqa: BLE001

@@ -605,6 +605,8 @@ class Job:
                         for j, r in enumerate(new):
                             self._check_or_raise()
                             self.current = f"{label} — article {j + 1}/{len(new)}"
+                            if j and j % 10 == 0:
+                                self.log(f"   reading articles: {j}/{len(new)}")
                             try:
                                 art = crawler.article(r["url"])
                                 r.update({k: v for k, v in art.items() if v})   # keep Google's title if the page gives none

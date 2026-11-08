@@ -194,7 +194,7 @@ def test_news_engine_review_fixes(tmp_path):
         url = r.request.url
         if "/rss/search" in url:
             return r.fulfill(status=200, content_type="application/xml", body=feed)
-        if "/rss/articles/" in url:
+        if "/articles/" in url:
             gid = url.rsplit("/", 1)[-1]
             return r.fulfill(status=200, content_type="text/html", body=(
                 "<html><body><iframe src='https://ads.doubleclick.net/x'></iframe>"

@@ -294,7 +294,7 @@ def test_google_news_feed_with_media_links(tmp_path):
         if "news.google.com/rss/search" in url:
             feeds.append(url)
             return r.fulfill(status=200, content_type="application/xml", body=_rss(items))
-        m = re.search(r"/rss/articles/(A\d)", url)
+        m = re.search(r"/(?:rss/)?articles/(A\d)", url)
         if m and m.group(1) != "A4":
             gid = m.group(1)
             return r.fulfill(status=200, content_type="text/html",

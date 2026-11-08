@@ -27,7 +27,7 @@ PAGES = {
     "news.google.com/rss/search": '<?xml version="1.0"?><rss><channel><item><title>Tarif listrik naik - Kompas.com</title>'
                                   '<link>https://news.google.com/rss/articles/K1</link><pubDate>Mon, 05 Oct 2026 01:30:00 GMT</pubDate>'
                                   '<source url="https://www.kompas.com">Kompas.com</source></item></channel></rss>',
-    "news.google.com/rss/articles/K1": "<html><script>setTimeout(() => location.replace('https://www.kompas.com/a1'), 200)</script></html>",
+    "news.google.com/articles/K1": "<html><script>setTimeout(() => location.replace('https://www.kompas.com/a1'), 200)</script></html>",
     "kompas.com/a1": ARTICLE,
     "instagram.com/pu_sda/": _fake_feed_html([[f"/p/{ig_code(d)}/", ""] for d in IN_RANGE + OLD]),
     "tiktok.com/@pu_sda_citarum": _fake_feed_html([[f"https://www.tiktok.com/@pu_sda_citarum/video/{tt_id(d)}", ""] for d in IN_RANGE + OLD]),

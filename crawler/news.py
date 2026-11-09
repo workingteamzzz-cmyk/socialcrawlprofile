@@ -415,7 +415,7 @@ class NewsCrawler(BrowserCrawler):
         self._goto(f"https://news.google.com/?{self._gnews_loc}")
         self._accept_consent()
         q = google_query(kw, opt)
-        fresh, read, outside, failed = [], 0, 0, 0
+        fresh = []
         seen_links = set()
         try:
             return self._feed_windows(q, opt, windows, loc, found, fresh, seen_links)

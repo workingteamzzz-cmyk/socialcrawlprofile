@@ -547,6 +547,9 @@ def test_fast_details_x_from_list_and_tiktok_youtube_in_background(tmp_path):
             body = tt_page(int(u.rsplit("/", 1)[-1]))
         elif "youtube.com/watch" in u:
             body = yt_page
+        elif "instagram.com/p/" in u:
+            body = ('<html><head><meta property="og:description" content="1,234 likes, 56 comments - pu_sda on '
+                    'October 5, 2026: &quot;Banjir surut&quot;"></head></html>')
         else:
             body = "<html><body>home</body></html>"
         r.fulfill(status=200, content_type="text/html", body=body)
@@ -581,4 +584,10 @@ def test_fast_details_x_from_list_and_tiktok_youtube_in_background(tmp_path):
         posts = [Post("https://www.youtube.com/watch?v=v1", None)]
         assert fill("youtube", posts) is False
         assert posts[0].details["views"] == 12345 and posts[0].details["caption"].startswith("Judul video")
+
+        posts = [Post("https://www.instagram.com/p/ABC123/", None)]
+        navigations.clear()
+        assert fill("instagram", posts) is False
+        assert posts[0].details["likes"] == 1234 and posts[0].details["caption"] == "Banjir surut"
+        assert not any("/p/" in u for u in navigations)              # read in the background, not opened
         ctx.close()

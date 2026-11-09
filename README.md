@@ -116,7 +116,13 @@ Post Link), **Search Status** and **Info** (the options used), plus a `.csv`.
 ## Caption & engagement (optional)
 
 Choose **Links + caption & engagement** under *Output* (Collect page) or *Advanced options → Output* (Keyword Search).
-After the links of an account/search are collected, the browser opens each post and reads what the page shows:
+After the links of an account/search are collected, caption and numbers are read the quickest way that works, the way
+a person would see them:
+
+1. **X** — the replies / reposts / likes / views under each tweet are read while scrolling; no tweet is opened.
+2. **TikTok, YouTube, Threads, Instagram** — post pages are read a few at a time in the background with your own
+   session (like background tabs; 2 at a time on Instagram, which is the quickest to say "try again later").
+3. Only what could not be read that way (and Facebook) is opened one by one, without idle waiting.
 
 | Platform | Caption | Likes | Comments | Shares / reposts | Views |
 | --- | --- | --- | --- | --- | --- |
@@ -127,7 +133,8 @@ After the links of an account/search are collected, the browser opens each post 
 | Threads | ✓ | ✓ | ✓ (replies) | ✓ (reposts + quotes) | – |
 | Facebook | ✓ | ✓ (all reactions) | ✓ | ✓ | videos, when shown |
 
-It takes roughly 3–8 seconds per post, and the numbers are a snapshot at collection time. Empty cells mean the page did
+The Activity Log shows how long it took, e.g. `details: 120 posts in 45s (110 read without opening, 10 opened)`.
+The numbers are a snapshot at collection time. Empty cells mean the page did
 not show that number. The Excel gets extra columns Caption, Likes, Comments, Shares / Reposts, Views.
 
 ## News from Google
@@ -138,7 +145,9 @@ Three sources, all on by default (*Advanced options → Sources*); an article fo
   structured list (title, media, exact publish time — up to 100 articles per search). The feed only gives
   news.google.com links, so *Get the media's own link* turns them into the media's own URL without opening them: older
   links contain the URL in their id; newer ones are translated by Google News itself in the background (the same request
-  its redirect page makes), a few at a time. Only if that fails is the link opened briefly. Turn it off to keep the
+  its redirect page makes), a few at a time — also in *Full article* mode, which then opens the media page directly.
+Only if that fails is the link opened briefly (as `news.google.com/articles/…`; the feed's `/rss/articles/…` form only
+shows a blank page). Turn it off to keep the
   news.google.com links (they still open the article).
 - **Google Search · News tab**: Google with the keyword and a custom date range, sorted by date, page by page.
 - **Google Search · All results**: the regular "All" tab with the same date range, read **to the last page**. Only
@@ -205,6 +214,10 @@ the site's current layout. Check it first — it can show the name of the accoun
 
 ## Limitations
 
+- Chrome shows a bar "You are using an unsupported command-line flag: --disable-blink-features=AutomationControlled".
+  It is harmless — close it. The flag keeps TikTok and others from treating the window as a bot.
+- If X shows nothing, the Activity Log says why (asks to log in, account locked, rate limited, "Something went wrong").
+  X's search is tried first; when it stays empty the account's profile timeline is read instead.
 - Platforms can change their pages at any time; if one platform suddenly returns 0 links for every account, its page
   layout probably changed.
 - Random pauses between scrolls and accounts are deliberate so the logged-in accounts aren't rate-limited. Avoid

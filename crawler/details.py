@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import html as _html
 import json
-import random
 import re
 from urllib.parse import urlparse
 
@@ -127,7 +126,10 @@ def prefetch_details(crawler, platform: str, urls: list[str], progress=None) -> 
     if not parse or not home or not urls:
         return {}
     host = urlparse(home).hostname
-    todo = [u for u in urls if (urlparse(u).hostname or "").replace("m.", "www.", 1) in (host, host.replace("www.", ""))]
+    def site(u):                                           # www./m./bare host all count as the same site
+        h = (urlparse(u).hostname or "").lower()
+        return h[4:] if h.startswith("www.") else h[2:] if h.startswith("m.") else h
+    todo = [u for u in urls if site(u) == site(home)]
     if not todo:
         return {}
     if (urlparse(crawler.page.url).hostname or "") != host:

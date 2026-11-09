@@ -216,20 +216,14 @@ def test_news_engine_review_fixes(tmp_path):
         # Stop while links are being resolved keeps the whole batch
         stop = threading.Event()
         c2 = _news_crawler(ctx, stop)
-        real = c2._resolve
-        calls = {"n": 0}
-
-        def resolve(u, wait_s=10):
-            calls["n"] += 1
-            if calls["n"] == 3:
-                stop.set()
-                c2._check_stop()
-            return real(u, wait_s=wait_s)
-        c2._resolve = resolve
+        def log(m):                     # Stop pressed while the links are being opened in tabs
+            if "opening them instead" in m:
+                threading.Timer(0.5, stop.set).start()
+        c2.log = log
         with pytest.raises(Stopped) as e:
             c2.search("x", NewsOptions(sources=["feed"], by_day=False), datetime(2026, 10, 20), datetime(2026, 10, 20))
         urls = [p["url"] for p in e.value.posts]
-        assert len(urls) == 5 and sum(u.startswith("https://media.example/") for u in urls) == 2
+        assert len(urls) == 5 and sum(u.startswith("https://media.example/") for u in urls) < 5
     finally:
         ctx.close()
         pw.stop()

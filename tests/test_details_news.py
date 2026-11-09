@@ -521,10 +521,71 @@ def test_google_news_decode_failure_is_explained_and_saved(tmp_path):
         ctx.route("**/*", route)
         c = _fast(NewsCrawler(ctx, logs.append, threading.Event(), datetime(2026, 10, 19, 17, tzinfo=UTC),
                               datetime(2026, 10, 20, 16, 59, tzinfo=UTC), tz=WIB, debug_dir=str(tmp_path / "debug")))
-        c._resolve = lambda u, wait_s=10: ""
+        c._resolve_many = lambda rows: 0
         res = c.search("x", NewsOptions(sources=["feed"], by_day=False), datetime(2026, 10, 20), datetime(2026, 10, 20))
         ctx.close()
     assert res.posts[0]["url"].startswith("https://news.google.com/")          # kept, still opens the article
-    assert any("0/1 links decoded" in m and "no signature (HTTP 200" in m for m in logs), logs
+    assert any("1 links could not be decoded" in m and "no signature (HTTP 200" in m for m in logs), logs
     saved = os.listdir(tmp_path / "debug")
     assert len(saved) == 1 and saved[0].startswith("google_news_decode_")
+
+
+def test_google_news_decoding_when_signed_in_to_google_and_fast_fallback(tmp_path):
+    """A browser signed in to Google: Google's translator refuses requests that carry the session without its token.
+    Asking anonymously works; and when the translator gives nothing at all, every link (not just a few) is opened in
+    a few tabs at once, in the /articles/ form that forwards."""
+    if _browser_path() is None:
+        pytest.skip("no local Chromium")
+    import json as _json
+
+    from playwright.sync_api import sync_playwright
+
+    from crawler.browser import launch_context
+    from crawler.news import NewsCrawler, NewsOptions
+    ids = [f"CBMiAU_yqL{i:03d}xyz" for i in range(20)]
+    feed = ('<?xml version="1.0"?><rss><channel>' + "".join(
+        f'<item><title>Berita {i} - Detik</title><link>https://news.google.com/rss/articles/{g}?oc=5</link>'
+        f'<pubDate>Tue, 20 Oct 2026 03:{i:02d}:00 GMT</pubDate><source url="https://detik.com">Detik</source></item>'
+        for i, g in enumerate(ids)) + '</channel></rss>')
+    mode = {"translator": "anonymous_only"}
+
+    def route(r):
+        req = r.request
+        u = req.url
+        if "/rss/search" in u:
+            return r.fulfill(status=200, content_type="application/xml", body=feed)
+        if "batchexecute" in u:
+            signed_in = "SID=" in (req.headers.get("cookie") or "")
+            if mode["translator"] == "off" or (signed_in and "at=" not in (req.post_data or "")):
+                return r.fulfill(status=400, body=")]}'\n[]")
+            gid = re.search(r"CBMiAU_yqL(\d+)", req.post_data).group(1)
+            ans = _json.dumps([["wrb.fr", "Fbv4je", _json.dumps(["garturlres", f"https://news.detik.com/d-{int(gid)}", 1])]])
+            return r.fulfill(status=200, body=")]}'\n\n" + ans)
+        m = re.search(r"news\.google\.com/(rss/)?articles/CBMiAU_yqL(\d+)", u)
+        if m and not m.group(1) and req.is_navigation_request():      # only /articles/ forwards to the media
+            return r.fulfill(status=200, content_type="text/html",
+                             body=f"<script>location.replace('https://news.detik.com/d-{int(m.group(2))}')</script>")
+        if m:
+            return r.fulfill(status=200, content_type="text/html",
+                             body='<c-wiz><div data-n-a-sg="SIG" data-n-a-ts="1730000000"></div></c-wiz>')
+        r.fulfill(status=200, content_type="text/html", body="<html><body>news</body></html>")
+    import re
+    os.environ["CRAWLER_BROWSER_PATH"] = _browser_path()
+    with sync_playwright() as pw:
+        ctx = launch_context(pw, str(tmp_path / "profile"), headless=True)
+        ctx.add_cookies([{"name": "SID", "value": "signed-in", "domain": ".google.com", "path": "/"}])
+        ctx.route("**/*", route)
+        c = _fast(NewsCrawler(ctx, lambda m: None, threading.Event(), datetime(2026, 10, 19, 17, tzinfo=UTC),
+                              datetime(2026, 10, 20, 16, 59, tzinfo=UTC), tz=WIB))
+        res = c.search("listrik", NewsOptions(sources=["feed"], by_day=False), datetime(2026, 10, 20), datetime(2026, 10, 20))
+        assert sorted(p["url"] for p in res.posts) == sorted(f"https://news.detik.com/d-{i}" for i in range(20)), res.note
+        assert "20/20 media links resolved" in res.note
+        mode["translator"] = "off"
+        c2 = _fast(NewsCrawler(ctx, lambda m: None, threading.Event(), datetime(2026, 10, 19, 17, tzinfo=UTC),
+                               datetime(2026, 10, 20, 16, 59, tzinfo=UTC), tz=WIB))
+        t = time.time()
+        res = c2.search("listrik", NewsOptions(sources=["feed"], by_day=False), datetime(2026, 10, 20), datetime(2026, 10, 20))
+        took = time.time() - t
+        ctx.close()
+    assert sorted(p["url"] for p in res.posts) == sorted(f"https://news.detik.com/d-{i}" for i in range(20)), res.note
+    assert took < 40, took

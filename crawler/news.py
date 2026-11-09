@@ -7,6 +7,7 @@ the browser window."""
 from __future__ import annotations
 
 import os
+import time
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -257,8 +258,11 @@ def _parse_batchexecute(text: str) -> str:
 
 _GNEWS_DECODE_JS = r"""async (args) => {
   // Same two steps Google News's own redirect page takes: read the article's signature, then ask for its URL.
-  const [ids, loc] = args;
+  // creds 'omit': ask as an anonymous visitor (works whether or not the browser is signed in to Google);
+  // 'include': ask with the Google session, then the page's own security token ("at") must go along.
+  const [ids, loc, creds] = args;
   const out = {};
+  const at = (window.WIZ_global_data || {}).SNlM0e || '';
   const grab = (h, name) => (h.match(new RegExp(name + '="([^"]+)"')) || h.match(new RegExp(name + '\\\\?":\\\\?"([^"\\\\]+)')) || [])[1];
   const one = async (id) => {
     const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 25000);
@@ -266,7 +270,7 @@ _GNEWS_DECODE_JS = r"""async (args) => {
     try {
       let sg, ts;
       for (const path of ['/rss/articles/' + id + '?' + loc, '/articles/' + id + '?' + loc, '/rss/articles/' + id, '/articles/' + id]) {
-        const r = await fetch(path, {credentials: 'include', signal: ctl.signal});
+        const r = await fetch(path, {credentials: creds || 'omit', signal: ctl.signal});
         const h = await r.text();
         sg = grab(h, 'data-n-a-sg'); ts = grab(h, 'data-n-a-ts');
         info.pages.push({path, status: r.status, size: h.length, sig: !!(sg && ts), head: sg && ts ? '' : h.slice(0, 1500)});
@@ -275,10 +279,11 @@ _GNEWS_DECODE_JS = r"""async (args) => {
       if (!sg || !ts) { out[id] = info; return; }
       const inner = JSON.stringify(["garturlreq", [["X", "X", ["X", "X"], null, null, 1, 1, "US:en", null, 1, null, null, null,
         null, null, 0, 1], "X", "X", 1, [1, 1, 1], 1, 1, null, 0, 0, null, 0], id, Number(ts), sg]);
-      const body = 'f.req=' + encodeURIComponent(JSON.stringify([[["Fbv4je", inner, null, "generic"]]]));
-      const r = await fetch('/_/DotsSplashUi/data/batchexecute?rpcids=Fbv4je', {method: 'POST', credentials: 'include',
+      let body = 'f.req=' + encodeURIComponent(JSON.stringify([[["Fbv4je", inner, null, "generic"]]]));
+      if (creds === 'include' && at) body += '&at=' + encodeURIComponent(at);
+      const r = await fetch('/_/DotsSplashUi/data/batchexecute?rpcids=Fbv4je', {method: 'POST', credentials: creds || 'omit',
         signal: ctl.signal, headers: {'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'}, body});
-      info.status = r.status; info.body = await r.text();
+      info.status = r.status; info.body = await r.text(); info.creds = creds;
     } catch (e) { info.error = String(e); } finally { clearTimeout(t); }
     out[id] = info;
   };
@@ -495,39 +500,95 @@ class NewsCrawler(BrowserCrawler):
                 todo.append(r)
         loc = getattr(self, "_gnews_loc", "hl=id&gl=ID&ceid=ID:id")
         failures = []
-        for k in range(0, len(todo), 8):
-            self._check_stop()
-            batch = todo[k:k + 8]
-            ids = [_gnews_id(r["google_url"]) for r in batch]
-            try:
-                raw = self.page.evaluate(_GNEWS_DECODE_JS, [ids, loc]) or {}
-            except Exception as e:  # noqa: BLE001
-                if BROWSER_CLOSED in str(e):
-                    raise
-                raw = {}
-                failures.append({"error": str(e)[:300]})
-            for r, gid in zip(batch, ids):
-                info = raw.get(gid) or {}
-                real = _parse_batchexecute(info.get("body", "")) if gid else ""
-                if real:
-                    r["url"] = real
-                    done += 1
-                    r["_ok"] = True
-                elif info:
-                    failures.append(info)
-            if k + 8 < len(todo):
-                self._pause(0.8, 1.6)
-        leftovers = [r for r in todo if not r.pop("_ok", False)]
-        if leftovers:
+        for creds in ("omit", "include"):          # anonymous first; then with the Google session (+ its token)
+            if not todo:
+                break
+            ok_before = done
+            for k in range(0, len(todo), 8):
+                self._check_stop()
+                batch = todo[k:k + 8]
+                ids = [_gnews_id(r["google_url"]) for r in batch]
+                try:
+                    raw = self.page.evaluate(_GNEWS_DECODE_JS, [ids, loc, creds]) or {}
+                except Exception as e:  # noqa: BLE001
+                    if BROWSER_CLOSED in str(e):
+                        raise
+                    raw = {}
+                    failures.append({"error": str(e)[:300], "creds": creds})
+                for r, gid in zip(batch, ids):
+                    info = raw.get(gid) or {}
+                    real = _parse_batchexecute(info.get("body", "")) if gid else ""
+                    if real:
+                        r["url"] = real
+                        done += 1
+                        r["_ok"] = True
+                    elif info:
+                        failures.append(info)
+                if k == 0 and done == ok_before and len(todo) > 8:
+                    break                          # this way gives nothing at all now: don't spend time on the rest
+                if k + 8 < len(todo):
+                    self._pause(0.5, 1.0)
+            todo = [r for r in todo if not r.pop("_ok", False)]
+        if todo:
             why = _decode_failure_reason(failures)
-            self.log(f"   ⚠ Google News: {len(todo) - len(leftovers)}/{len(todo)} links decoded in the background ({why})")
+            self.log(f"   ⚠ Google News: {len(todo)} links could not be decoded in the background ({why}) — "
+                     "opening them instead, several at a time")
             self._save_decode_debug(failures)
-        for r in leftovers[:8]:               # last resort, capped so a blocked decoder can't stall the run
-            self._check_stop()
-            real = self._resolve(r["google_url"], wait_s=6)
-            if real:
-                r["url"] = real
-                done += 1
+            done += self._resolve_many(todo)
+        return done
+
+    def _resolve_many(self, rows: list, tabs: int = 4, wait_s: float = 12) -> int:
+        """Last resort, still quick: open the links (in the /articles/ form, which forwards) in a few extra tabs at once
+        and catch where each one goes — the media page itself is not loaded."""
+        rx = re.compile(r"(^|\.)(google\.[a-z.]+|gstatic\.com|googleusercontent\.com|doubleclick\.net|"
+                        r"googlesyndication\.com|googleadservices\.com|youtube\.com)$")
+        pages, done = [], 0
+        try:
+            for _ in range(min(tabs, len(rows))):
+                pg = self.ctx.new_page()
+                slot = {"page": pg, "row": None, "t": 0.0}
+
+                def make_handler(slot):              # (a 2-argument handler would get the request as 2nd argument)
+                    def handler(route):
+                        req = route.request
+                        host = (urlparse(req.url).hostname or "").lower()
+                        if req.is_navigation_request() and req.frame == slot["page"].main_frame and not rx.search(host):
+                            slot.setdefault("target", req.url)
+                            return route.abort()
+                        return route.fallback()
+                    return handler
+                pg.route("**/*", make_handler(slot))
+                pages.append(slot)
+            queue = list(rows)
+            total, last_log = len(rows), time.time()
+            while queue or any(sl["row"] for sl in pages):
+                self._check_stop()
+                for sl in pages:
+                    if sl["row"] is not None:
+                        if "target" in sl:
+                            sl["row"]["url"] = sl.pop("target")
+                            done += 1
+                            sl["row"] = None
+                        elif time.time() - sl["t"] > wait_s:
+                            sl["row"] = None                     # gave up on this one: keep the Google link
+                    if sl["row"] is None and queue:
+                        sl["row"], sl["t"] = queue.pop(0), time.time()
+                        sl.pop("target", None)
+                        try:                                    # start the navigation without waiting for it
+                            sl["page"].evaluate("u => { location.href = u; }", gnews_open_url(sl["row"]["google_url"]))
+                        except Exception as e:  # noqa: BLE001
+                            if BROWSER_CLOSED in str(e):
+                                raise
+                if time.time() - last_log > 15:
+                    last_log = time.time()
+                    self.log(f"   opening Google News links: {total - len(queue)}/{total}")
+                pages[0]["page"].wait_for_timeout(200)
+        finally:
+            for sl in pages:
+                try:
+                    sl["page"].close()
+                except Exception:  # noqa: BLE001
+                    pass
         return done
 
     def _save_decode_debug(self, failures):

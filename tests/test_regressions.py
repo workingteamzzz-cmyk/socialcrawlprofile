@@ -506,3 +506,79 @@ def test_app_starts_and_reports_a_busy_port(tmp_path):
     log = os.path.join(root, "startup_error.log")
     if os.path.exists(log):
         os.remove(log)
+
+
+@pytest.mark.skipif(_browser_path() is None, reason="no local Chromium")
+def test_fast_details_x_from_list_and_tiktok_youtube_in_background(tmp_path):
+    """X: counts come from the timeline, no tweet is opened. TikTok/YouTube: post pages are read in the background
+    (no navigation per post); a post that can't be read that way is opened normally."""
+    import json as _json
+    import types
+
+    from playwright.sync_api import sync_playwright
+
+    from crawler.browser import BrowserCrawler, Post, launch_context
+    from crawler.job import Job
+    from tests.test_crawler import x_id
+    d = datetime(2026, 11, 4, 3, tzinfo=UTC)
+    x_page = ('<html><body><main><div>' + "".join(
+        f'<div><a href="/u{i}/status/{x_id(d + timedelta(minutes=i))}">1h</a><div data-testid="tweetText">tweet {i}</div>'
+        f'<div role="group" aria-label="{i} replies, {i * 2} reposts, {i * 10} likes, 1 bookmark, {i * 100} views"></div></div>'
+        for i in range(1, 4)) + '</div></main></body></html>')
+
+    def tt_page(i):
+        data = {"__DEFAULT_SCOPE__": {"webapp.video-detail": {"itemInfo": {"itemStruct": {
+            "desc": f"video {i} #listrik", "author": {"uniqueId": "abc"},
+            "stats": {"diggCount": i * 10, "commentCount": i, "shareCount": i * 2, "playCount": i * 1000}}}}}}
+        return f'<html><script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">{_json.dumps(data)}</script></html>'
+    yt_page = ('<html><script>var ytInitialPlayerResponse = {"videoDetails":{"videoId":"v1","title":"Judul video",'
+               '"viewCount":"12345","shortDescription":"isi"}};</script></html>')
+    navigations = []
+
+    def route(r):
+        u = r.request.url
+        if r.request.is_navigation_request():
+            navigations.append(u)
+        if "x.com" in u:
+            body = x_page
+        elif "/video/9" in u:
+            body = "<html>blocked</html>"
+        elif "tiktok.com/@abc/video/" in u:
+            body = tt_page(int(u.rsplit("/", 1)[-1]))
+        elif "youtube.com/watch" in u:
+            body = yt_page
+        else:
+            body = "<html><body>home</body></html>"
+        r.fulfill(status=200, content_type="text/html", body=body)
+
+    os.environ["CRAWLER_BROWSER_PATH"] = _browser_path()
+    with sync_playwright() as pw:
+        ctx = launch_context(pw, str(tmp_path / "p"), headless=True)
+        ctx.route("**/*", route)
+        c = BrowserCrawler(ctx, lambda m: None, threading.Event(), datetime(2026, 11, 1, tzinfo=UTC), datetime(2026, 11, 30, tzinfo=UTC))
+        c._pause = lambda lo=0, hi=0: c.page.wait_for_timeout(50)
+        job = types.SimpleNamespace(stop_flag=threading.Event(), current="", log=lambda m: None)
+        fill = lambda plat, posts: Job._fill_details(job, c, plat, posts, "t")   # noqa: E731
+
+        c.page.goto("https://x.com/search?q=x")
+        rows = c._x_rows()
+        from crawler.browser import _x_listed
+        posts = [Post("https://x.com" + h, None, listed=_x_listed(g, v, cap)) for h, _t, g, v, cap in rows]
+        navigations.clear()
+        assert fill("x", posts) is False
+        assert [p.details["likes"] for p in posts] == [10, 20, 30] and posts[2].details["views"] == 300
+        assert posts[0].details["comments"] == 1 and posts[0].details["shares"] == 2 and posts[0].details["caption"] == "tweet 1"
+        assert navigations == []                                    # no tweet was opened
+
+        posts = [Post(f"https://www.tiktok.com/@abc/video/{i}", None) for i in (1, 2, 3, 9)]
+        navigations.clear()
+        assert fill("tiktok", posts) is False
+        assert [p.details.get("views") for p in posts[:3]] == [1000, 2000, 3000]
+        assert posts[1].details["likes"] == 20 and posts[1].details["caption"] == "video 2 #listrik"
+        opened = [u for u in navigations if "/video/" in u]
+        assert opened == ["https://www.tiktok.com/@abc/video/9"]    # only the one that couldn't be read in the background
+
+        posts = [Post("https://www.youtube.com/watch?v=v1", None)]
+        assert fill("youtube", posts) is False
+        assert posts[0].details["views"] == 12345 and posts[0].details["caption"].startswith("Judul video")
+        ctx.close()

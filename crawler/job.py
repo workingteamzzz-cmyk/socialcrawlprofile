@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 
 from .accounts import PLATFORM_LABEL, PLATFORMS, parse_accounts
 from .browser import BROWSER_CLOSED, LOGIN_PAGES, BrowserCrawler, Result, Stopped, launch_context, login_status
-from .details import read_details
+from .details import DETAIL_FIELDS, prefetch_details, read_details
 from .output import write_keyword_outputs, write_news_outputs, write_outputs
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -141,11 +141,40 @@ class Job:
             time.sleep(0.25)
 
     def _fill_details(self, crawler, platform: str, posts, label: str) -> bool:
-        """Open each post and read caption + engagement. Returns True if the user pressed Stop."""
-        for j, p in enumerate(posts):
+        """Caption + engagement (likes, comments, shares/reposts, views), quickest way first:
+        1. what the list already showed (X shows the counts under every tweet);
+        2. post pages read a few at a time in the background (TikTok, YouTube, Threads, Instagram);
+        3. only the rest are opened one by one.
+        Returns True if the user pressed Stop."""
+        t0 = time.time()
+        left = []
+        for p in posts:
+            if p.listed:
+                p.details = {k: p.listed.get(k) for k in DETAIL_FIELDS}
+                p.details["caption"] = p.details.get("caption") or p.text or ""
+            else:
+                left.append(p)
+        fast = len(posts) - len(left)
+        if left:
+            try:
+                got = prefetch_details(crawler, platform, [p.url for p in left],
+                                       progress=lambda d, n: setattr(self, "current", f"{label} — details {d}/{n} (fast)"))
+            except Stopped:
+                return True
+            rest = []
+            for p in left:
+                if p.url in got:
+                    p.details = got[p.url]
+                    if p.details.get("author") and not p.author:
+                        p.author = p.details["author"]
+                    fast += 1
+                else:
+                    rest.append(p)
+            left = rest
+        for j, p in enumerate(left):
             if self.stop_flag.is_set():
                 return True
-            self.current = f"{label} — details {j + 1}/{len(posts)}"
+            self.current = f"{label} — details {fast + j + 1}/{len(posts)}"
             try:
                 p.details = read_details(crawler, platform, p.url)
                 if p.details.get("author") and not p.author:
@@ -156,6 +185,9 @@ class Job:
                 if BROWSER_CLOSED in str(e):
                     raise
                 p.details = {"error": str(e).splitlines()[0][:120]}
+        if posts:
+            self.log(f"   details: {len(posts)} posts in {time.time() - t0:.0f}s "
+                     f"({fast} read without opening, {len(left)} opened)")
         return False
 
     AUTOSAVE_SECONDS = 20

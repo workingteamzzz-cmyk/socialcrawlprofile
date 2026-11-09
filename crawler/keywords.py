@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from urllib.parse import quote
 
-from .browser import BrowserCrawler, Post, Result, Stopped
+from .browser import _x_listed, BrowserCrawler, Post, Result, Stopped
 from .idtime import instagram_shortcode_time, tiktok_id_time, x_status_time
 from .textmatch import verdict
 
@@ -143,11 +143,11 @@ class KeywordCrawler(BrowserCrawler):
             # Only each tweet's own permalink (the link wrapping its timestamp), not quoted tweets.
             rows = self._x_rows()           # old and new X layouts
             out = []
-            for h, txt in rows:
+            for h, txt, grp, views, cap in rows:
                 m = rx.match(h or "")
                 if m and m.group(1).lower() not in _RESERVED_X:
                     out.append(Post(f"https://x.com/{m.group(1)}/status/{m.group(2)}", x_status_time(m.group(2)), m.group(1),
-                                    text=txt or ""))
+                                    text=txt or "", listed=_x_listed(grp, views, cap)))
             return out
 
         posts = self._scroll_collect(extract, older_needed=0, idle_limit=5, max_rounds=600, cap=opt.cap, keep=self._keep(opt))

@@ -48,6 +48,7 @@ class Post:
     author: str = ""
     details: dict | None = None      # caption / engagement, when requested
     text: str = ""                   # what the result shows (post text, title) — used to drop excluded/off-topic posts
+    listed: dict | None = None       # engagement the list itself showed (X), so the post need not be opened
 
 
 @dataclass
@@ -148,6 +149,13 @@ def login_status(ctx) -> dict:
         out[plat] = any(c.get("name") == name and domain in (c.get("domain") or "") and c.get("value")
                         and (c.get("expires", -1) in (-1, None) or c.get("expires", 0) > now) for c in cookies)
     return out
+
+
+def _x_listed(group_label: str, views: str, caption: str) -> dict | None:
+    """Replies/reposts/likes/views as X's timeline shows them under each tweet — no need to open the tweet."""
+    from .details import x_counts
+    d = x_counts(group_label or "", caption or "", views or "")
+    return d if any(d.get(k) is not None for k in ("likes", "comments", "shares", "views")) else None
 
 
 class BrowserCrawler:
@@ -256,6 +264,8 @@ class BrowserCrawler:
             before = len(found)
             for p in extract():
                 old = found.get(p.url)
+                if old is not None and p.listed and not old.listed:
+                    old.listed = p.listed                # X drew the counts a moment after the tweet
                 if old is None or (old.time_utc is None and p.time_utc) or len(p.text) > len(old.text):
                     if old is not None and p.time_utc is None:
                         p.time_utc = old.time_utc
@@ -372,10 +382,11 @@ class BrowserCrawler:
 
         def extract():
             out = []
-            for h, _txt in self._x_rows():      # each tweet's own permalink; quoted tweets are not taken
+            for h, _txt, grp, views, cap in self._x_rows():   # each tweet's own permalink; quoted tweets are not taken
                 m = rx.match(h or "")
                 if m and m.group(1).lower() == handle:
-                    out.append(Post(f"https://x.com/{m.group(1)}/status/{m.group(2)}", x_status_time(m.group(2))))
+                    out.append(Post(f"https://x.com/{m.group(1)}/status/{m.group(2)}", x_status_time(m.group(2)),
+                                    listed=_x_listed(grp, views, cap)))
             return out
 
         posts = self._scroll_collect(extract, older_needed=1, idle_limit=4)
@@ -427,11 +438,15 @@ class BrowserCrawler:
         if (!ls.length) return null;
         const own = ls.find(l => l.querySelector('time')) || ls[0];
         const t = c.querySelector('[data-testid="tweetText"]');
-        return [own.getAttribute('href'), (t ? t.innerText : c.innerText) || ''];
+        const g = c.querySelector('[role="group"][aria-label]');
+        const v = [...c.querySelectorAll('a[href$="/analytics"]')].map(e => e.getAttribute('aria-label') || e.innerText).join(' ');
+        return [own.getAttribute('href'), (t ? t.innerText : c.innerText) || '', g ? g.getAttribute('aria-label') : '', v,
+                t ? t.innerText : ''];
       }).filter(Boolean);
     }"""
 
     def _x_rows(self) -> list:
+        """[[permalink, card text, action-bar label, views text, tweet text], ...]"""
         try:
             return self.page.evaluate(self._X_JS) or []
         except Exception:  # noqa: BLE001

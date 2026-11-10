@@ -5,7 +5,7 @@
 #   2. inside that folder:   sudo bash install-server.sh
 #
 # It installs Docker, a firewall (only SSH, HTTP, HTTPS open), automatic security updates and swap, asks for the
-# people who may use the app (each gets their own key) and an address, then starts it with HTTPS.
+# people who may use the app (each gets a username + password; the first is admin) and an address, then starts it with HTTPS.
 # Safe to run again: existing settings and data are kept. Settings can also be given beforehand:
 #   PEOPLE="ana,budi" DOMAIN=collector.example.com sudo -E bash install-server.sh
 set -euo pipefail
@@ -68,21 +68,22 @@ else
   DOMAIN=${DOMAIN:-$default_domain}
   DOMAIN=${DOMAIN#https://}; DOMAIN=${DOMAIN#http://}; DOMAIN=${DOMAIN%%/*}
 
-  keys="" ; list=""
+  names_ok=""
   IFS=',' read -ra names <<< "$PEOPLE"
   for raw in "${names[@]}"; do
     name=$(echo "$raw" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
     [ -z "$name" ] && continue
-    [[ "$name" =~ ^[a-z0-9_-]{1,32}$ ]] || fail "\"$raw\" is not a valid name — use letters, digits, - or _ (no spaces)."
-    key=$(openssl rand -hex 24)
-    keys="${keys:+$keys,}$name=$key"
-    list="$list$(printf '%-16s %s' "$name" "$key")"$'\n'
+    [[ "$name" =~ ^[a-z0-9][a-z0-9._-]{1,31}$ ]] || \
+      fail "\"$raw\" is not a valid username — 2 to 32 letters, digits, dot, - or _ (no spaces)."
+    names_ok="${names_ok:+$names_ok,}$name"
   done
-  [ -n "$keys" ] || fail "No names given."
+  [ -n "$names_ok" ] || fail "No names given."
+  emergency=$(openssl rand -hex 24)
   umask 077
   cat > .env <<EOF
 DOMAIN=$DOMAIN
-COLLECTOR_API_KEYS=$keys
+# Emergency admin access key (sign-in "Use an access key instead", or the X-API-Key header). Keep it safe.
+COLLECTOR_API_KEYS=admin=$emergency
 ALLOWED_IPS=
 CAPTCHA_WAIT_MINUTES=10
 CAPTCHA_WEBHOOK_URL=
@@ -94,8 +95,11 @@ SESSION_DAYS=7
 RETENTION_DAYS=30
 DEBUG_RETENTION_DAYS=7
 EOF
-  { echo "Post Link Collector — https://$DOMAIN"; echo "Each person signs in with their own key:"; echo; printf '%s' "$list"; } > "$KEYS_FILE"
-  chmod 600 .env "$KEYS_FILE"
+  echo "$names_ok" > .people_pending                # the accounts are made once the app runs (step 4)
+  { echo "Post Link Collector — https://$DOMAIN"; echo
+    echo "Emergency admin access key (keep it safe; for scripts, or if every password is lost):"
+    echo "  $emergency"; echo; } > "$KEYS_FILE"
+  chmod 600 .env "$KEYS_FILE" .people_pending
   umask 022
 fi
 
@@ -109,6 +113,22 @@ if [ "${SKIP_START:-0}" != 1 ]; then
     if curl -fsS --max-time 5 "https://$DOMAIN/api/health" >/dev/null 2>&1; then ok=1; break; fi
     sleep 5
   done
+  # First install: one account per name — the first is admin, the others operators — each with a random password.
+  if [ -f .people_pending ]; then
+    echo "Sign in with username + password (each person can change it under their name in the sidebar):" >> "$KEYS_FILE"
+    first=1
+    IFS=',' read -ra names < .people_pending
+    for name in "${names[@]}"; do
+      role="operator"; if [ "$first" = 1 ]; then role="admin"; fi; first=0
+      pw=$(LC_ALL=C tr -dc 'A-HJ-NP-Za-km-z2-9' < /dev/urandom | head -c 14)
+      if docker compose exec -T -e NEW_PASSWORD="$pw" collector python serve.py add-user "$name" "$role" >/dev/null; then
+        printf '  %-16s %-9s %s\n' "$name" "$role" "$pw" >> "$KEYS_FILE"
+      else
+        echo "  (could not create $name — make it later on the Users page)" >> "$KEYS_FILE"
+      fi
+    done
+    rm -f .people_pending
+  fi
   if [ "$ok" != 1 ]; then
     echo "The app is running, but https://$DOMAIN does not answer yet."
     echo "- Using your own domain? Check that it points at this server, then wait a few minutes."
@@ -123,11 +143,12 @@ if [ -f "$KEYS_FILE" ]; then
   echo
   cat "$KEYS_FILE"
   echo
-  echo "(Saved in $KEYS_FILE — give each person only their own key.)"
+  echo "(Saved in $KEYS_FILE — give each person only their own username and password, privately.)"
 fi
 cat <<'EOF'
 
 Next: sign in, click "Import cookies" and import the cookies of the accounts used for collecting.
+More people, other roles (viewer / operator / admin), new passwords: the Users page (admins).
 Useful later:
   docker compose logs --tail 50        what the app is doing
   docker compose restart               restart

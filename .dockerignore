@@ -7,3 +7,4 @@ outputs
 tests
 *.log
 .env
+.people_pending

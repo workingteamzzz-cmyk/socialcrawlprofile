@@ -252,6 +252,10 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
   .modal .card-bd{padding:14px}
   .main{padding:16px}
 }
+/* rights: viewer < operator < admin (the server checks too) */
+body[data-role="viewer"] .need-op{display:none!important}
+body:not([data-role="admin"]) .need-admin{display:none!important}
+.role-chip{font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px;background:var(--accent-soft);color:var(--accent);text-transform:uppercase;letter-spacing:.04em}
 </style>
 </head>
 <body>
@@ -305,12 +309,14 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
       <div class="sep">System</div>
       <button data-p="schedules"><svg class="i"><use href="#i-cal"/></svg>Schedules<span class="count" id="navSch">0</span></button>
       <button data-p="exports"><svg class="i"><use href="#i-file"/></svg>Exports</button>
+      <button data-p="users" class="need-admin" style="display:none" id="navUsers"><svg class="i"><use href="#i-users"/></svg>Users</button>
       <button data-p="log"><svg class="i"><use href="#i-term"/></svg>Activity Log</button>
     </nav>
     <div class="side-foot">
-      <button class="btn-block" id="btnLogin" title="Open a browser to sign in to each platform (once)"><svg class="i"><use href="#i-login"/></svg>Log in to platforms</button>
+      <button class="btn-block need-admin" id="btnLogin" title="Open a browser to sign in to each platform (once)"><svg class="i"><use href="#i-login"/></svg>Log in to platforms</button>
       <div class="logins" id="logins" title="Sign-in status from the browser profile (checked at the last login or run)"></div>
       <button class="btn sm ghost" id="btnImport" style="justify-content:center;color:var(--accent)">Import logins from an older copy…</button>
+      <button class="btn sm ghost" id="btnMe" style="justify-content:center;display:none" title="Password and personal API key"></button>
       <button class="btn sm ghost" id="btnSignOut" style="justify-content:center;display:none">Sign out of this server</button>
       <div class="status-row"><span class="dot" id="stDot"></span><div><b id="stTitle">Ready</b><small id="stSub">No job running</small></div></div>
     </div>
@@ -347,9 +353,9 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
                 <div class="stat"><b id="sUnits">0</b><small>groups</small></div>
                 <div class="stat"><b id="sDays">0</b><small>days</small></div>
               </div>
-              <button class="btn primary lg" id="btnStart"><svg class="i"><use href="#i-play"/></svg>Start collecting</button>
-              <button class="btn lg" id="btnSched" style="margin-top:8px" title="Run this search by itself, every day or every few hours"><svg class="i"><use href="#i-cal"/></svg>Schedule it (runs by itself)…</button>
-              <button class="btn danger lg" id="btnStop" style="display:none"><svg class="i"><use href="#i-stop"/></svg>Stop (keeps what was collected)</button>
+              <button class="need-op btn primary lg" id="btnStart"><svg class="i"><use href="#i-play"/></svg>Start collecting</button>
+              <button class="need-op btn lg" id="btnSched" style="margin-top:8px" title="Run this search by itself, every day or every few hours"><svg class="i"><use href="#i-cal"/></svg>Schedule it (runs by itself)…</button>
+              <button class="need-op btn danger lg" id="btnStop" style="display:none"><svg class="i"><use href="#i-stop"/></svg>Stop (keeps what was collected)</button>
               <div class="alert" id="runMsg"></div>
               <div class="prog" id="prog">
                 <div class="track"><div class="fill" id="progFill"></div></div>
@@ -383,9 +389,9 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
         <div class="actions">
           <label for="listSel" class="sr">Account list</label>
           <select class="select" id="listSel" style="min-width:200px;font-weight:600"></select>
-          <button class="btn" id="btnNewList"><svg class="i"><use href="#i-plus"/></svg>New list</button>
-          <button class="btn danger" id="btnDelList" title="Delete this list">Delete list</button>
-          <button class="btn primary" id="btnAdd"><svg class="i"><use href="#i-plus"/></svg>Add profiles</button>
+          <button class="need-op btn" id="btnNewList"><svg class="i"><use href="#i-plus"/></svg>New list</button>
+          <button class="need-op btn danger" id="btnDelList" title="Delete this list">Delete list</button>
+          <button class="need-op btn primary" id="btnAdd"><svg class="i"><use href="#i-plus"/></svg>Add profiles</button>
         </div>
       </div>
       <div class="card">
@@ -468,9 +474,9 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
                 <div class="stat"><b id="kS2">0</b><small>platforms</small></div>
                 <div class="stat"><b id="kS3">0</b><small>searches</small></div>
               </div>
-              <button class="btn primary lg" id="kBtnStart"><svg class="i"><use href="#i-search"/></svg>Start keyword search</button>
-              <button class="btn lg" id="kBtnSched" style="margin-top:8px" title="Run this search by itself, every day or every few hours"><svg class="i"><use href="#i-cal"/></svg>Schedule it (runs by itself)…</button>
-              <button class="btn danger lg" id="kBtnStop" style="display:none"><svg class="i"><use href="#i-stop"/></svg>Stop (keeps what was collected)</button>
+              <button class="need-op btn primary lg" id="kBtnStart"><svg class="i"><use href="#i-search"/></svg>Start keyword search</button>
+              <button class="need-op btn lg" id="kBtnSched" style="margin-top:8px" title="Run this search by itself, every day or every few hours"><svg class="i"><use href="#i-cal"/></svg>Schedule it (runs by itself)…</button>
+              <button class="need-op btn danger lg" id="kBtnStop" style="display:none"><svg class="i"><use href="#i-stop"/></svg>Stop (keeps what was collected)</button>
               <div class="alert" id="kMsg"></div>
               <div class="prog" id="kProg">
                 <div class="track"><div class="fill" id="kProgFill"></div></div>
@@ -571,9 +577,9 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
                 <div class="stat"><b id="nS2">100</b><small>max links each</small></div>
                 <div class="stat"><b id="nS3">0</b><small>days</small></div>
               </div>
-              <button class="btn primary lg" id="nBtnStart"><svg class="i"><use href="#i-news"/></svg>Start news search</button>
-              <button class="btn lg" id="nBtnSched" style="margin-top:8px" title="Run this search by itself, every day or every few hours"><svg class="i"><use href="#i-cal"/></svg>Schedule it (runs by itself)…</button>
-              <button class="btn danger lg" id="nBtnStop" style="display:none"><svg class="i"><use href="#i-stop"/></svg>Stop (keeps what was collected)</button>
+              <button class="need-op btn primary lg" id="nBtnStart"><svg class="i"><use href="#i-news"/></svg>Start news search</button>
+              <button class="need-op btn lg" id="nBtnSched" style="margin-top:8px" title="Run this search by itself, every day or every few hours"><svg class="i"><use href="#i-cal"/></svg>Schedule it (runs by itself)…</button>
+              <button class="need-op btn danger lg" id="nBtnStop" style="display:none"><svg class="i"><use href="#i-stop"/></svg>Stop (keeps what was collected)</button>
               <div class="alert" id="nMsg"></div>
               <div class="prog" id="nProg">
                 <div class="track"><div class="fill" id="nProgFill"></div></div>
@@ -640,7 +646,7 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
     <section class="page" id="p-exports">
       <div class="pagehead"><div><h1>Exports</h1><p>Excel files from earlier collections — saved in <b id="outDir">Documents/Post Link Collector/outputs</b>.</p></div></div>
       <div class="card"><div class="card-bd exports" id="exports" style="padding-top:14px"></div></div>
-      <div class="card" style="margin-top:16px">
+      <div class="card need-op" style="margin-top:16px">
         <div class="card-hd"><h3>Fix Google News links in a file</h3></div>
         <div class="card-bd">
           <p class="hint" style="margin-top:0">An older Excel/CSV still has <code>news.google.com/rss/articles/…</code> links? Choose the file: every such link is replaced by the media's own link (other cells stay as they are), with a <b>Decode Log</b> sheet. The fixed file appears in the list above as <code>…_decoded.xlsx</code>. New searches already do this by themselves.</p>
@@ -650,7 +656,7 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
           </div>
         </div>
       </div>
-      <div class="card" id="auditCard" style="display:none;margin-top:16px">
+      <div class="card need-admin" id="auditCard" style="display:none;margin-top:16px">
         <div class="card-hd"><h3>Access log</h3><div class="tools"><small class="hint">Who did what on this server — newest first</small></div></div>
         <div class="card-bd" style="overflow-x:auto"><table class="tbl" id="auditTbl"><thead><tr><th>Time</th><th>Who</th><th>Action</th><th>Details</th><th>Address</th></tr></thead><tbody></tbody></table></div>
       </div>
@@ -661,6 +667,20 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
       <div class="pagehead"><div><h1>Schedules</h1><p>Searches that run by themselves — e.g. news for yesterday, every morning. Set a search up on its page, then click <b>Schedule it</b>. Each run saves its own Excel file (Exports).</p></div></div>
       <div class="card"><div class="card-bd" style="overflow-x:auto"><table class="tbl" id="schTbl"><thead><tr><th>Name</th><th>What</th><th>When</th><th>Next run</th><th>Last run</th><th></th></tr></thead><tbody></tbody></table></div></div>
       <p class="hint" id="schHint" style="margin-top:12px"></p>
+    </section>
+
+    <!-- USERS (admin) -->
+    <section class="page" id="p-users">
+      <div class="pagehead"><div><h1>Users</h1><p>Who may sign in, and what they may do. <b>Viewer</b>: see results and download Excel. <b>Operator</b>: also run searches, schedules, account lists. <b>Admin</b>: also users, platform cookies and the access log.</p></div></div>
+      <div class="card"><div class="card-hd"><h3>Add a user</h3></div><div class="card-bd">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;align-items:end">
+          <div class="field" style="margin:0"><label for="uName">Username</label><input id="uName" placeholder="e.g. budi" autocomplete="off"></div>
+          <div class="field" style="margin:0"><label for="uRole">Role</label><select id="uRole"><option value="viewer">Viewer</option><option value="operator" selected>Operator</option><option value="admin">Admin</option></select></div>
+          <div class="field" style="margin:0"><label for="uPass">Password (min. 10 characters)</label><input id="uPass" type="text" autocomplete="off" placeholder="give it to them privately"></div>
+          <div><button class="btn" id="uGen" type="button">Generate</button> <button class="btn primary" id="uAdd">Add user</button></div>
+        </div><ul class="errs" id="uErrs"></ul></div></div>
+      <div class="card" style="margin-top:16px"><div class="card-bd" style="overflow-x:auto"><table class="tbl" id="uTbl"><thead><tr><th>User</th><th>Role</th><th>Status</th><th>Last sign-in</th><th>API key</th><th></th></tr></thead><tbody></tbody></table></div></div>
+      <p class="hint" style="margin-top:12px">Changing a role or password, or disabling someone, signs them out at once. The access keys from the server's settings keep working as admin keys (for emergencies).</p>
     </section>
 
     <!-- LOG -->
@@ -784,6 +804,25 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
     </div>
   </div>
 </div>
+<div class="modal" id="meModal" role="dialog" aria-modal="true" aria-labelledby="meTitle">
+  <div class="card" style="width:min(520px,100%)">
+    <div class="card-hd"><h3 id="meTitle">My account</h3><div class="tools"><button class="iconbtn" id="meClose" aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div></div>
+    <div class="card-bd">
+      <p style="margin-top:0">Signed in as <b id="meName"></b> <span class="role-chip" id="meRole"></span></p>
+      <div id="mePw">
+        <div class="field"><label for="meOld">Current password</label><input id="meOld" type="password" autocomplete="current-password"></div>
+        <div class="field"><label for="meNew">New password (min. 10 characters)</label><input id="meNew" type="password" autocomplete="new-password"></div>
+        <button class="btn primary" id="meSave">Change password</button>
+        <hr style="border:0;border-top:1px solid var(--line);margin:18px 0">
+        <p class="hint" style="margin-top:0">A personal API key lets scripts or n8n use the API with your rights. It is shown once; making a new one stops the old one.</p>
+        <button class="btn" id="meKey">Make a new API key</button>
+        <pre id="meKeyOut" style="display:none;white-space:pre-wrap;word-break:break-all;background:var(--soft);padding:10px;border-radius:8px;margin-top:10px"></pre>
+      </div>
+      <p class="hint" id="meNoPw" style="display:none">You signed in with an access key (admin). Make a user account for yourself on the Users page.</p>
+      <ul class="errs" id="meErrs"></ul>
+    </div>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -840,6 +879,7 @@ function go(p){
   ls.set('page', p); window.scrollTo(0, 0);
   if (p === 'exports'){ loadExports(); if (SERVER) loadAudit(); }
   if (p === 'schedules') loadSchedules();
+  if (p === 'users') loadUsers();
 }
 document.querySelectorAll('#nav button').forEach(b => b.onclick = () => go(b.dataset.p));
 document.addEventListener('click', e => { const g = e.target.closest('[data-go]'); if (g){ e.preventDefault(); go(g.dataset.go); } });
@@ -930,7 +970,7 @@ function renderAccounts(){
           ${pi(a.platform, true)}
           <div class="h"><a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(shortHandle(a))}</a><small>${esc(PL[a.platform].n)}${a.note ? ' · ' + esc(a.note) : ''}</small></div>
           ${statusTag(a.status)}
-          <button class="iconbtn del" data-id="${a.id}" title="Remove from this list" aria-label="Remove ${esc(a.handle)}">${icon('i-x', 'width:15px;height:15px')}</button>
+          <button class="iconbtn del need-op" data-id="${a.id}" title="Remove from this list" aria-label="Remove ${esc(a.handle)}">${icon('i-x', 'width:15px;height:15px')}</button>
         </div>`).join('')}</div></div>`;
   }).join('');
   document.querySelectorAll('.ucb').forEach(cb => cb.indeterminate = cb.dataset.ind === '1');
@@ -1380,6 +1420,7 @@ async function capSend(a){
   setTimeout(capRefresh, 500);
 }
 function capUpdate(c){
+  if (ROLE === 'viewer') return;
   const was = cap.pending;
   cap = c || {pending: false};
   if (cap.pending && capDismissed !== cap.since && !capModal.classList.contains('show')){
@@ -1475,7 +1516,7 @@ async function loadSchedules(){
       <td>${s.running ? '<b>running now</b>' : when(s.last_run)}<br><small class="hint">${esc(s.last_result || '')}</small></td>
       <td style="white-space:nowrap"><button class="btn sm" data-run="${i}">Run now</button>
         <button class="btn sm" data-tog="${i}">${s.enabled ? 'Pause' : 'Resume'}</button>
-        <button class="btn sm ghost" data-del="${i}" style="color:var(--bad)">Delete</button></td></tr>`;
+        <button class="btn sm ghost" data-del="${i}" style="color:var(--bad)">Delete</button></td></tr>`.replace(/<button class="btn sm/g, '<button class="need-op btn sm');
   }).join('') || '<tr><td colspan="6" class="hint">No schedules yet. Set up a search on the News Search, Keyword Search or Collect page and click “Schedule it”.</td></tr>';
   $('schHint').textContent = SERVER ? 'The server runs these by itself, 24 hours a day. A schedule that comes due while another search is running starts right after it.'
     : 'These run while this app is open on this computer. For runs while the computer is off, use the server version.';
@@ -1486,6 +1527,76 @@ async function loadSchedules(){
     const r = await api('/api/schedules/save', {...s, enabled: !s.enabled}); if (r.error) toast(r.error); loadSchedules(); });
   tb.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => { const s = schList[+b.dataset.del];
     if (!confirm(`Delete the schedule “${s.name}”?`)) return; await api('/api/schedules/delete', {id: s.id}); loadSchedules(); });
+}
+
+/* ---------- rights, my account, users ---------- */
+let ROLE = 'admin', ME = null;
+async function loadMe(){
+  const d = await api('/api/me');
+  if (!d || !d.role) return;
+  ME = d; ROLE = d.role; document.body.dataset.role = ROLE;
+  $('navUsers').style.display = d.accounts && ROLE === 'admin' ? '' : 'none';
+  if (d.who !== 'local'){
+    $('btnMe').style.display = ''; $('btnMe').innerHTML = `${esc(d.who)} <span class="role-chip">${esc(ROLE)}</span>`;
+  }
+}
+const meModal = $('meModal');
+$('btnMe').onclick = () => { $('meName').textContent = ME.who; $('meRole').textContent = ME.role; $('meErrs').innerHTML = '';
+  $('mePw').style.display = ME.password ? '' : 'none'; $('meNoPw').style.display = ME.password ? 'none' : '';
+  $('meKeyOut').style.display = 'none'; $('meOld').value = $('meNew').value = ''; meModal.classList.add('show'); };
+$('meClose').onclick = () => meModal.classList.remove('show');
+meModal.addEventListener('click', e => { if (e.target === meModal) meModal.classList.remove('show'); });
+$('meSave').onclick = async () => {
+  const r = await api('/api/me/password', {old: $('meOld').value, new: $('meNew').value});
+  if (!r.ok){ $('meErrs').innerHTML = `<li>${esc(r.error)}</li>`; return; }
+  toast('Password changed — please sign in again'); setTimeout(() => location.reload(), 1200);
+};
+$('meKey').onclick = async () => {
+  if (!confirm('Make a new personal API key? Your old key (if any) stops working.')) return;
+  const r = await api('/api/me/apikey', {});
+  if (!r.ok){ $('meErrs').innerHTML = `<li>${esc(r.error)}</li>`; return; }
+  $('meKeyOut').style.display = ''; $('meKeyOut').textContent = r.api_key + '\n\nCopy it now — it will not be shown again.';
+};
+function genPassword(){
+  const a = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789', v = new Uint32Array(14);
+  crypto.getRandomValues(v); return [...v].map(x => a[x % a.length]).join('');
+}
+$('uGen').onclick = () => { $('uPass').value = genPassword(); };
+$('uAdd').onclick = async () => {
+  const r = await api('/api/users/save', {username: $('uName').value.trim(), role: $('uRole').value, password: $('uPass').value});
+  if (!r.ok){ $('uErrs').innerHTML = `<li>${esc(r.error)}</li>`; return; }
+  $('uErrs').innerHTML = ''; toast(`User ${r.user.username} added — give them the password privately`);
+  $('uName').value = $('uPass').value = ''; loadUsers();
+};
+let uList = [];
+async function loadUsers(){
+  const d = await api('/api/users');
+  uList = d.users || [];
+  $('uTbl').querySelector('tbody').innerHTML = uList.map((u, i) => `<tr>
+    <td><b>${esc(u.username)}</b>${ME && u.username === ME.who ? ' <span class="hint">(you)</span>' : ''}</td>
+    <td><select data-role="${i}">${['viewer', 'operator', 'admin'].map(r => `<option ${r === u.role ? 'selected' : ''}>${r}</option>`).join('')}</select></td>
+    <td>${u.disabled ? '<span style="color:var(--bad)">disabled</span>' : 'active'}</td>
+    <td>${esc(u.last_login || '—')}</td><td>${u.has_api_key ? 'yes' : '—'}</td>
+    <td style="white-space:nowrap"><button class="btn sm" data-pw="${i}">New password</button>
+      <button class="btn sm" data-key="${i}">New API key</button>
+      <button class="btn sm" data-dis="${i}">${u.disabled ? 'Enable' : 'Disable'}</button>
+      <button class="btn sm ghost" data-udel="${i}" style="color:var(--bad)">Delete</button></td></tr>`).join('')
+    || '<tr><td colspan="6" class="hint">No user accounts yet — add the first one above.</td></tr>';
+  const tb = $('uTbl');
+  const save = async (u, extra) => { const r = await api('/api/users/save', {username: u.username, role: u.role, disabled: u.disabled, ...extra});
+    if (!r.ok) toast(r.error); return r; };
+  tb.querySelectorAll('[data-role]').forEach(el => el.onchange = async () => { await save(uList[+el.dataset.role], {role: el.value}); loadUsers(); });
+  tb.querySelectorAll('[data-dis]').forEach(b => b.onclick = async () => { const u = uList[+b.dataset.dis]; await save(u, {disabled: !u.disabled}); loadUsers(); });
+  tb.querySelectorAll('[data-pw]').forEach(b => b.onclick = async () => { const u = uList[+b.dataset.pw], pw = genPassword();
+    if (!confirm(`Give ${u.username} a new password? They will be signed out.`)) return;
+    const r = await save(u, {password: pw}); if (r.ok) prompt(`New password for ${u.username} — copy it and give it to them privately:`, pw); });
+  tb.querySelectorAll('[data-key]').forEach(b => b.onclick = async () => { const u = uList[+b.dataset.key];
+    if (!confirm(`Make a new API key for ${u.username}? Their old key stops working.`)) return;
+    const r = await api('/api/users/apikey', {username: u.username});
+    if (r.ok) prompt(`API key for ${u.username} — copy it now (shown once):`, r.api_key); else toast(r.error); loadUsers(); });
+  tb.querySelectorAll('[data-udel]').forEach(b => b.onclick = async () => { const u = uList[+b.dataset.udel];
+    if (!confirm(`Delete the user ${u.username}?`)) return;
+    const r = await api('/api/users/delete', {username: u.username}); if (!r.ok) toast(r.error); loadUsers(); });
 }
 
 /* ---------- sign-in status ---------- */
@@ -1569,7 +1680,7 @@ async function poll(){
 }
 
 go(document.getElementById('p-' + ls.get('page', 'collect')) ? ls.get('page', 'collect') : 'collect');
-loadLists().then(loadAccounts); loadLogins(); loadSchedules(); renderResults(); kwRender(); renderKw(); nwRender(); renderNews(); poll();
+loadMe(); loadLists().then(loadAccounts); loadLogins(); loadSchedules(); renderResults(); kwRender(); renderKw(); nwRender(); renderNews(); poll();
 </script>
 </body>
 </html>

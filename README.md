@@ -366,6 +366,24 @@ Open `https://<your domain>` and sign in with your key. Without Docker: `pip ins
 `python -m playwright install --with-deps chromium`, then `COLLECTOR_API_KEYS=... COLLECTOR_SERVER=1 python serve.py`
 behind your own HTTPS proxy. All settings are listed at the top of `serve.py` and in `.env.example`.
 
+### Users and rights
+
+People sign in with **username + password**. Each has a role:
+
+| Role | May |
+| --- | --- |
+| **Viewer** | see results, schedules and account lists; download the Excel files (e.g. for a client or a manager) |
+| **Operator** | + run searches, schedules, change account lists, fix Google News links in files, solve verifications |
+| **Admin** | + the **Users** page (add people, change roles, new passwords, disable, delete), import platform cookies, the access log |
+
+The installer makes one account per name you give it — the first is admin, the others operators — with random
+passwords, printed at the end and saved in `/root/post-link-collector-keys.txt`. Everyone can change their own
+password (their name in the sidebar), and make a **personal API key** for scripts/n8n with their own rights.
+Passwords are stored only as salted scrypt hashes; five wrong passwords lock that name for 15 minutes; changing a
+role or password, or disabling someone, signs them out at once. The emergency access key in `.env`
+(`COLLECTOR_API_KEYS`) acts as admin — keep it safe. Lost every admin password? On the server:
+`docker compose exec collector python serve.py add-user <name> admin` prints a new one.
+
 ### Sign in to the platforms (cookies)
 
 1. On your own browser, sign in to the platform (ideally a separate account for collecting).
@@ -435,7 +453,8 @@ All of them, with request examples, are in `/docs`.
 | `crawler/job.py` | Background login/collection jobs, saving results |
 | `crawler/output.py` | Excel/CSV writer |
 | `crawler/server.py`, `crawler/static/index.html` | Local dashboard (reachable only from this computer) |
-| `crawler/api.py`, `serve.py` | The FastAPI server (keys per person, audit log, `/docs`, cookie import) |
+| `crawler/api.py`, `serve.py` | The FastAPI server (sign-in, roles, audit log, `/docs`, cookie import) |
+| `crawler/users.py` | User accounts: passwords (scrypt), roles viewer/operator/admin, personal API keys |
 | `crawler/retention.py` | Deletes old result files and page copies on a server |
 | `crawler/captcha.py` | Lets a person solve a verification from the dashboard when the browser runs on a server |
 | `crawler/schedule.py` | Searches that run by themselves (Schedules page) |

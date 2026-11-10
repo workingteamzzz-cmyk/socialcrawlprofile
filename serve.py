@@ -2,9 +2,13 @@
 (docker-compose.yml puts it behind Caddy with automatic HTTPS).
 
 Environment:
-  COLLECTOR_API_KEYS   one key per person: "ana=<key>,budi=<key>" (each key 16+ random characters,
-                       e.g. `openssl rand -hex 24`). Remove a person's entry and restart to lock them out.
-  COLLECTOR_API_KEY    or a single key (person "admin"). One of the two is required unless HOST is 127.0.0.1.
+  Sign-in: user accounts (username + password, role viewer/operator/admin) are managed on the dashboard's Users
+  page; the first admin is made with:   python serve.py add-user <name> admin
+  (in Docker: docker compose exec collector python serve.py add-user <name> admin) — it prints a password.
+  COLLECTOR_API_KEYS   access keys that act as admin: "admin=<key>" (16+ random characters, `openssl rand -hex 24`);
+                       for emergencies and scripts. Remove an entry and restart to cancel it.
+  COLLECTOR_API_KEY    or a single key (person "admin").
+  Keys or at least one user account are required unless HOST is 127.0.0.1.
   ALLOWED_IPS          optional: only these addresses/networks may connect, e.g. "203.0.113.7,198.51.100.0/24"
   SESSION_DAYS         how long a dashboard sign-in lasts (default 7)
   RETENTION_DAYS       delete result files older than this many days (default 30; 0 = keep)
@@ -47,14 +51,37 @@ def read_keys(env=os.environ) -> dict:
     return keys
 
 
+def add_user(argv):
+    """python serve.py add-user <name> [viewer|operator|admin]  — prints a new random password."""
+    import secrets
+
+    from crawler import paths
+    from crawler.users import UserError, Users
+    if len(argv) < 1:
+        sys.exit("Usage: python serve.py add-user <name> [viewer|operator|admin]")
+    name, role = argv[0], (argv[1] if len(argv) > 1 else "operator")
+    password = os.environ.get("NEW_PASSWORD") or secrets.token_urlsafe(12)
+    try:
+        u = Users(os.path.join(paths.APP_DATA, "users.json")).save(name, role, password)
+    except UserError as e:
+        sys.exit(str(e))
+    print(f"{u['username']}\t{u['role']}\t{password}")
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "add-user":
+        return add_user(sys.argv[2:])
     host = os.environ.get("HOST", "0.0.0.0")
     port = int(os.environ.get("PORT", "8770"))
     keys = read_keys()
     local_only = host in ("127.0.0.1", "localhost", "::1")
-    if not keys and not local_only:
-        sys.exit("No access key set (COLLECTOR_API_KEYS or COLLECTOR_API_KEY). Anyone who can reach this server could "
-                 "use your signed-in accounts — set long random keys (openssl rand -hex 24), or use HOST=127.0.0.1.")
+    from crawler import paths as _paths
+    users_file = os.path.join(_paths.APP_DATA, "users.json")
+    has_users = os.path.exists(users_file) and os.path.getsize(users_file) > 5
+    if not keys and not has_users and not local_only:
+        sys.exit("No way to sign in is set up. Anyone who can reach this server could use your signed-in accounts — "
+                 "make an admin (python serve.py add-user <name> admin) or set COLLECTOR_API_KEYS, "
+                 "or use HOST=127.0.0.1.")
     allowed = [a.strip() for a in os.environ.get("ALLOWED_IPS", "").split(",") if a.strip()]
     for a in allowed:
         try:
@@ -75,14 +102,15 @@ def main():
     retention.start(paths.OUTPUT_DIR, days, debug_days)
     app = create_app(keys or None, secure_cookie=os.environ.get("COOKIE_SECURE", "") in ("1", "true", "yes"),
                      allowed_ips=allowed or None, audit_path=os.path.join(paths.APP_DATA, "audit.log"),
-                     session_days=float(os.environ.get("SESSION_DAYS", "7") or 7))
+                     session_days=float(os.environ.get("SESSION_DAYS", "7") or 7), users_path=users_file)
     from crawler import schedule
     sched = schedule.get()
     sched.audit = lambda who, action, **kw: app.state.audit.add(who, action, "", **kw)
     sched.start()
     print(f"Schedules: {len(sched.items)}")
     print(f"Data folder: {os.path.dirname(paths.LISTS_DIR)}  ·  server mode: {'on' if paths.SERVER_MODE else 'off'}")
-    print(f"People with a key: {', '.join(sorted(keys)) or '-'}  ·  allowed addresses: {', '.join(allowed) or 'any'}")
+    print(f"Access keys: {', '.join(sorted(keys)) or '-'}  ·  user accounts: {'yes' if has_users else 'none yet'}  ·  "
+          f"allowed addresses: {', '.join(allowed) or 'any'}")
     print(f"Results kept {days:g} days (0 = forever), page copies {debug_days:g} days")
     print(f"API on http://{host}:{port}  ·  docs at /docs  ·  health at /api/health")
     uvicorn.run(app, host=host, port=port, proxy_headers=True, server_header=False,

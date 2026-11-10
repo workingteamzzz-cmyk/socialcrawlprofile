@@ -196,16 +196,42 @@ class DecodeFile(BaseModel):
 
 
 class SignIn(BaseModel):
-    key: str
+    username: str = ""
+    password: str = ""
+    key: str = Field("", description="Or an access key (COLLECTOR_API_KEYS = admin) or a personal API key")
+
+
+class UserIn(BaseModel):
+    username: str
+    role: Literal["viewer", "operator", "admin"] = "viewer"
+    password: str = Field("", description="Required for a new user; give it to change the password")
+    disabled: bool = False
+
+
+class UserRef(BaseModel):
+    username: str
+
+
+class PasswordChange(BaseModel):
+    old: str
+    new: str
 
 
 def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, allowed_ips: list | None = None,
-               audit_path: str | None = None, session_days: float = 7) -> FastAPI:
+               audit_path: str | None = None, session_days: float = 7, users_path: str | None = None) -> FastAPI:
     """api_keys: {person: key} (a single key string means {"admin": key}). None only for a copy that listens on
     127.0.0.1 — then everything is open, like the local app. allowed_ips: addresses/networks that may connect
     (None = any)."""
     from .paths import SERVER_MODE
     keys = {"admin": api_keys} if isinstance(api_keys, str) else dict(api_keys or {})
+    from .users import Users, UserError, allowed
+    users = Users(users_path) if users_path else None
+
+    def protected() -> bool:
+        """Sign-in needed: there are access keys or user accounts. Otherwise this is an open copy on 127.0.0.1."""
+        if users:
+            users._fresh()
+        return bool(keys) or bool(users and users.data)
     nets = [ipaddress.ip_network(n, strict=False) for n in (allowed_ips or [])]
     audit = Audit(audit_path)
     app_state = {"audit": audit}
@@ -248,48 +274,67 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
             return None
         return name if hmac.compare_digest(value.encode(), _session_value(name, key, issued_i).encode()) else None
 
-    def who(request: Request, header_key: str | None) -> str | None:
-        """The person making the request, or None. Raises 403 for a cookie request sent from another site."""
-        if not keys:
-            return "local"
+    def identify(request: Request, header_key: str | None) -> tuple[str, str] | None:
+        """(person, role) making the request, or None. Raises 403 for a cookie request sent from another site.
+        Access keys (COLLECTOR_API_KEYS) are admins; user accounts have their own role."""
+        if not protected():
+            return ("local", "admin")
         bearer = (request.headers.get("authorization") or "")
         if bearer.lower().startswith("bearer "):
             header_key = header_key or bearer[7:].strip()
-        name = key_owner(header_key)
-        if name:
-            return name
-        name = cookie_owner(request.cookies.get(COOKIE) or "")
-        if name and request.method not in ("GET", "HEAD", "OPTIONS"):
+        if header_key:
+            name = key_owner(header_key)
+            if name:
+                return (name, "admin")
+            hit = users.by_api_key(header_key) if users else None
+            if hit:
+                return hit
+        value = request.cookies.get(COOKIE) or ""
+        ident = None
+        if value.startswith("u.") and users:
+            ident = users.from_session(value, session_days * 86400)
+        elif value:
+            name = cookie_owner(value)
+            ident = (name, "admin") if name else None
+        if ident and request.method not in ("GET", "HEAD", "OPTIONS"):
             # a signed-in browser: only this app's own page may send changes (no cross-site requests)
             origin = request.headers.get("origin") or request.headers.get("referer") or ""
             if not origin or urlparse(origin).netloc != request.headers.get("host", ""):
                 raise HTTPException(403, "forbidden: request from another site")
-        return name
+        return ident
 
     def signed_in(request: Request, header_key: str | None) -> bool:
-        return who(request, header_key) is not None
+        return identify(request, header_key) is not None
 
-    def require(request: Request, key: str | None = Depends(_key_header)) -> str:
-        if not keys and urlparse("//" + request.headers.get("host", "")).hostname not in ("127.0.0.1", "localhost", "::1"):
-            raise HTTPException(403, "forbidden")      # open local copy: only requests addressed to this computer
-        ip = client_ip(request)
-        if not ip_allowed(ip):
-            raise HTTPException(403, "This address may not use the server.")
-        if failures.blocked(ip):
-            raise HTTPException(429, "Too many wrong keys — try again in a few minutes.")
-        name = who(request, key)
-        if name is None:
-            if key or request.cookies.get(COOKIE) or request.headers.get("authorization"):
-                failures.add(ip)
-                audit.add("?", "rejected", ip, path=request.url.path)
-            raise HTTPException(401, "Missing or wrong API key (send the X-API-Key header, or sign in on the dashboard).")
-        request.state.who = name
-        return name
+    def need(role: str):
+        """Dependency: signed in, with at least this role (viewer < operator < admin)."""
+        def check(request: Request, key: str | None = Depends(_key_header)) -> str:
+            if not protected() and urlparse("//" + request.headers.get("host", "")).hostname not in (
+                    "127.0.0.1", "localhost", "::1"):
+                raise HTTPException(403, "forbidden")      # open local copy: only requests addressed to this computer
+            ip = client_ip(request)
+            if not ip_allowed(ip):
+                raise HTTPException(403, "This address may not use the server.")
+            if failures.blocked(ip):
+                raise HTTPException(429, "Too many wrong keys — try again in a few minutes.")
+            ident = identify(request, key)
+            if ident is None:
+                if key or request.cookies.get(COOKIE) or request.headers.get("authorization"):
+                    failures.add(ip)
+                    audit.add("?", "rejected", ip, path=request.url.path)
+                raise HTTPException(401, "Please sign in (or send your API key in the X-API-Key header).")
+            request.state.who, request.state.role = ident
+            if not allowed(ident[1], role):
+                raise HTTPException(403, f"Your account ({ident[1]}) may not do this — it needs {role} rights.")
+            return ident[0]
+        return [Depends(check)]
 
     def log(request: Request, action: str, **info):
         audit.add(getattr(request.state, "who", "?"), action, client_ip(request), **info)
 
-    auth = [Depends(require)]
+    auth = need("viewer")            # see results, lists, schedules, download
+    op = need("operator")            # run searches, schedules, lists, file fixer, verifications
+    admin_only = need("admin")       # users, platform cookies, audit log
 
     @app.exception_handler(HTTPException)
     async def _http_error(request: Request, exc: HTTPException):
@@ -329,7 +374,7 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
     def dashboard(request: Request):
         if not ip_allowed(client_ip(request)):
             raise HTTPException(403, "This address may not use the server.")
-        if keys and not signed_in(request, None):
+        if protected() and not signed_in(request, None):
             return HTMLResponse(_SIGN_IN_PAGE, headers={"Cache-Control": "no-store"})
         return FileResponse(os.path.join(STATIC, "index.html"), media_type="text/html",
                             headers={"Cache-Control": "no-store"})
@@ -340,15 +385,25 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
         if not ip_allowed(ip):
             raise HTTPException(403, "This address may not use the server.")
         if failures.blocked(ip):
-            raise HTTPException(429, "Too many wrong keys — try again in a few minutes.")
-        name = key_owner(body.key.strip())
-        if not name:
+            raise HTTPException(429, "Too many wrong attempts — try again in a few minutes.")
+        cookie = name = role = None
+        if body.username and users:
+            if users.locked(body.username.strip().lower()):
+                raise HTTPException(429, "Too many wrong passwords for this user — try again in 15 minutes.")
+            name = users.check_login(body.username, body.password)
+            if name:
+                role, cookie = users.data[name]["role"], users.session(name)
+        elif body.key.strip():
+            name = key_owner(body.key.strip())
+            if name:
+                role, cookie = "admin", _session_value(name, keys[name])
+        if not cookie:
             failures.add(ip)
-            audit.add("?", "sign-in failed", ip)
-            raise HTTPException(401, "Wrong key.")
-        audit.add(name, "signed in", ip)
-        resp = JSONResponse({"ok": True, "who": name})
-        resp.set_cookie(COOKIE, _session_value(name, keys[name]), httponly=True, samesite="strict", secure=secure_cookie,
+            audit.add(body.username.strip().lower()[:32] or "?", "sign-in failed", ip)
+            raise HTTPException(401, "Wrong username or password." if body.username else "Wrong key.")
+        audit.add(name, "signed in", ip, role=role)
+        resp = JSONResponse({"ok": True, "who": name, "role": role})
+        resp.set_cookie(COOKIE, cookie, httponly=True, samesite="strict", secure=secure_cookie,
                         max_age=int(session_days * 86400))
         return resp
 
@@ -358,7 +413,7 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
         resp.delete_cookie(COOKIE)
         return resp
 
-    @app.get("/api/audit", tags=["server"], dependencies=auth, summary="Who did what on this server (newest first)")
+    @app.get("/api/audit", tags=["server"], dependencies=admin_only, summary="Who did what on this server (newest first)")
     def audit_log(limit: int = 200):
         return {"entries": audit.tail(max(1, min(limit, 2000)))}
 
@@ -397,7 +452,7 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
     def answer(err):
         return {"ok": err is None, "error": err}
 
-    @app.post("/api/start", tags=["jobs"], dependencies=auth, summary="Collect post links from accounts")
+    @app.post("/api/start", tags=["jobs"], dependencies=op, summary="Collect post links from accounts")
     def start(body: CrawlRequest, request: Request):
         text = store.lines_for(body.list_id, body.ids) if body.ids else body.text
         err = JOB.start_crawl(text, body.start, body.end, body.tz, list(body.platforms), body.detail, body.template)
@@ -405,21 +460,21 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
             accounts=len([ln for ln in text.splitlines() if ln.strip()]), detail=body.detail)
         return answer(err)
 
-    @app.post("/api/keywords/start", tags=["jobs"], dependencies=auth, summary="Keyword search on the platforms")
+    @app.post("/api/keywords/start", tags=["jobs"], dependencies=op, summary="Keyword search on the platforms")
     def keywords(body: KeywordRequest, request: Request):
         err = JOB.start_keywords(body.keywords, body.start, body.end, body.tz, list(body.platforms), body.options)
         log(request, "started keyword search" if not err else "start refused", period=f"{body.start}..{body.end}",
             keywords=body.keywords[:20], platforms=list(body.platforms))
         return answer(err)
 
-    @app.post("/api/news/start", tags=["jobs"], dependencies=auth, summary="News links from Google")
+    @app.post("/api/news/start", tags=["jobs"], dependencies=op, summary="News links from Google")
     def news(body: NewsRequest, request: Request):
         err = JOB.start_news(body.keywords, body.start, body.end, body.tz, body.options)
         log(request, "started news search" if not err else "start refused", period=f"{body.start}..{body.end}",
             keywords=body.keywords[:20])
         return answer(err)
 
-    @app.post("/api/tools/decode", tags=["jobs"], dependencies=auth,
+    @app.post("/api/tools/decode", tags=["jobs"], dependencies=op,
               summary="Fix the Google News links in a file (.xlsx/.csv/.txt, base64); the result appears in Exports")
     def decode_file(body: DecodeFile, request: Request):
         import base64
@@ -431,7 +486,7 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
         log(request, "started fixing Google News links in a file" if not err else "file fix refused", file=body.name[:80])
         return answer(err)
 
-    @app.post("/api/stop", tags=["jobs"], dependencies=auth, summary="Stop the running job (results so far are kept)")
+    @app.post("/api/stop", tags=["jobs"], dependencies=op, summary="Stop the running job (results so far are kept)")
     def stop(request: Request):
         JOB.stop()
         log(request, "stopped the job")
@@ -439,7 +494,7 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
 
     # ---------- verification ("I'm not a robot") solved by a person from the dashboard ----------
     solving: dict = {}
-    @app.get("/api/captcha/screenshot", tags=["verification"], dependencies=auth,
+    @app.get("/api/captcha/screenshot", tags=["verification"], dependencies=op,
              summary="Live picture of the page that asks for a verification")
     def captcha_picture(view: Literal["full", "focus"] = "full"):
         """`view=focus`: a close-up of the check itself (for phones). The `X-Clip` header says which part of the page
@@ -454,7 +509,7 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
         return Response(png, media_type="image/png", headers={"Cache-Control": "no-store",
                                                               "X-Clip": ",".join(str(int(v)) for v in clip)})
 
-    @app.post("/api/captcha", tags=["verification"], dependencies=auth,
+    @app.post("/api/captcha", tags=["verification"], dependencies=op,
               summary="Click / type / press a key on that page, or skip it")
     def captcha_action(body: CaptchaAction, request: Request):
         from .captcha import CAPTCHA
@@ -479,7 +534,7 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
     def schedules():
         return {"schedules": sched_mod.get().list(), "now": int(time.time())}
 
-    @app.post("/api/schedules/save", tags=["schedules"], dependencies=auth, summary="Create or change a schedule")
+    @app.post("/api/schedules/save", tags=["schedules"], dependencies=op, summary="Create or change a schedule")
     def schedule_save(body: ScheduleIn, request: Request):
         def go():
             s = sched_mod.get().save(body.model_dump())
@@ -487,14 +542,14 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
             return {"ok": True, "schedule": s}
         return sched_call(go)
 
-    @app.post("/api/schedules/delete", tags=["schedules"], dependencies=auth)
+    @app.post("/api/schedules/delete", tags=["schedules"], dependencies=op)
     def schedule_delete(body: ScheduleRef, request: Request):
         ok = sched_mod.get().delete(body.id)
         if ok:
             log(request, "deleted a schedule", id=body.id)
         return {"ok": ok, "error": None if ok else "That schedule no longer exists."}
 
-    @app.post("/api/schedules/run", tags=["schedules"], dependencies=auth, summary="Run a schedule now")
+    @app.post("/api/schedules/run", tags=["schedules"], dependencies=op, summary="Run a schedule now")
     def schedule_run(body: ScheduleRef, request: Request):
         err = sched_mod.get().run_now(body.id)
         if not err:
@@ -506,7 +561,7 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
     def logins(request: Request):
         return {**logins_info(), "server": SERVER_MODE, "who": getattr(request.state, "who", "")}
 
-    @app.post("/api/logins/cookies", tags=["logins"], dependencies=auth,
+    @app.post("/api/logins/cookies", tags=["logins"], dependencies=admin_only,
               summary="Sign the server in with cookies exported from your browser")
     def import_cookies(body: CookieImport, request: Request):
         text = body.cookies if isinstance(body.cookies, str) else json.dumps(body.cookies)
@@ -515,22 +570,84 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
             count=res.get("added", 0), signed_in=[p for p, v in (res.get("platforms") or {}).items() if v])
         return res
 
-    @app.post("/api/login", include_in_schema=False, dependencies=auth)
+    @app.post("/api/login", include_in_schema=False, dependencies=admin_only)
     def login():
         return answer(JOB.start_login())
 
     if not SERVER_MODE:                      # these look at folders on the computer itself — not on a server
-        @app.get("/api/old-profiles", include_in_schema=False, dependencies=auth)
+        @app.get("/api/old-profiles", include_in_schema=False, dependencies=admin_only)
         def old_profiles():
             from .paths import find_old_profiles
             return {"profiles": find_old_profiles()[:10]}
 
-        @app.post("/api/logins/import", include_in_schema=False, dependencies=auth)
+        @app.post("/api/logins/import", include_in_schema=False, dependencies=admin_only)
         def import_profile(body: dict):
             if JOB.running:
                 return answer("Wait until the current job has finished (or Stop it) and try again.")
             from .paths import import_profile as do_import
             return answer(do_import(body.get("path", ""), JOB.log) or None)
+
+    # ---------- users (sign-in accounts and their rights) ----------
+    def user_call(fn):
+        if not users:
+            return {"ok": False, "error": "User accounts are not enabled on this copy."}
+        try:
+            return fn()
+        except UserError as e:
+            return {"ok": False, "error": str(e)}
+
+    @app.get("/api/me", tags=["users"], dependencies=auth, summary="Who is signed in, and their role")
+    def me(request: Request):
+        return {"who": request.state.who, "role": request.state.role, "server": SERVER_MODE,
+                "accounts": bool(users), "password": bool(users and request.state.who in users.data)}
+
+    @app.post("/api/me/password", tags=["users"], dependencies=auth, summary="Change my own password")
+    def my_password(body: PasswordChange, request: Request):
+        def go():
+            users.change_password(request.state.who, body.old, body.new)
+            log(request, "changed own password")
+            return {"ok": True}
+        return user_call(go)
+
+    @app.post("/api/me/apikey", tags=["users"], dependencies=auth,
+              summary="A new personal API key for me (shown once; the old one stops working)")
+    def my_api_key(request: Request):
+        def go():
+            key = users.new_api_key(request.state.who)
+            log(request, "made a new personal API key")
+            return {"ok": True, "api_key": key}
+        return user_call(go)
+
+    @app.get("/api/users", tags=["users"], dependencies=admin_only)
+    def users_list():
+        return {"users": users.list() if users else []}
+
+    @app.post("/api/users/save", tags=["users"], dependencies=admin_only, summary="Create a user or change role/password")
+    def users_save(body: UserIn, request: Request):
+        def go():
+            new = body.username.strip().lower() not in users.data
+            u = users.save(body.username, body.role, body.password, body.disabled, by=request.state.who)
+            log(request, "created a user" if new else "changed a user", user=u["username"], role=u["role"],
+                disabled=u["disabled"], password_set=bool(body.password))
+            return {"ok": True, "user": u}
+        return user_call(go)
+
+    @app.post("/api/users/delete", tags=["users"], dependencies=admin_only)
+    def users_delete(body: UserRef, request: Request):
+        def go():
+            users.delete(body.username, by=request.state.who)
+            log(request, "deleted a user", user=body.username)
+            return {"ok": True}
+        return user_call(go)
+
+    @app.post("/api/users/apikey", tags=["users"], dependencies=admin_only,
+              summary="A new API key for a user (shown once; their old one stops working)")
+    def users_api_key(body: UserRef, request: Request):
+        def go():
+            key = users.new_api_key(body.username)
+            log(request, "made a new API key for a user", user=body.username)
+            return {"ok": True, "api_key": key}
+        return user_call(go)
 
     # ---------- account lists ----------
     def list_change(fn):
@@ -549,17 +666,17 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
     def accounts(list: str = ""):  # noqa: A002  (the dashboard's parameter name)
         return {"accounts": store.load(list)}
 
-    @app.post("/api/accounts/add", tags=["account lists"], dependencies=auth)
+    @app.post("/api/accounts/add", tags=["account lists"], dependencies=op)
     def accounts_add(body: AccountsAdd, request: Request):
         log(request, "added accounts", list=body.list_id)
         return list_change(lambda: store.add(body.list_id, body.text, body.group))
 
-    @app.post("/api/accounts/remove", tags=["account lists"], dependencies=auth)
+    @app.post("/api/accounts/remove", tags=["account lists"], dependencies=op)
     def accounts_remove(body: AccountsRemove, request: Request):
         log(request, "removed accounts", list=body.list_id, count=len(body.ids))
         return list_change(lambda: {"removed": store.remove(body.list_id, body.ids)})
 
-    @app.post("/api/lists/create", tags=["account lists"], dependencies=auth)
+    @app.post("/api/lists/create", tags=["account lists"], dependencies=op)
     def lists_create(body: ListCreate, request: Request):
         log(request, "created a list", name=body.name)
         def go():
@@ -567,7 +684,7 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
             return {"ok": err is None, "error": err, "id": list_id}
         return list_change(go)
 
-    @app.post("/api/lists/delete", tags=["account lists"], dependencies=auth)
+    @app.post("/api/lists/delete", tags=["account lists"], dependencies=op)
     def lists_delete(body: ListDelete, request: Request):
         log(request, "deleted a list", list=body.id)
         return list_change(lambda: {"ok": store.delete_list(body.id)})
@@ -592,15 +709,25 @@ button{margin-top:12px;width:100%;padding:11px;border:0;border-radius:10px;backg
   font:600 15px system-ui,sans-serif;cursor:pointer}
 #e{color:#dc2626;min-height:1.5em;margin:10px 0 0;font-size:14px}
 </style></head><body>
-<form id="f"><h1>Link Collector</h1><p>Enter the server's access key.</p>
-<input id="k" type="password" autocomplete="current-password" placeholder="Access key" autofocus required>
-<button>Sign in</button><div id="e"></div></form>
+<form id="f"><h1>Link Collector</h1><p id="sub">Sign in to continue.</p>
+<div id="up"><input id="u" autocomplete="username" placeholder="Username" autofocus>
+<input id="p" type="password" autocomplete="current-password" placeholder="Password" style="margin-top:10px"></div>
+<div id="kb" style="display:none"><input id="k" type="password" autocomplete="off" placeholder="Access key"></div>
+<button>Sign in</button><div id="e"></div>
+<a href="#" id="sw" style="display:block;margin-top:14px;font-size:13.5px;color:var(--mute)">Use an access key instead</a></form>
 <script>
+let useKey = false;
+document.getElementById('sw').onclick = ev => { ev.preventDefault(); useKey = !useKey;
+  document.getElementById('up').style.display = useKey ? 'none' : '';
+  document.getElementById('kb').style.display = useKey ? '' : 'none';
+  document.getElementById('sw').textContent = useKey ? 'Use username and password' : 'Use an access key instead';
+  document.getElementById(useKey ? 'k' : 'u').focus(); };
 document.getElementById('f').onsubmit = async ev => {
   ev.preventDefault();
-  const r = await fetch('/auth', {method: 'POST', headers: {'Content-Type': 'application/json'},
-                                  body: JSON.stringify({key: document.getElementById('k').value})});
+  const v = id => document.getElementById(id).value;
+  const body = useKey ? {key: v('k')} : {username: v('u'), password: v('p')};
+  const r = await fetch('/auth', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
   if (r.ok) location.reload();
-  else document.getElementById('e').textContent = (await r.json()).error || 'Wrong key.';
+  else document.getElementById('e').textContent = (await r.json()).error || 'Could not sign in.';
 };
 </script></body></html>"""

@@ -9,3 +9,4 @@ outputs/
 *.tmp
 startup_error.log
 .env
+.people_pending

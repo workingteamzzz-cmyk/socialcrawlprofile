@@ -37,7 +37,7 @@ def test_everything_needs_the_key(client):
         assert r.status_code == 401, path
         assert client.get(path, headers={"X-API-Key": "wrong-key-wrong-key"}).status_code in (401, 429), path
     assert client.post("/api/stop", json={}).status_code == 401
-    assert "Enter the server's access key" in client.get("/").text            # sign-in page, not the dashboard
+    assert "Sign in to continue" in client.get("/").text                       # sign-in page, not the dashboard
 
 
 def test_key_header_and_bearer_work(client):

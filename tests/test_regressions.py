@@ -99,6 +99,25 @@ def test_failed_browser_start_reports_error_and_writes_no_files(tmp_path, monkey
     assert s["modes"]["profiles"]["files"] == [] and not os.listdir(tmp_path / "out")
 
 
+def test_local_app_refuses_other_host_names():
+    """DNS rebinding: a web page whose domain points at 127.0.0.1 must not be able to read the results."""
+    import http.client
+    from http.server import ThreadingHTTPServer
+
+    from crawler import server
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    port = httpd.server_address[1]
+    try:
+        for host, code in [("evil.example:%d" % port, 403), ("127.0.0.1:%d" % port, 200), ("localhost:%d" % port, 200)]:
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+            conn.request("GET", "/api/status", headers={"Host": host})
+            assert conn.getresponse().status == code, host
+            conn.close()
+    finally:
+        httpd.shutdown()
+
+
 def test_origin_check_is_exact():
     from http.server import ThreadingHTTPServer
 

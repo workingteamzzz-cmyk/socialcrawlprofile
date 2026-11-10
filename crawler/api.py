@@ -150,6 +150,8 @@ def create_app(api_key: str | None = None, secure_cookie: bool = False) -> FastA
         return False
 
     def require(request: Request, key: str | None = Depends(_key_header)):
+        if not api_key and urlparse("//" + request.headers.get("host", "")).hostname not in ("127.0.0.1", "localhost", "::1"):
+            raise HTTPException(403, "forbidden")      # open local copy: only requests addressed to this computer
         ip = request.client.host if request.client else "?"
         if failures.blocked(ip):
             raise HTTPException(429, "Too many wrong keys — try again in a few minutes.")

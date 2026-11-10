@@ -52,13 +52,23 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, obj, code=200):
         self._send(code, json.dumps(obj).encode())
 
+    def _local_host(self) -> bool:
+        """Only answer requests addressed to this computer by name. A web page that points its own domain at
+        127.0.0.1 ("DNS rebinding") would otherwise be able to read the results."""
+        host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]").lower()
+        return host in ("127.0.0.1", "localhost", "::1")
+
     def do_GET(self):
+        if not self._local_host():
+            return self._json({"error": "forbidden"}, 403)
         try:
             self._get()
         except Exception as e:  # noqa: BLE001  never leave the dashboard without an answer
             self._json({"error": f"{e.__class__.__name__}: {e}"}, 500)
 
     def do_POST(self):
+        if not self._local_host():
+            return self._json({"ok": False, "error": "forbidden"}, 403)
         try:
             self._post()
         except Exception as e:  # noqa: BLE001

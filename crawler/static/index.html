@@ -702,6 +702,28 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
     </div>
   </div>
 </div>
+<div class="modal" id="capModal" role="dialog" aria-modal="true" aria-labelledby="capTitle">
+  <div class="card" style="width:min(1000px,100%)">
+    <div class="card-hd"><h3 id="capTitle">Verification needed</h3><div class="tools"><button class="iconbtn" id="capClose" aria-label="Close (the job keeps waiting)"><svg class="i"><use href="#i-x"/></svg></button></div></div>
+    <div class="card-bd">
+      <p class="hint" style="margin-top:0"><b id="capSite"></b> wants to check that a person is there. This is the server's
+        browser, live: <b>click on the picture</b> exactly as you would on the page (tick the box, pick the images, press
+        Verify). The search continues by itself once it is through. <span id="capLeft"></span></p>
+      <div style="position:relative;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--soft);min-height:120px">
+        <img id="capImg" alt="The page asking for a verification" style="display:block;width:100%;height:auto;cursor:crosshair">
+        <div id="capWait" class="hint" style="position:absolute;inset:0;display:grid;place-items:center">Taking a picture of the page…</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center">
+        <input id="capText" placeholder="Text to type (if the page asks for it)" style="flex:1;min-width:200px;border:1px solid var(--line);border-radius:10px;padding:9px 12px;background:var(--panel)">
+        <button class="btn" id="capType">Type</button>
+        <button class="btn" id="capEnter">Press Enter</button>
+        <button class="btn" id="capDown">Scroll down</button>
+        <button class="btn" id="capUp">Scroll up</button>
+        <button class="btn" id="capSkip" style="margin-left:auto">Skip this search</button>
+      </div>
+    </div>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -1260,6 +1282,47 @@ async function loadAudit(){
     <td>${esc(e.ip)}</td></tr>`).join('') || '<tr><td colspan="5" class="hint">Nothing yet</td></tr>';
 }
 
+/* ---------- verification solved from the dashboard (server) ---------- */
+const capModal = $('capModal');
+let cap = {pending: false}, capDismissed = 0, capTimer = null, capBusy = false;
+function capRefresh(){
+  clearTimeout(capTimer);
+  if (!capModal.classList.contains('show')) return;
+  const img = new Image();
+  img.onload = () => { $('capImg').src = img.src; $('capWait').style.display = 'none'; };
+  img.src = '/api/captcha/screenshot?t=' + Date.now();
+  const left = Math.max(0, Math.round((cap.until - Date.now() / 1000) / 60));
+  $('capLeft').textContent = cap.until ? `(about ${left} min left before it is skipped)` : '';
+  capTimer = setTimeout(capRefresh, 1300);
+}
+async function capSend(a){
+  if (capBusy) return;
+  capBusy = true;
+  try { const r = await api('/api/captcha', a); if (!r.ok && r.error) toast(r.error); } finally { capBusy = false; }
+  setTimeout(capRefresh, 500);
+}
+function capUpdate(c){
+  const was = cap.pending;
+  cap = c || {pending: false};
+  if (cap.pending && capDismissed !== cap.since && !capModal.classList.contains('show')){
+    $('capSite').textContent = cap.label || 'A site'; $('capWait').style.display = 'grid'; $('capImg').removeAttribute('src');
+    capModal.classList.add('show'); capRefresh();
+    if (!was) toast('Verification needed — see the picture');
+  }
+  if (!cap.pending && capModal.classList.contains('show')){ capModal.classList.remove('show'); clearTimeout(capTimer); toast('Verification finished'); }
+}
+$('capImg').addEventListener('click', e => {
+  const r = e.target.getBoundingClientRect();
+  capSend({type: 'click', x: (e.clientX - r.left) / r.width * (cap.width || 1280), y: (e.clientY - r.top) / r.height * (cap.height || 900)});
+});
+$('capType').onclick = () => { const t = $('capText').value; if (t){ capSend({type: 'type', text: t}); $('capText').value = ''; } };
+$('capEnter').onclick = () => capSend({type: 'key', key: 'Enter'});
+$('capDown').onclick = () => capSend({type: 'scroll', dy: 400});
+$('capUp').onclick = () => capSend({type: 'scroll', dy: -400});
+$('capSkip').onclick = () => capSend({type: 'skip'});
+$('capClose').onclick = () => { capDismissed = cap.since; capModal.classList.remove('show'); clearTimeout(capTimer);
+  toast('The search keeps waiting — the panel opens again on the next verification'); };
+
 /* ---------- sign-in status ---------- */
 async function loadLogins(){
   const d = await api('/api/logins');
@@ -1292,6 +1355,7 @@ async function poll(){
   polling = true;
   try {
     const s = await api('/api/status?since=' + logCount);
+    if (s.captcha) capUpdate(s.captcha);
     if (s.log_count < logCount){ $('log').textContent = ''; logCount = 0; }
     if (s.logs.length){ const box = $('log'), bottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
       box.textContent += s.logs.join('\n') + '\n'; logCount = s.log_count; if (bottom) box.scrollTop = box.scrollHeight; }

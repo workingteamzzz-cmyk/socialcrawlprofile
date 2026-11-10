@@ -362,18 +362,22 @@ class NewsCrawler(BrowserCrawler):
     def _wait_google_captcha(self) -> bool:
         """True when the page is usable; waits up to ~5 minutes for the user to solve a captcha."""
         from .paths import SERVER_MODE
-        for i in range(1 if SERVER_MODE else 100):      # a server cannot solve a captcha: report it, don't wait
-            blocked = "/sorry/" in self.page.url
-            if not blocked:      # judged from the page itself, not its text ("lalu lintas tidak biasa" is ordinary news)
-                try:
-                    blocked = bool(self.page.query_selector("form#captcha-form, #recaptcha, iframe[src*='recaptcha']"))
-                except Exception:  # noqa: BLE001
-                    blocked = False
-            if not blocked:
+        def blocked_now() -> bool:
+            if "/sorry/" in self.page.url:
                 return True
-            if SERVER_MODE:
-                self.log("   ⚠ Google is asking for a captcha — a server cannot solve it; this search is skipped. "
-                         "The Google News feed source usually still works.")
+            try:     # judged from the page itself, not its text ("lalu lintas tidak biasa" is ordinary news)
+                return bool(self.page.query_selector("form#captcha-form, #recaptcha, iframe[src*='recaptcha']"))
+            except Exception:  # noqa: BLE001
+                return False
+        for i in range(1 if SERVER_MODE else 100):
+            if not blocked_now():
+                return True
+            if SERVER_MODE:            # no screen here: a person solves it from the dashboard, or it is skipped
+                from .captcha import CAPTCHA
+                if CAPTCHA.solve(self, lambda: not blocked_now(), "Google Search"):
+                    return True
+                self._google_gave_up = True        # don't keep knocking on Google Search for the rest of this run
+                self.log("   Google Search is skipped for the rest of this run; the Google News feed is still used.")
                 return False
             if i == 0:
                 self.log("   ⚠ Google is asking for a captcha — solve it in the browser window; waiting...")
@@ -653,6 +657,9 @@ class NewsCrawler(BrowserCrawler):
             if opt.by_day and days > 1 else [(start_local, end_local)]
         notes, errors, cards = [], [], 0
         q = google_query(kw, opt)
+        if self.__dict__.get("_google_gave_up"):
+            return Result("ok", [], f"query: {q}; skipped — Google asked for a verification earlier in this run "
+                                    "and nobody solved it (more requests would only make the block longer)")
         try:
             for i, (a, b) in enumerate(windows):
                 if opt.cap and len(found) >= opt.cap:

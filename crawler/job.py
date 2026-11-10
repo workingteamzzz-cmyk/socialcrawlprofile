@@ -46,6 +46,11 @@ def _utc_range(d_start, d_end, tz):
     return start_utc, end_utc
 
 
+def _captcha_info() -> dict:
+    from .captcha import CAPTCHA
+    return CAPTCHA.info()
+
+
 class Job:
     def __init__(self):
         self.lock = threading.Lock()
@@ -79,7 +84,7 @@ class Job:
             return {"kind": self.kind, "running": self.running, "done": self.done, "total": self.total,
                     "current": self.current, "error": self.error, "job_id": self.job_id,
                     "logs": self.logs[max(0, since - (self.log_total - len(self.logs))):] if since < self.log_total else [],
-                    "log_count": self.log_total,
+                    "log_count": self.log_total, "captcha": _captcha_info(),
                     "modes": {m: {"count": len(b["links"]), "files": list(b["files"]), "period": b["period"],
                                   "version": b["version"]} for m, b in self.data.items()}}
 

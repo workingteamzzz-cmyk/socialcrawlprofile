@@ -9,7 +9,10 @@ Environment:
   SESSION_DAYS         how long a dashboard sign-in lasts (default 7)
   RETENTION_DAYS       delete result files older than this many days (default 30; 0 = keep)
   DEBUG_RETENTION_DAYS delete page copies in outputs/debug older than this (default 7; 0 = keep)
-  COLLECTOR_SERVER     1 = no screen: hidden browser, logins by cookie import, captchas reported instead of waited for
+  COLLECTOR_SERVER     1 = no screen: hidden browser, logins by cookie import, verifications solved from the dashboard
+  CAPTCHA_WAIT_MINUTES how long a verification waits for a person before that search is skipped (default 10)
+  CAPTCHA_WEBHOOK_URL  optional: gets {"text": ...} when a verification is waiting (Slack/Teams/n8n)
+  PUBLIC_URL           the dashboard's address, used in that message
   HOST / PORT          default 0.0.0.0 / 8770
   COOKIE_SECURE        1 behind HTTPS (docker-compose sets it): sign-in cookie HTTPS-only, HSTS
   CRAWLER_HOME         folder for the browser profile, account lists, results and audit.log (Docker: /data)

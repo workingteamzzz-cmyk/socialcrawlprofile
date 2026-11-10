@@ -216,13 +216,14 @@ class BrowserCrawler:
 
     def _wait_captcha(self):
         from .paths import SERVER_MODE
-        for i in range(1 if SERVER_MODE else 60):  # up to ~3 minutes (no waiting on a server: nobody can solve it)
+        for i in range(1 if SERVER_MODE else 60):  # up to ~3 minutes
             txt = self._body_text()
             if not any(t in txt for t in CAPTCHA_TEXTS):
                 return
-            if SERVER_MODE:
-                self.log("   ⚠ Captcha/verification shown — a server cannot solve it; skipped (try later or "
-                         "import fresh cookies)")
+            if SERVER_MODE:            # no screen here: a person solves it from the dashboard
+                from .captcha import CAPTCHA
+                host = urlparse(self.page.url).netloc.removeprefix("www.")
+                CAPTCHA.solve(self, lambda: not any(t in self._body_text() for t in CAPTCHA_TEXTS), host or "A site")
                 return
             if i == 0:
                 self.log("   ⚠ Captcha/verification shown — solve it in the browser window; waiting...")

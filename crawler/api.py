@@ -158,6 +158,15 @@ class ListDelete(BaseModel):
     id: str
 
 
+class CaptchaAction(BaseModel):
+    type: Literal["click", "type", "key", "scroll", "refresh", "skip"]
+    x: float = Field(0, description="click: position on the page (in page pixels, see width/height in /api/status)")
+    y: float = 0
+    text: str = Field("", max_length=200, description="type: the text")
+    key: str = Field("", description="key: Enter, Tab, Backspace, Escape, Space, ArrowDown, ArrowUp")
+    dy: float = Field(400, description="scroll: pixels down (negative = up)")
+
+
 class SignIn(BaseModel):
     key: str
 
@@ -386,6 +395,31 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
         JOB.stop()
         log(request, "stopped the job")
         return answer(None)
+
+    # ---------- verification ("I'm not a robot") solved by a person from the dashboard ----------
+    solving: dict = {}
+    @app.get("/api/captcha/screenshot", tags=["verification"], dependencies=auth,
+             summary="Live picture of the page that asks for a verification")
+    def captcha_picture():
+        from fastapi import Response
+
+        from .captcha import CAPTCHA
+        png = CAPTCHA.screenshot()
+        if not png:
+            raise HTTPException(404, "No picture yet")
+        return Response(png, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/captcha", tags=["verification"], dependencies=auth,
+              summary="Click / type / press a key on that page, or skip it")
+    def captcha_action(body: CaptchaAction, request: Request):
+        from .captcha import CAPTCHA
+        err = CAPTCHA.act(body.model_dump())
+        if not err and body.type == "skip":
+            log(request, "skipped a verification", site=CAPTCHA.label)
+        elif not err and solving.get("since") != CAPTCHA.since:          # once per verification, not per click
+            solving["since"] = CAPTCHA.since
+            log(request, "worked on a verification", site=CAPTCHA.label)
+        return answer(err)
 
     # ---------- logins ----------
     @app.get("/api/logins", tags=["logins"], dependencies=auth, summary="Which platforms the server is signed in to")

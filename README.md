@@ -233,8 +233,8 @@ JSON endpoints for scripts, n8n, Power Query and the like, and interactive docs 
 - Instagram, X, TikTok, Threads and Facebook trust data-centre IP addresses much less than a home/office connection.
   Expect more login checks, captchas and empty results; Google may ask for captchas sooner (the Google News feed
   source is the least affected). A VPS in Indonesia helps.
-- There is no screen: logins come from **cookies you import** (below), and a captcha cannot be solved — it is reported
-  in the Activity Log and that search is skipped instead of waiting.
+- There is no screen: logins come from **cookies you import** (below), and a verification ("I'm not a robot") is
+  solved by a person **from the dashboard** (below).
 - The cookies let the server act as those accounts. Use separate accounts for collecting.
 
 ### How the data is protected
@@ -280,6 +280,22 @@ behind your own HTTPS proxy. All settings are listed at the top of `serve.py` an
    platforms and Google/YouTube are kept. Repeat per platform; re-import when the sidebar shows ✗. Delete the exported
    file from your computer afterwards.
 
+### "I'm not a robot" on a server — who clicks?
+
+You (or anyone with a key), from the dashboard — on a laptop or a phone. When Google or a platform asks for a
+verification, the job pauses and the dashboard opens a **Verification needed** panel with a live picture of the
+server's browser. Click on the picture exactly as you would on the page (tick the box, pick the images, press
+Verify); type text if asked. The job continues by itself once the page is through.
+
+- Nobody within `CAPTCHA_WAIT_MINUTES` (default 10) → that search is skipped. For news, Google Search is then left
+  alone for the rest of the run (more requests only make the block longer) while the **Google News feed** keeps
+  working — the feed rarely asks for a verification (tested from a cloud server: hundreds of links without one).
+- To be told when it happens, set `CAPTCHA_WEBHOOK_URL` (a Slack/Teams incoming webhook, or an n8n/Make webhook that
+  forwards to WhatsApp/Telegram) and `PUBLIC_URL` (the dashboard's address). It receives `{"text": "..."}`.
+- Fewer verifications: start with the Google News feed as the source, keep periods and keyword lists modest, import
+  Google cookies of a signed-in account, and prefer a VPS in Indonesia.
+- The app never sends verifications to paid "captcha solving" services.
+
 ### Using the API
 
 Send your key in the `X-API-Key` header (or sign in on the dashboard). One job runs at a time.
@@ -303,6 +319,7 @@ curl -H "X-API-Key: $KEY" "$URL/api/outputs"                # Excel files; downl
 | `GET /api/status`, `/api/results?mode=profiles\|keywords\|news`, `/api/outputs`, `/download/<file>` | Progress, results, files |
 | `GET /api/logins`, `POST /api/logins/cookies` | Signed-in status (and who you are); import cookies |
 | `GET /api/audit` | Who did what |
+| `GET /api/captcha/screenshot`, `POST /api/captcha` | The waiting verification's picture; click/type/key/scroll/skip |
 | `GET/POST /api/lists...`, `/api/accounts...` | Account lists |
 | `GET /api/health` | Up? (no key needed — for uptime monitors) |
 
@@ -324,6 +341,7 @@ All of them, with request examples, are in `/docs`.
 | `crawler/server.py`, `crawler/static/index.html` | Local dashboard (reachable only from this computer) |
 | `crawler/api.py`, `serve.py` | The FastAPI server (keys per person, audit log, `/docs`, cookie import) |
 | `crawler/retention.py` | Deletes old result files and page copies on a server |
+| `crawler/captcha.py` | Lets a person solve a verification from the dashboard when the browser runs on a server |
 | `crawler/cookies.py` | Reads exported cookies (Cookie-Editor JSON, storage state, cookies.txt) |
 | `Dockerfile`, `docker-compose.yml`, `Caddyfile`, `.env.example`, `requirements-server.txt` | Running it on a server (HTTPS, locked-down container) |
 | `data/lists/` | Account lists; `Ditjen SDA.csv` is the bundled example |

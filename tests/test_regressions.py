@@ -604,3 +604,71 @@ def test_fast_details_x_from_list_and_tiktok_youtube_in_background(tmp_path):
         assert posts[0].details["likes"] == 1234 and posts[0].details["caption"] == "Banjir surut"
         assert not any("/p/" in u for u in navigations)              # read in the background, not opened
         ctx.close()
+
+
+@pytest.mark.skipif(_browser_path() is None, reason="no local Chromium")
+def test_server_verification_solved_from_the_dashboard(tmp_path, monkeypatch):
+    """On a server Google shows "I'm not a robot": the job pauses, the dashboard gets a live picture, a person's click
+    on the picture lands on the page, and the search continues by itself. Nobody → skipped, and Google Search is left
+    alone for the rest of the run (the feed still runs)."""
+    from crawler import paths
+    from crawler.captcha import CAPTCHA
+    from crawler.news import NewsOptions
+    monkeypatch.setattr(paths, "SERVER_MODE", True)
+    monkeypatch.setenv("CAPTCHA_WAIT_MINUTES", "0.15")
+    solved = {"yes": False}
+    sorry = """<html><body style="margin:0"><form id="captcha-form" action="/sorry/done">
+      <button id="robot" type="submit" style="position:absolute;left:300px;top:200px;width:240px;height:90px">
+      I'm not a robot</button></form></body></html>"""
+    results = """<html><body><div id="rso">
+      <a href="https://news.example/1"><div>Media A</div><div role="heading">Tarif listrik turun</div><span>20 Okt 2026</span></a>
+    </div></body></html>"""
+    feed = ('<?xml version="1.0"?><rss><channel><item><title>Feed item - Detik</title>'
+            '<link>https://news.detik.com/feed-1</link><pubDate>Tue, 20 Oct 2026 03:00:00 GMT</pubDate>'
+            '<source url="https://detik.com">Detik</source></item></channel></rss>')
+
+    def route(r):
+        u = r.request.url
+        if "/rss/search" in u:
+            return r.fulfill(status=200, content_type="application/xml", body=feed)
+        if "/sorry/done" in u:
+            solved["yes"] = True
+            return r.fulfill(status=302, headers={"Location": "https://www.google.com/search?q=ok"})
+        if "google.com/search" in u:
+            return r.fulfill(status=200, content_type="text/html", body=results if solved["yes"] else sorry)
+        r.fulfill(status=200, content_type="text/html", body="<html><body>x</body></html>")
+    pw, ctx = _news_ctx(tmp_path, route)
+    try:
+        c = _news_crawler(ctx)
+        person = {"clicked": None}
+
+        def dashboard_person():                     # what the dashboard does: wait for the picture, click on it
+            for _ in range(200):
+                info = CAPTCHA.info()
+                if info["pending"] and CAPTCHA.screenshot():
+                    person["clicked"] = (420, 245)         # the middle of the button as seen on the picture
+                    assert CAPTCHA.act({"type": "click", "x": 420, "y": 245}) is None
+                    return
+                time.sleep(0.1)
+        helper = threading.Thread(target=dashboard_person)
+        helper.start()
+        res = c.search("tarif listrik", NewsOptions(sources=["news_tab"], by_day=False), datetime(2026, 10, 20), datetime(2026, 10, 20))
+        helper.join()
+        assert person["clicked"] and solved["yes"], res.note
+        assert [p["url"] for p in res.posts] == ["https://news.example/1"], res.note
+        assert CAPTCHA.info()["pending"] is False
+
+        # nobody answers: skipped; then Google Search is not asked again, the feed still runs
+        solved["yes"] = False
+        c2 = _news_crawler(ctx)
+        t = time.time()
+        res = c2.search("tarif listrik", NewsOptions(sources=["news_tab", "feed"], by_day=False),
+                        datetime(2026, 10, 20), datetime(2026, 10, 20))
+        assert time.time() - t < 30
+        assert [p["url"] for p in res.posts] == ["https://news.detik.com/feed-1"], res.note
+        res = c2.search("PLN", NewsOptions(sources=["news_tab"], by_day=False), datetime(2026, 10, 20), datetime(2026, 10, 20))
+        assert "skipped" in res.note and "nobody solved it" in res.note
+        assert CAPTCHA.act({"type": "click", "x": 1, "y": 1}) == "No verification is waiting."
+    finally:
+        ctx.close()
+        pw.stop()

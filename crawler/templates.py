@@ -13,7 +13,6 @@ File names follow the team's pattern: 20261108_Online_Manual_24.00.xlsx (period 
 from __future__ import annotations
 
 import csv
-import html
 import os
 import re
 from datetime import datetime, timezone
@@ -25,7 +24,7 @@ from openpyxl.styles import Font, PatternFill
 
 ONLINE_COLUMNS = ["DATE", "TIME", "TITLE", "URL", "IMAGE", "MEDIA", "INFLUENCER", "PERSON", "AUTHOR", "SUMMARY",
                   "CONTENT", "SENTIMENT"]
-ONLINE_WIDTHS = [11, 9, 40, 40, 30, 22, 20, 20, 22, 50, 50, 11]
+ONLINE_WIDTHS = [8.9, 7.3, 21, 13.87, 12.37, 17.37, 21.38, 12.99, 16.37, 19, 12, 9.5]     # the template's
 MEDSOS_COLUMNS = ["No", "Sentiment", "Username", "User ID", "Follower", "Text", "Date", "Time", "Likes", "Reply",
                   "Shares", "Url", "Emotion", "User Image", "Platform", "Sub Type", "Views Count", "Gender",
                   "Age Category", "Content Location", "Religion", "Ethnic", "Phsychography", "Parent ID", "Post ID",
@@ -122,14 +121,15 @@ def file_name(layout: str, end_date: str, tz, origin: str = "Manual", folder: st
 
 # ---------- rows ----------
 def online_row(r: dict, tz) -> list:
-    """A news result -> the Online columns."""
+    """A news result -> the Online columns, with the team's final upload rules (online_clean.py)."""
+    from . import online_clean as oc
     dt = None
     full = (r.get("published_full") or "").strip()            # from the article page, local time "YYYY-MM-DD HH:MM"
     if re.match(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", full):
         dt = datetime.strptime(full[:16], "%Y-%m-%d %H:%M")
     elif r.get("ts"):                                         # the Google News feed's exact time
         dt = _local(r["ts"], tz)
-    date_s = time_s = ""
+    date_s, time_s = "", "00:00:00"                          # unknown time -> 00:00:00 (team rule)
     if dt:
         date_s, time_s = f"{dt.day:02d}-{MONTHS[dt.month - 1]}-{dt.year}", dt.strftime("%H:%M:00" if full else "%H:%M:%S")
     elif r.get("published"):
@@ -138,14 +138,13 @@ def online_row(r: dict, tz) -> list:
             date_s = f"{d.day:02d}-{MONTHS[d.month - 1]}-{d.year}"
         except ValueError:
             pass
-    host = (urlparse(r.get("url") or "").hostname or "").lower()
-    host = host[4:] if host.startswith("www.") else host
+    url = oc.normalize_url(r.get("url"))
+    title = (r.get("title") or "").strip()
     text = r.get("text") or ""
-    paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
-    content = "".join(f"<p>{html.escape(p, quote=False)}</p>" for p in paras)
-    summary = (r.get("description") or "").strip() or (re.sub(r"\s+", " ", text)[:260].rstrip() if text else "")
-    return [date_s, time_s, r.get("title") or "", r.get("url") or "", r.get("image") or "", host, "", "",
-            r.get("author") or "", summary, content, ""]
+    summary = oc.clean_summary(r.get("description") or (re.sub(r"\s+", " ", text)[:400] if text else ""), title)
+    return [date_s, time_s, title, url, (r.get("image") or "").strip(), oc.media_from_url(url),
+            oc.format_names(r.get("influencer")), oc.format_names(r.get("person")), (r.get("author") or "").strip(),
+            summary, oc.content_html(text, title, r.get("author") or ""), (r.get("sentiment") or "").lower().strip()]
 
 
 def medsos_row(i: int, r: dict, tz) -> list:
@@ -164,28 +163,41 @@ def medsos_row(i: int, r: dict, tz) -> list:
             _num(r.get("views")), "", "", "", "", "", "", "", post_id(plat, r.get("url"), uid), uid]
 
 
-def rows_for(layout: str, rows: list, tz) -> tuple[list, list]:
-    """(columns, values) — used for the Excel/CSV files and for deliveries to another server."""
+def rows_for(layout: str, rows: list, tz, drop_empty: bool = False, stats: dict | None = None) -> tuple[list, list]:
+    """(columns, values) — used for the Excel/CSV files and for deliveries to another server.
+    Online: duplicate URLs dropped (fullest CONTENT kept); drop_empty also drops articles without CONTENT."""
     if layout == "online":
-        return ONLINE_COLUMNS, [online_row(r, tz) for r in rows]
+        from . import online_clean as oc
+        values, st = oc.finalize([online_row(r, tz) for r in rows], ONLINE_COLUMNS, drop_empty)
+        if stats is not None:
+            stats.update(st)
+        return ONLINE_COLUMNS, values
     return MEDSOS_COLUMNS, [medsos_row(i, r, tz) for i, r in enumerate(rows, 1)]
 
 
 # ---------- files ----------
-def write(layout: str, path_xlsx: str, path_csv: str, rows: list, tz) -> None:
-    cols, values = rows_for(layout, rows, tz)
+def write(layout: str, path_xlsx: str, path_csv: str, rows: list, tz, drop_empty: bool = False) -> None:
+    cols, values = rows_for(layout, rows, tz, drop_empty)
     wb = Workbook(write_only=False)
     ws = wb.active
     ws.title = "Sheet1"
     ws.append(cols)
     if layout == "online":
-        fill, font, widths = PatternFill("solid", fgColor="FF15677B"), Font(name="Calibri", size=9, bold=True,
-                                                                                color="FFFFFFFF"), ONLINE_WIDTHS
+        # exactly like the team's Online_News_Template_Upload_2.xlsx: teal header, grey for INFLUENCER/PERSON/SUMMARY
+        from openpyxl.styles import Alignment
+        from openpyxl.styles.colors import Color
+        font = Font(name="Calibri", size=9, bold=True, color=Color(theme=0))
+        teal, grey = PatternFill("solid", fgColor="FF15677B"), PatternFill("solid", fgColor=Color(theme=0, tint=-0.5))
+        for c in ws[1]:
+            c.font, c.alignment = font, Alignment(horizontal="left", vertical="center")
+            c.fill = grey if c.value in ("INFLUENCER", "PERSON", "SUMMARY") else teal
+        widths = ONLINE_WIDTHS
+        ws.sheet_view.zoomScale = 80
     else:
         fill, font, widths = PatternFill("solid", fgColor="FF4472C4"), Font(name="Calibri", size=11, bold=True,
                                                                                 color="FFFFFFFF"), MEDSOS_WIDTHS
-    for c in ws[1]:
-        c.fill, c.font = fill, font
+        for c in ws[1]:
+            c.fill, c.font = fill, font
     for row in values:
         ws.append([_cell(v) for v in row])
         for c in ws[ws.max_row]:

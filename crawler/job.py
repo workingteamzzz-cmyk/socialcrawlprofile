@@ -669,7 +669,7 @@ class Job:
             if opt.template == "online":
                 from . import templates
                 rows = sorted(seen.values(), key=lambda r: -(r.get("ts") or 0))
-                return self._safe_save(lambda: templates.write("online", x, c, rows, tz), x)
+                return self._safe_save(lambda: templates.write("online", x, c, rows, tz, opt.detail == "full"), x)
             return self._safe_save(lambda: write_news_outputs(x, c, list(seen.values()), statuses, meta), x)
 
         def record(kw, res):
@@ -759,6 +759,15 @@ class Job:
             files = self._finish_files(save, [xlsx, csvp], bool(statuses))
             self._close(ctx, pw)
         b["files"] = files
+        if opt.template == "online" and seen:                 # like the team's uploader notebook reports it
+            from . import templates
+            st: dict = {}
+            templates.rows_for("online", list(seen.values()), tz, opt.detail == "full", st)
+            if st.get("empty"):
+                self.log(f"⚠ {len(st['empty'])} article(s) left out of the Online file — no article text after cleaning: "
+                         + ", ".join(st["empty"][:10]) + (" …" if len(st["empty"]) > 10 else ""))
+            if st.get("duplicates"):
+                self.log(f"   {len(st['duplicates'])} duplicate URL(s) merged (the fullest article kept)")
         self.log(("⏹ Stopped. " if stopped else "✅ Done. ") + f"Total {len(seen)} unique news links" + (f" → {files[0]}" if files else ""))
 
     def start_decode(self, name: str, data: bytes) -> str | None:

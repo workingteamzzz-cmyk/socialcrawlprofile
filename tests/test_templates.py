@@ -35,17 +35,19 @@ def test_online_layout(tmp_path):
     wb = openpyxl.load_workbook(x)
     ws = wb.active
     assert wb.sheetnames == ["Sheet1"] and [v.value for v in ws[1]] == ONLINE_HEAD
-    assert ws["A1"].font.b and ws["A1"].fill.fgColor.rgb == "FF15677B"
+    assert ws["A1"].font.b and ws["A1"].fill.fgColor.rgb == "FF15677B" and ws["A1"].font.sz == 9
+    assert ws["G1"].fill.fgColor.theme == 0 and ws["G1"].fill.fgColor.tint == -0.5          # INFLUENCER grey, like the template
+    assert ws.sheet_view.zoomScale == 80 and ws.column_dimensions["A"].width == 8.9
     r2 = [v.value for v in ws[2]]
     assert r2[:6] == ["09-Nov-2026", "00:07:00", "Sering Mati Lampu, 10 Rumah Ludes", rows[0]["url"],
                       "https://www.mediasulsel.com/img.jpg", "mediasulsel.com"]
     assert r2[8] == "Ambang Ardi" and r2[9].startswith("Pemadaman listrik yang kerap")
-    assert r2[10] == "<p>Pemadaman listrik yang kerap terjadi di Kabupaten.</p><p>Warga &lt;kecewa&gt; &amp; mengadu.</p>"
+    assert r2[10] == "<p>Pemadaman listrik yang kerap terjadi di Kabupaten.</p><p>Warga <kecewa> & mengadu.</p>"
     assert r2[6] is None and r2[7] is None and r2[11] is None             # INFLUENCER / PERSON / SENTIMENT: no AI
     r3 = [v.value for v in ws[3]]
     assert r3[:2] == ["09-Nov-2026", "01:04:33"] and r3[5] == "mataram.antaranews.com"
     r4 = [v.value for v in ws[4]]
-    assert r4[:2] == ["08-Nov-2026", None]
+    assert r4[:2] == ["08-Nov-2026", "00:00:00"]                          # unknown time -> 00:00:00 (team rule)
     assert open(c, encoding="utf-8-sig").readline().strip() == ",".join(ONLINE_HEAD)
 
 
@@ -116,3 +118,29 @@ def test_exports_list_and_delivery_use_the_layout(tmp_path, monkeypatch):
     body = delivery.payload(J(), "news")
     assert body["layout"] == "online" and body["columns"] == ONLINE_HEAD
     assert body["rows"][0]["DATE"] == "09-Nov-2026" and body["rows"][0]["TIME"] == "05:06:07" and body["rows"][0]["MEDIA"] == "detik.com"
+
+
+def test_online_final_rules_like_the_uploader_notebook(tmp_path):
+    """Trailing / removed; duplicate URLs keep the fullest article; empty-CONTENT articles dropped (full articles);
+    portal boilerplate removed from CONTENT and SUMMARY."""
+    rows = [
+        {"url": "https://www.antaranews.com/berita/1/pln-siaga/", "title": "PLN siaga", "published": "2026-11-09",
+         "text": "Jakarta (ANTARA) - PLN siaga.\n\nDilarang keras mengambil konten, melakukan crawling atau indexasi "
+                 "otomatis untuk AI di situs web ini tanpa izin tertulis dari Kantor Berita ANTARA.\n\nPewarta: Ani"},
+        {"url": "https://www.antaranews.com/berita/1/pln-siaga", "title": "PLN siaga", "published": "2026-11-09",
+         "text": "Jakarta (ANTARA) - PLN siaga penuh.\n\nWarga diminta melapor jika ada gangguan.\n\n(dai/dai)"},
+        {"url": "https://berita.murianews.com/x/1", "title": "Mati lampu", "published": "2026-11-09",
+         "text": "Apresiasi Pembaca\n\nTerima kasih atas kontribusi Anda"},
+        {"url": "https://amp.kontan.co.id/news/a", "title": "Tarif Listrik Desember", "published": "2026-11-09",
+         "description": "Tarif Listrik Desember - 10 November 2026, 09.15 WIB PLN menetapkan tarif tetap.",
+         "text": "PLN menetapkan tarif tetap."},
+    ]
+    stats = {}
+    cols, values = T.rows_for("online", rows, WIB, drop_empty=True, stats=stats)
+    urls = [v[3] for v in values]
+    assert urls == ["https://www.antaranews.com/berita/1/pln-siaga", "https://amp.kontan.co.id/news/a"]
+    assert values[0][10] == "<p>Jakarta (ANTARA) - PLN siaga penuh.</p><p>Warga diminta melapor jika ada gangguan.</p>"
+    assert stats["empty"] == ["https://berita.murianews.com/x/1"] and len(stats["duplicates"]) == 1
+    assert values[1][5] == "kontan.co.id" and values[1][9] == "PLN menetapkan tarif tetap." and values[1][1] == "00:00:00"
+    _, kept = T.rows_for("online", rows, WIB, drop_empty=False)
+    assert len(kept) == 3                                                  # links-only runs keep rows without text

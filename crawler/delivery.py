@@ -51,7 +51,8 @@ def payload(job, kind: str, schedule: dict | None = None) -> dict:
 
         from . import templates
         tz = timezone(timedelta(hours={"WIB": 7, "WITA": 8, "WIT": 9, "UTC": 0}.get((period or {}).get("tz"), 7)))
-        cols, values = templates.rows_for(layout, links, tz)
+        detail = (((getattr(job, "data", {}).get(kind) or {}).get("meta") or {}).get("detail"))
+        cols, values = templates.rows_for(layout, links, tz, drop_empty=(layout == "online" and detail == "full"))
         body.update({"layout": layout, "columns": cols, "rows": [dict(zip(cols, v)) for v in values]})
     return body
 

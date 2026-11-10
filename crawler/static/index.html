@@ -307,6 +307,7 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
       <button class="btn-block" id="btnLogin" title="Open a browser to sign in to each platform (once)"><svg class="i"><use href="#i-login"/></svg>Log in to platforms</button>
       <div class="logins" id="logins" title="Sign-in status from the browser profile (checked at the last login or run)"></div>
       <button class="btn sm ghost" id="btnImport" style="justify-content:center;color:var(--accent)">Import logins from an older copy…</button>
+      <button class="btn sm ghost" id="btnSignOut" style="justify-content:center;display:none">Sign out of this server</button>
       <div class="status-row"><span class="dot" id="stDot"></span><div><b id="stTitle">Ready</b><small id="stSub">No job running</small></div></div>
     </div>
   </aside>
@@ -677,6 +678,26 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
     </div>
   </div>
 </div>
+<div class="modal" id="ckModal" role="dialog" aria-modal="true" aria-labelledby="ckTitle">
+  <div class="card" style="width:min(680px,100%)">
+    <div class="card-hd"><h3 id="ckTitle">Import cookies (sign the server in)</h3><div class="tools"><button class="iconbtn" id="ckClose" aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div></div>
+    <div class="card-bd">
+      <p class="hint" style="margin-top:0">This server has no screen, so it cannot show a login window. Sign in on your own
+        browser, export that site's cookies with an extension such as <b>Cookie-Editor</b> (Export → JSON), and paste them
+        here — or choose a <code>cookies.txt</code> / JSON file. Do this for each platform you need. Only cookies of
+        Instagram, X, TikTok, Threads, Facebook, YouTube and Google are kept.</p>
+      <p class="hint">Use a separate account for collecting if you can: cookies let the server act as that account.
+        Sessions last weeks to months; import again when a platform shows ✗.</p>
+      <div class="field"><label for="ckText">Cookies</label>
+        <textarea id="ckText" placeholder='[{"domain": ".instagram.com", "name": "sessionid", "value": "…", …}]'></textarea></div>
+      <div class="field"><label for="ckFile">Or a file</label><input id="ckFile" type="file" accept=".json,.txt,application/json,text/plain"></div>
+      <ul class="errs" id="ckErrs"></ul>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+        <button class="btn" id="ckCancel">Cancel</button><button class="btn primary" id="ckGo">Import cookies</button>
+      </div>
+    </div>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -719,6 +740,7 @@ function toast(t){ const el = $('toast'); el.textContent = t; el.classList.add('
 async function api(url, body){
   try {
     const r = await fetch(url, body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    if (r.status === 401){ location.reload(); return {ok: false, error: 'Signed out'}; }   // server: the sign-in expired
     return await r.json();
   } catch (e) {
     return {ok: false, error: 'Lost connection to the app — is the black server window still open?', offline: true};
@@ -939,7 +961,9 @@ $('btnStart').onclick = async () => {
 };
 $('btnStop').onclick = () => api('/api/stop', {});
 $('kBtnStop').onclick = () => api('/api/stop', {});
+let SERVER = false;      // running on a server without a screen: logins come from imported cookies
 $('btnLogin').onclick = async () => {
+  if (SERVER){ openCookies(); return; }
   const r = await api('/api/login', {});
   if (r.error) toast(r.error); else { toast('Browser opened — sign in, then close it'); go('log'); started(); }
 };
@@ -1205,9 +1229,34 @@ $('btnImport').onclick = async () => {
 };
 $('impGo').onclick = () => { const v = $('impPath').value.trim(); if (!v){ $('impPath').focus(); return; } doImport(v); };
 
+/* ---------- import cookies (server) ---------- */
+const ckModal = $('ckModal');
+const closeCk = () => ckModal.classList.remove('show');
+function openCookies(){ $('ckErrs').innerHTML = ''; $('ckText').value = ''; $('ckFile').value = ''; ckModal.classList.add('show'); }
+$('ckClose').onclick = closeCk; $('ckCancel').onclick = closeCk;
+ckModal.addEventListener('click', e => { if (e.target === ckModal) closeCk(); });
+$('ckFile').onchange = async () => { const f = $('ckFile').files[0]; if (f) $('ckText').value = await f.text(); };
+$('ckGo').onclick = async () => {
+  const text = $('ckText').value.trim();
+  if (!text){ $('ckText').focus(); return; }
+  $('ckGo').disabled = true; $('ckErrs').innerHTML = '';
+  const r = await api('/api/logins/cookies', {cookies: text});
+  $('ckGo').disabled = false;
+  if (!r.ok){ $('ckErrs').innerHTML = `<li>${esc(r.error || 'Import failed')}</li>`; return; }
+  const on = Object.entries(r.platforms || {}).filter(([, v]) => v).map(([k]) => k);
+  closeCk(); toast(`${r.added} cookies imported` + (on.length ? ' — signed in: ' + on.join(', ') : '')); loadLogins();
+};
+$('btnSignOut').onclick = async () => { await fetch('/logout', {method: 'POST'}); location.reload(); };
+
 /* ---------- sign-in status ---------- */
 async function loadLogins(){
   const d = await api('/api/logins');
+  if (d.server && !SERVER){
+    SERVER = true;
+    $('btnLogin').lastChild.textContent = 'Import cookies';
+    $('btnLogin').title = 'Sign the server in with cookies exported from your own browser';
+    $('btnImport').style.display = 'none'; $('btnSignOut').style.display = '';
+  }
   if (d.outputs_dir) $('outDir').textContent = d.outputs_dir;
   const st = d.platforms || {};
   const names = {instagram: 'IG', x: 'X', tiktok: 'TikTok', threads: 'Threads', facebook: 'FB'};

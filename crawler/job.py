@@ -260,7 +260,44 @@ class Job:
 
     # ---------- login ----------
     def start_login(self):
+        from .paths import SERVER_MODE
+        if SERVER_MODE:
+            return ("This copy runs on a server without a screen, so it cannot show a login window. "
+                    "Import the cookies of a browser where you are signed in instead (Import cookies).")
         return self._start("login", self._login)
+
+    def import_cookies(self, text: str, wait_s: float = 120) -> dict:
+        """Add exported cookies to the app's browser profile and report which platforms are now signed in.
+        Runs as a short job, so it never overlaps a collection."""
+        from .cookies import CookieError, parse_cookies
+        try:
+            cookies = parse_cookies(text)
+        except CookieError as e:
+            return {"ok": False, "error": str(e)}
+        result = {}
+        err = self._start("login", self._import_cookies, cookies, result)
+        if err:
+            return {"ok": False, "error": err}
+        self.thread.join(wait_s)
+        if "platforms" not in result:
+            return {"ok": False, "error": self.error or "Importing the cookies took too long — see the Activity Log."}
+        return {"ok": True, "added": len(cookies), "platforms": result["platforms"]}
+
+    def _import_cookies(self, cookies: list, result: dict):
+        from playwright.sync_api import sync_playwright
+        self.log(f"Importing {len(cookies)} cookies into the app's browser profile...")
+        with sync_playwright() as pw:
+            ctx = launch_context(pw, PROFILE_DIR, headless=True)
+            try:
+                ctx.add_cookies(cookies)
+                st = login_status(ctx)
+            finally:
+                ctx.close()
+        import json
+        with open(LOGINS_FILE, "w", encoding="utf-8") as f:
+            json.dump({"checked": datetime.now().strftime("%Y-%m-%d %H:%M"), "platforms": st}, f)
+        self.log("Signed in: " + ", ".join(f"{PLATFORM_LABEL[p]} {'✓' if ok else '✗'}" for p, ok in st.items()))
+        result["platforms"] = st
 
     def _login(self):
         from playwright.sync_api import sync_playwright

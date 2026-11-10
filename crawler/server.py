@@ -12,6 +12,29 @@ from .job import JOB, OUTPUT_DIR
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
 
+def list_outputs() -> list[dict]:
+    """The result files that can be downloaded, newest first."""
+    files = []
+    if os.path.isdir(OUTPUT_DIR):
+        for name in os.listdir(OUTPUT_DIR):
+            if name.endswith(".xlsx") and name.startswith(("post_links_", "keyword_links_", "news_links_")):
+                st = os.stat(os.path.join(OUTPUT_DIR, name))
+                files.append({"name": name, "size": st.st_size, "mtime": int(st.st_mtime)})
+    files.sort(key=lambda f: f["mtime"], reverse=True)
+    return files[:40]
+
+
+def logins_info() -> dict:
+    from .paths import LISTS_DIR, LOGINS_FILE, OUTPUT_DIR as OUT
+    info = {}
+    try:
+        with open(LOGINS_FILE, encoding="utf-8") as f:
+            info = json.load(f)
+    except (OSError, ValueError):
+        pass
+    return {**info, "lists_dir": LISTS_DIR, "outputs_dir": OUT}
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
@@ -50,14 +73,8 @@ class Handler(BaseHTTPRequestHandler):
             since = int(parse_qs(u.query).get("since", ["0"])[0] or 0)
             return self._json(JOB.state(since))
         if u.path == "/api/logins":
-            from .paths import LISTS_DIR, LOGINS_FILE, OUTPUT_DIR as OUT
-            info = {}
-            try:
-                with open(LOGINS_FILE, encoding="utf-8") as f:
-                    info = json.load(f)
-            except (OSError, ValueError):
-                pass
-            return self._json({**info, "lists_dir": LISTS_DIR, "outputs_dir": OUT})
+            from .paths import SERVER_MODE
+            return self._json({**logins_info(), "server": SERVER_MODE})
         if u.path == "/api/old-profiles":
             from .paths import find_old_profiles
             return self._json({"profiles": find_old_profiles()[:10]})
@@ -69,14 +86,7 @@ class Handler(BaseHTTPRequestHandler):
             mode = parse_qs(u.query).get("mode", ["profiles"])[0]
             return self._json(JOB.results_view(mode))
         if u.path == "/api/outputs":
-            files = []
-            if os.path.isdir(OUTPUT_DIR):
-                for name in os.listdir(OUTPUT_DIR):
-                    if name.endswith(".xlsx") and name.startswith(("post_links_", "keyword_links_", "news_links_")):
-                        st = os.stat(os.path.join(OUTPUT_DIR, name))
-                        files.append({"name": name, "size": st.st_size, "mtime": int(st.st_mtime)})
-            files.sort(key=lambda f: f["mtime"], reverse=True)
-            return self._json({"files": files[:40]})
+            return self._json({"files": list_outputs()})
         if u.path.startswith("/download/"):
             name = os.path.basename(unquote(u.path[len("/download/"):]))
             path = os.path.join(OUTPUT_DIR, name)
@@ -131,6 +141,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": False, "error": "Wait until the current job has finished (or Stop it) and try again."})
             from .paths import import_profile
             err = import_profile(data.get("path", ""), JOB.log) or None
+        elif u.path == "/api/logins/cookies":
+            c = data.get("cookies", "")
+            return self._json(JOB.import_cookies(c if isinstance(c, str) else json.dumps(c)))
         elif u.path == "/api/stop":
             JOB.stop()
             err = None

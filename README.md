@@ -224,6 +224,76 @@ the site's current layout. Check it first — it can show the name of the accoun
   back-to-back runs.
 - Collab posts created by other accounts, stories and deleted posts are not included.
 
+## Run as an API server (FastAPI, Docker)
+
+The same app can run on a VPS/cloud machine as an API (FastAPI): the same dashboard, plus JSON endpoints for scripts,
+n8n, Power Query and the like, and interactive docs at `/docs`.
+
+**Read this first — a server is harder for this kind of tool than your laptop:**
+- Instagram, X, TikTok, Threads and Facebook trust data-centre IP addresses much less than a home/office connection.
+  Expect more login checks, captchas and empty results; Google may ask for captchas sooner (the Google News feed
+  source is the least affected). A VPS in Indonesia, or a residential connection, helps.
+- There is no screen: logins come from **cookies you import** (below), and a captcha cannot be solved — it is reported
+  in the Activity Log and that search is skipped instead of waiting.
+- The cookies let the server act as those accounts. Use separate accounts for collecting where you can, keep the key
+  secret, and only open the server over HTTPS.
+
+### Start it
+
+```bash
+openssl rand -hex 24          # make a key, then put it in a file named .env:  COLLECTOR_API_KEY=<the key>
+docker compose up -d --build
+```
+
+It listens on `127.0.0.1:8770` of the server. To open it to the internet, put an HTTPS proxy in front, e.g. Caddy:
+
+```
+collector.example.com {
+    reverse_proxy 127.0.0.1:8770
+}
+```
+
+and add `COOKIE_SECURE=1` to `.env`. Without Docker: `pip install -r requirements-server.txt`,
+`python -m playwright install --with-deps chromium`, then
+`COLLECTOR_API_KEY=... COLLECTOR_SERVER=1 python serve.py`. Data (browser profile, lists, results) is kept in the
+`collector-data` Docker volume (`/data`).
+
+### Sign in to the platforms (cookies)
+
+1. On your own browser, sign in to the platform (ideally a separate account for collecting).
+2. Export that site's cookies with an extension such as **Cookie-Editor** (Export → JSON).
+3. On the server's dashboard click **Import cookies** and paste them (or choose the file) — or send them to the API.
+   JSON from cookie extensions, Playwright storage state and `cookies.txt` are accepted; only cookies of the supported
+   platforms and Google/YouTube are kept. Repeat per platform; re-import when the sidebar shows ✗.
+
+### Using the API
+
+Send the key in the `X-API-Key` header (or sign in once on the dashboard). One job runs at a time.
+
+```bash
+KEY=your-key; URL=https://collector.example.com
+curl -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+     -d '{"keywords": ["tarif listrik"], "start": "2026-11-01", "end": "2026-11-09", "options": {"cap": 300}}' \
+     $URL/api/news/start
+curl -H "X-API-Key: $KEY" "$URL/api/status"                 # running? progress, log lines
+curl -H "X-API-Key: $KEY" "$URL/api/results?mode=news"      # the links as JSON
+curl -H "X-API-Key: $KEY" "$URL/api/outputs"                # Excel files; download: /download/<name>
+```
+
+| Endpoint | What it does |
+| --- | --- |
+| `POST /api/start` | Post links from accounts (`text` with profile links, or `list` + `ids`), `platforms`, `detail` |
+| `POST /api/keywords/start` | Keyword search on the platforms (`keywords`, `platforms`, `options`) |
+| `POST /api/news/start` | News from Google (`keywords`, `options`: sources, cap, exclude, detail ...) |
+| `POST /api/stop` | Stop; links collected so far are kept |
+| `GET /api/status`, `/api/results?mode=profiles\|keywords\|news`, `/api/outputs`, `/download/<file>` | Progress, results, files |
+| `GET /api/logins`, `POST /api/logins/cookies` | Signed-in status; import cookies |
+| `GET/POST /api/lists...`, `/api/accounts...` | Account lists |
+| `GET /api/health` | Up? (no key needed — for uptime monitors) |
+
+All of them, with request examples, are in `/docs`. After 10 wrong keys from one address within 10 minutes that
+address is refused for a while.
+
 ## Project layout
 
 | File | Purpose |
@@ -238,5 +308,8 @@ the site's current layout. Check it first — it can show the name of the accoun
 | `crawler/job.py` | Background login/collection jobs, saving results |
 | `crawler/output.py` | Excel/CSV writer |
 | `crawler/server.py`, `crawler/static/index.html` | Local dashboard (reachable only from this computer) |
+| `crawler/api.py`, `serve.py` | The FastAPI server (API key, `/docs`, cookie import) |
+| `crawler/cookies.py` | Reads exported cookies (Cookie-Editor JSON, storage state, cookies.txt) |
+| `Dockerfile`, `docker-compose.yml`, `requirements-server.txt` | Running it on a server |
 | `data/lists/` | Account lists; `Ditjen SDA.csv` is the bundled example |
 | `tests/` | Unit, end-to-end and stress tests with fake platform pages (`python -m pytest tests`, about 2 minutes) |

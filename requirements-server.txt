@@ -1,0 +1,6 @@
+# The local app's requirements plus the API server (serve.py).
+-r requirements.txt
+# Same version as the Docker base image (Dockerfile), whose Chromium belongs to it.
+playwright==1.64.1
+fastapi>=0.110,<1
+uvicorn[standard]>=0.29,<1

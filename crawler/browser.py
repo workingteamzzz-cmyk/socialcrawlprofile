@@ -69,6 +69,8 @@ BROWSER_CLOSED = "has been closed"   # Playwright error text when the user close
 
 
 def launch_context(pw, profile_dir: str, headless: bool = False):
+    from .paths import SERVER_MODE
+    headless = headless or SERVER_MODE           # a server has no screen
     os.makedirs(profile_dir, exist_ok=True)
     # Stale Chrome lock files left by a crash would make the profile look "in use". Only this app uses this folder,
     # and only one job runs at a time, so it is safe to clear them.
@@ -213,9 +215,14 @@ class BrowserCrawler:
             return ""
 
     def _wait_captcha(self):
-        for i in range(60):  # up to ~3 minutes
+        from .paths import SERVER_MODE
+        for i in range(1 if SERVER_MODE else 60):  # up to ~3 minutes (no waiting on a server: nobody can solve it)
             txt = self._body_text()
             if not any(t in txt for t in CAPTCHA_TEXTS):
+                return
+            if SERVER_MODE:
+                self.log("   ⚠ Captcha/verification shown — a server cannot solve it; skipped (try later or "
+                         "import fresh cookies)")
                 return
             if i == 0:
                 self.log("   ⚠ Captcha/verification shown — solve it in the browser window; waiting...")

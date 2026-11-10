@@ -8,3 +8,4 @@ outputs/
 *.deleted
 *.tmp
 startup_error.log
+.env

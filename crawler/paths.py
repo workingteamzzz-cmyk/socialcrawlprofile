@@ -16,6 +16,9 @@ import shutil
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Server mode (Docker / VPS, see serve.py): no screen — the browser runs hidden, logins come from imported cookies,
+# and captchas cannot be solved, so they are reported instead of waited for.
+SERVER_MODE = os.environ.get("COLLECTOR_SERVER", "").strip().lower() in ("1", "true", "yes")
 BUNDLED_LISTS = os.path.join(ROOT, "data", "lists")
 
 

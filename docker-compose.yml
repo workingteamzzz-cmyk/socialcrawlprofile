@@ -1,0 +1,18 @@
+# docker compose up -d   (put COLLECTOR_API_KEY=... in a .env file next to this one first)
+services:
+  collector:
+    build: .
+    image: post-link-collector
+    restart: unless-stopped
+    environment:
+      COLLECTOR_API_KEY: ${COLLECTOR_API_KEY:?Set COLLECTOR_API_KEY in .env (openssl rand -hex 24)}
+      COOKIE_SECURE: ${COOKIE_SECURE:-0}
+    ports:
+      # Only this machine can reach it; put HTTPS (Caddy/Nginx) in front to open it to the internet.
+      - "127.0.0.1:8770:8770"
+    volumes:
+      - collector-data:/data
+    shm_size: "1gb"          # Chromium needs more shared memory than Docker's default 64 MB
+
+volumes:
+  collector-data:

@@ -361,7 +361,8 @@ class NewsCrawler(BrowserCrawler):
 
     def _wait_google_captcha(self) -> bool:
         """True when the page is usable; waits up to ~5 minutes for the user to solve a captcha."""
-        for i in range(100):
+        from .paths import SERVER_MODE
+        for i in range(1 if SERVER_MODE else 100):      # a server cannot solve a captcha: report it, don't wait
             blocked = "/sorry/" in self.page.url
             if not blocked:      # judged from the page itself, not its text ("lalu lintas tidak biasa" is ordinary news)
                 try:
@@ -370,6 +371,10 @@ class NewsCrawler(BrowserCrawler):
                     blocked = False
             if not blocked:
                 return True
+            if SERVER_MODE:
+                self.log("   ⚠ Google is asking for a captcha — a server cannot solve it; this search is skipped. "
+                         "The Google News feed source usually still works.")
+                return False
             if i == 0:
                 self.log("   ⚠ Google is asking for a captcha — solve it in the browser window; waiting...")
             self._pause(3, 3)

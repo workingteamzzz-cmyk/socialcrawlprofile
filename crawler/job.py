@@ -115,6 +115,7 @@ class Job:
             self.running = True
             self.job_id += 1
             self.kind = kind
+            self._origin = self.__dict__.pop("_next_origin", None) or "Manual"   # "Auto" for scheduled runs
             self.logs, self.log_total, self.done, self.total, self.current, self.error = [], 0, 0, 0, "", ""
             self.__dict__.pop("_save_warned", None)
             self._last_save = 0
@@ -350,7 +351,8 @@ class Job:
         self.log("✅ Browser closed. Login sessions saved.")
 
     # ---------- profiles ----------
-    def start_crawl(self, text: str, start: str, end: str, tz_name: str, platforms: list[str], detail: str = "links"):
+    def start_crawl(self, text: str, start: str, end: str, tz_name: str, platforms: list[str], detail: str = "links",
+                    template: str = "standard"):
         d_start, d_end, err = _period(start, end)
         if err:
             return err
@@ -358,9 +360,18 @@ class Job:
         accounts, bad = parse_accounts(text, platforms)
         if not accounts:
             return "No recognised accounts selected."
-        return self._start("profiles", self._crawl, accounts, bad, d_start, d_end, tz_name, detail == "full")
+        return self._start("profiles", self._crawl, accounts, bad, d_start, d_end, tz_name, detail == "full",
+                           "medsos" if template == "medsos" else "standard")
 
-    def _crawl(self, accounts, bad, d_start, d_end, tz_name, with_details=False):
+    def _out_base(self, standard: str, layout: str, d_end, tz) -> str:
+        """File name without extension: the app's own, or the client's pattern (20261108_Medsos_Manual_24.00)."""
+        if layout == "standard":
+            return standard
+        from .templates import file_name
+        return file_name({"online": "Online", "medsos": "Medsos"}[layout], f"{d_end:%Y-%m-%d}", tz,
+                         self.__dict__.get("_origin") or "Manual", OUTPUT_DIR)
+
+    def _crawl(self, accounts, bad, d_start, d_end, tz_name, with_details=False, template="standard"):
         tz_hours = TIMEZONES.get(tz_name, 7)
         tz = timezone(timedelta(hours=tz_hours))
         start_utc, end_utc = _utc_range(d_start, d_end, tz)
@@ -373,11 +384,12 @@ class Job:
             self.log(f"⚠ Unrecognised line skipped: {line}")
 
         os.makedirs(OUTPUT_DIR, exist_ok=True)
-        base = f"post_links_{d_start:%Y%m%d}-{d_end:%Y%m%d}_{datetime.now():%Y%m%d_%H%M%S}"
+        base = self._out_base(f"post_links_{d_start:%Y%m%d}-{d_end:%Y%m%d}_{datetime.now():%Y%m%d_%H%M%S}", template,
+                              d_end, timezone(timedelta(hours=TIMEZONES.get(tz_name, 7))))
         xlsx, csvp = (os.path.join(OUTPUT_DIR, base + ext) for ext in (".xlsx", ".csv"))
         meta = {"tz_hours": tz_hours, "tz_name": tz_name, "start": f"{d_start:%Y-%m-%d}",
                 "end": f"{d_end:%Y-%m-%d}", "created": datetime.now().strftime("%Y-%m-%d %H:%M"), "details": with_details}
-        b["meta"] = {"details": with_details}
+        b["meta"] = {"details": with_details, "template": template}
         links: list[dict] = []
         statuses: list[dict] = []
 
@@ -388,15 +400,18 @@ class Job:
                     b["links"].append({"platform": acc.platform, "group": acc.label or acc.handle,
                                        "handle": acc.handle, "url": p.url,
                                        "date": t.strftime("%Y-%m-%d") if t else "",
-                                       "time": t.strftime("%H:%M") if t else "", **(p.details or {})})
+                                       "time": t.strftime("%H:%M") if t else "",
+                                       "ts": p.time_utc.timestamp() if p.time_utc else 0,
+                                       **(p.meta or {}), **(p.details or {})})
                 b["statuses"].append({"platform": acc.platform, "group": acc.label or acc.handle,
                                       "handle": acc.handle, "url": acc.url, "status": res.status,
                                       "count": len(res.posts), "note": res.note})
                 b["version"] += 1
             for p in res.posts:
                 links.append({"order": order[acc.platform], "platform_label": PLATFORM_LABEL[acc.platform],
-                              "handle": acc.handle, "label": acc.label, "url": p.url, "time": p.time_utc,
-                              **(p.details or {})})
+                              "platform": acc.platform, "handle": acc.handle, "label": acc.label, "url": p.url,
+                              "time": p.time_utc, "ts": p.time_utc.timestamp() if p.time_utc else 0,
+                              **(p.meta or {}), **(p.details or {})})
             statuses.append({"platform_label": PLATFORM_LABEL[acc.platform], "handle": acc.handle, "label": acc.label,
                              "url": acc.url, "status": res.status, "count": len(res.posts), "note": res.note})
 
@@ -404,6 +419,10 @@ class Job:
             if not force and not self._autosave_due():
                 return True
             x, c = paths or (xlsx, csvp)
+            if template == "medsos":
+                from . import templates
+                rows = sorted(links, key=lambda r: (r["order"], -(r.get("ts") or 0)))
+                return self._safe_save(lambda: templates.write("medsos", x, c, rows, tz), x)
             return self._safe_save(lambda: write_outputs(x, c, links, statuses, meta), x)
 
         self.log(f"Period {d_start:%Y-%m-%d} to {d_end:%Y-%m-%d} ({tz_name}) — {len(accounts)} accounts")
@@ -499,12 +518,14 @@ class Job:
         start_utc, end_utc = _utc_range(d_start, d_end, tz)
         b = self.data["keywords"]
         b["period"] = {"start": f"{d_start:%Y-%m-%d}", "end": f"{d_end:%Y-%m-%d}", "tz": tz_name}
-        b["meta"] = {"keywords": kws, "platforms": plats, "cap": opt.cap, "details": opt.detail == "full"}
+        b["meta"] = {"keywords": kws, "platforms": plats, "cap": opt.cap, "details": opt.detail == "full",
+                     "template": opt.template}
         tasks = [(k, p) for k in kws for p in plats]
         self.total = len(tasks)
 
         os.makedirs(OUTPUT_DIR, exist_ok=True)
-        base = f"keyword_links_{d_start:%Y%m%d}-{d_end:%Y%m%d}_{datetime.now():%Y%m%d_%H%M%S}"
+        base = self._out_base(f"keyword_links_{d_start:%Y%m%d}-{d_end:%Y%m%d}_{datetime.now():%Y%m%d_%H%M%S}",
+                              opt.template, d_end, tz)
         xlsx, csvp = (os.path.join(OUTPUT_DIR, base + ext) for ext in (".xlsx", ".csv"))
         meta = {"tz_hours": tz_hours, "tz_name": tz_name, "start": f"{d_start:%Y-%m-%d}", "end": f"{d_end:%Y-%m-%d}",
                 "created": datetime.now().strftime("%Y-%m-%d %H:%M"), "keywords": kws, "options": opt}
@@ -523,7 +544,8 @@ class Job:
                     t = p.time_utc.astimezone(tz) if p.time_utc else None
                     row = {"keyword": kw, "keywords": [kw], "platform": plat, "author": p.author, "url": p.url,
                            "date": t.strftime("%Y-%m-%d") if t else "", "time": t.strftime("%H:%M") if t else "",
-                           "ts": p.time_utc.timestamp() if p.time_utc else 0, **(p.details or {})}
+                           "ts": p.time_utc.timestamp() if p.time_utc else 0, "text": p.text or "",
+                           **(p.meta or {}), **(p.details or {})}
                     seen[p.url] = row
                     b["links"].append(row)
                 st = {"keyword": kw, "platform": plat, "status": res.status, "count": len(res.posts), "note": res.note}
@@ -535,6 +557,10 @@ class Job:
             if not force and not self._autosave_due():
                 return True
             x, c = paths or (xlsx, csvp)
+            if opt.template == "medsos":
+                from . import templates
+                rows = sorted(seen.values(), key=lambda r: -(r.get("ts") or 0))
+                return self._safe_save(lambda: templates.write("medsos", x, c, rows, tz), x)
             return self._safe_save(lambda: write_keyword_outputs(x, c, list(seen.values()), statuses, meta), x)
 
         self.log(f"Keyword search: {', '.join(kws)} — {len(plats)} platforms — period {d_start:%Y-%m-%d} to {d_end:%Y-%m-%d} ({tz_name})")
@@ -624,10 +650,11 @@ class Job:
         start_utc, end_utc = _utc_range(d_start, d_end, tz)
         b = self.data["news"]
         b["period"] = {"start": f"{d_start:%Y-%m-%d}", "end": f"{d_end:%Y-%m-%d}", "tz": tz_name}
-        b["meta"] = {"keywords": kws, "detail": opt.detail, "cap": opt.cap}
+        b["meta"] = {"keywords": kws, "detail": opt.detail, "cap": opt.cap, "template": opt.template}
         self.total = len(kws)
         os.makedirs(OUTPUT_DIR, exist_ok=True)
-        base = f"news_links_{d_start:%Y%m%d}-{d_end:%Y%m%d}_{datetime.now():%Y%m%d_%H%M%S}"
+        base = self._out_base(f"news_links_{d_start:%Y%m%d}-{d_end:%Y%m%d}_{datetime.now():%Y%m%d_%H%M%S}",
+                              opt.template, d_end, tz)
         xlsx, csvp = (os.path.join(OUTPUT_DIR, base + ext) for ext in (".xlsx", ".csv"))
         meta = {"tz_name": tz_name, "start": f"{d_start:%Y-%m-%d}", "end": f"{d_end:%Y-%m-%d}",
                 "created": datetime.now().strftime("%Y-%m-%d %H:%M"), "keywords": kws, "options": opt}
@@ -638,6 +665,10 @@ class Job:
             if not force and not self._autosave_due():
                 return True
             x, c = paths or (xlsx, csvp)
+            if opt.template == "online":
+                from . import templates
+                rows = sorted(seen.values(), key=lambda r: -(r.get("ts") or 0))
+                return self._safe_save(lambda: templates.write("online", x, c, rows, tz), x)
             return self._safe_save(lambda: write_news_outputs(x, c, list(seen.values()), statuses, meta), x)
 
         def record(kw, res):

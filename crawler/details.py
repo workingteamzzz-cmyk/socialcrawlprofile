@@ -90,10 +90,17 @@ def _has_numbers(d: dict | None) -> bool:
     return bool(d) and any(d.get(k) is not None for k in ("likes", "comments", "shares", "views"))
 
 
+# Extra facts some pages carry, used by the client "Medsos" Excel layout (templates.py).
+EXTRA_FIELDS = ["user_id", "followers", "user_image", "sub_type"]
+
+
 def _result(out: dict) -> dict:
     res = {k: out.get(k) for k in DETAIL_FIELDS} | {"caption": _clean(out.get("caption") or "")}
     if out.get("author"):
         res["author"] = str(out["author"]).lstrip("@")[:80]
+    for k in EXTRA_FIELDS:
+        if out.get(k) not in (None, ""):
+            res[k] = out[k]
     return res
 
 
@@ -200,9 +207,12 @@ def _tiktok_item(raw: str) -> dict:
     if not item:
         return {}
     st = item.get("stats") or {}
+    author = item.get("author") or {}
     return {"caption": item.get("desc", ""), "likes": parse_count(st.get("diggCount")),
             "comments": parse_count(st.get("commentCount")), "shares": parse_count(st.get("shareCount")),
-            "views": parse_count(st.get("playCount")), "author": (item.get("author") or {}).get("uniqueId")}
+            "views": parse_count(st.get("playCount")), "author": author.get("uniqueId"),
+            "user_id": str(author.get("id") or ""), "user_image": author.get("avatarThumb") or "",
+            "followers": parse_count((item.get("authorStats") or {}).get("followerCount")), "sub_type": "post"}
 
 
 def _parse_youtube_html(html: str, url: str = "") -> dict:
@@ -214,8 +224,12 @@ def _parse_youtube_html(html: str, url: str = "") -> dict:
     likes = rx(r'"label":"([\d.,]+\s*(?:rb|jt|K|M)?)\s*(?:likes|suka|orang lainnya)') or \
         rx(r'like this video along with ([\d.,]+) other') or rx(r'bersama ([\d.,]+) orang lainnya')
     comments = rx(r'"commentCount":\{"simpleText":"([^"]+)"') or rx(r'"contextualInfo":\{"runs":\[\{"text":"([^"]+)"')
+    subs = rx(r'"subscriberCountText":\{"accessibility":\{"accessibilityData":\{"label":"([^"]+)"') or \
+        rx(r'"subscriberCountText":\{"simpleText":"([^"]+)"')
     return {"caption": (title + ("\n\n" + desc if desc else "")).strip(),
-            "views": parse_count(rx(r'"viewCount":"(\d+)"')), "likes": parse_count(likes), "comments": parse_count(comments)}
+            "views": parse_count(rx(r'"viewCount":"(\d+)"')), "likes": parse_count(likes), "comments": parse_count(comments),
+            "author": _unescape(rx(r'"ownerChannelName":"((?:[^"\\]|\\.)*)"')) or None,
+            "user_id": rx(r'"channelId":"(UC[\w-]{20,})"'), "followers": parse_count(subs), "sub_type": "post"}
 
 
 def _parse_threads_html(html: str, url: str = "") -> dict:
@@ -228,9 +242,13 @@ def _parse_threads_html(html: str, url: str = "") -> dict:
         return int(m.group(1)) if m else None
     cap = re.search(r'"caption":\{[^{}]*?"text":"((?:[^"\\]|\\.)*)"', win)
     reposts = num("repost_count")
+    user = re.search(r'"user":\{[^{}]*?"pk":"?(\d+)', win)
+    pic = re.search(r'"profile_pic_url":"((?:[^"\\]|\\.)*)"', win)
     return {"caption": _unescape(cap.group(1)) if cap else _meta(html, "og:description"),
             "likes": num("like_count"), "comments": num("direct_reply_count"),
-            "shares": (reposts or 0) + (num("quote_count") or 0) if reposts is not None else None}
+            "shares": (reposts or 0) + (num("quote_count") or 0) if reposts is not None else None,
+            "user_id": user.group(1) if user else "", "user_image": _unescape(pic.group(1)) if pic else "",
+            "sub_type": "post"}
 
 
 def _parse_instagram_html(html: str, url: str = "") -> dict:
@@ -276,6 +294,14 @@ def _instagram_from_json(html: str, code: str, have: dict) -> dict:
     if not have.get("author"):
         mm = re.search(r'"(?:owner|user)":\{[^{}]*?"username":"([A-Za-z0-9._]{1,30})"', win)
         out["author"] = mm.group(1) if mm else None
+    mm = re.search(r'"(?:owner|user)":\{[^{}]*?"(?:pk|id)":"?(\d+)', win)
+    out["user_id"] = mm.group(1) if mm else None
+    mm = re.search(r'"profile_pic_url":"((?:[^"\\]|\\.)*)"', win)
+    out["user_image"] = _unescape(mm.group(1)) if mm else None
+    mt = num("media_type")                             # 1 photo, 2 video, 8 carousel
+    out["sub_type"] = {1: "image", 2: "video", 8: "carousel"}.get(mt) if mt else None
+    if '"product_type":"clips"' in win:
+        out["sub_type"] = "video"
     return out
 
 

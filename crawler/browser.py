@@ -49,6 +49,7 @@ class Post:
     details: dict | None = None      # caption / engagement, when requested
     text: str = ""                   # what the result shows (post text, title) — used to drop excluded/off-topic posts
     listed: dict | None = None       # engagement the list itself showed (X), so the post need not be opened
+    meta: dict | None = None         # other facts the list showed (avatar, tweet/quoted/reply) for the Medsos layout
 
 
 @dataclass
@@ -274,6 +275,8 @@ class BrowserCrawler:
                 old = found.get(p.url)
                 if old is not None and p.listed and not old.listed:
                     old.listed = p.listed                # X drew the counts a moment after the tweet
+                if old is not None and p.meta and not old.meta:
+                    old.meta = p.meta
                 if old is None or (old.time_utc is None and p.time_utc) or len(p.text) > len(old.text):
                     if old is not None and p.time_utc is None:
                         p.time_utc = old.time_utc
@@ -390,11 +393,11 @@ class BrowserCrawler:
 
         def extract():
             out = []
-            for h, _txt, grp, views, cap in self._x_rows():   # each tweet's own permalink; quoted tweets are not taken
+            for h, _txt, grp, views, cap, avatar, kind in self._x_rows():   # own permalinks; quoted tweets not taken
                 m = rx.match(h or "")
                 if m and m.group(1).lower() == handle:
                     out.append(Post(f"https://x.com/{m.group(1)}/status/{m.group(2)}", x_status_time(m.group(2)),
-                                    listed=_x_listed(grp, views, cap)))
+                                    listed=_x_listed(grp, views, cap), meta={"user_image": avatar, "sub_type": kind}))
             return out
 
         posts = self._scroll_collect(extract, older_needed=1, idle_limit=4)
@@ -448,13 +451,17 @@ class BrowserCrawler:
         const t = c.querySelector('[data-testid="tweetText"]');
         const g = c.querySelector('[role="group"][aria-label]');
         const v = [...c.querySelectorAll('a[href$="/analytics"]')].map(e => e.getAttribute('aria-label') || e.innerText).join(' ');
+        const img = c.querySelector('img[src*="profile_images"]');
+        const ownId = (own.getAttribute('href').match(rx) || [])[2];
+        const other = ls.some(l => (l.getAttribute('href').match(rx) || [])[2] !== ownId);
+        const reply = /^(replying to|membalas)\b/im.test(c.innerText || '');
         return [own.getAttribute('href'), (t ? t.innerText : c.innerText) || '', g ? g.getAttribute('aria-label') : '', v,
-                t ? t.innerText : ''];
+                t ? t.innerText : '', img ? img.getAttribute('src') : '', reply ? 'reply' : other ? 'quoted' : 'tweet'];
       }).filter(Boolean);
     }"""
 
     def _x_rows(self) -> list:
-        """[[permalink, card text, action-bar label, views text, tweet text], ...]"""
+        """[[permalink, card text, action-bar label, views text, tweet text, avatar, tweet|quoted|reply], ...]"""
         try:
             return self.page.evaluate(self._X_JS) or []
         except Exception:  # noqa: BLE001

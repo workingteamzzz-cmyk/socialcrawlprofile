@@ -47,6 +47,7 @@ class NewsOptions:
     resolve: bool = True           # open Google News links to get each media's own article link
     media_only: bool = True        # skip non-media links (social media, forums, shops, wikis, files)
     extra_media: list[str] = field(default_factory=list)   # more domains to treat as media
+    template: str = "standard"     # Excel layout: "standard" or the client's "online" layout (templates.py)
 
     @classmethod
     def from_dict(cls, d: dict) -> "NewsOptions":
@@ -77,7 +78,8 @@ class NewsOptions:
                    exact=bool(d.get("exact")), exclude=[w.lstrip("-") for w in split(d.get("exclude"))],
                    sites=sites[:20], detail=detail,
                    sources=srcs or ["feed"], resolve=bool(d.get("resolve", True)),
-                   media_only=bool(d.get("media_only", True)), extra_media=hosts(d.get("extra_media"))[:200])
+                   media_only=bool(d.get("media_only", True)), extra_media=hosts(d.get("extra_media"))[:200],
+                   template="online" if d.get("template") == "online" else "standard")
 
 
 def google_query(kw: str, opt: NewsOptions) -> str:
@@ -342,9 +344,12 @@ _ARTICLE_JS = r"""() => {
   }
   let author = ld.author || meta('author') || '';
   if (typeof author === 'object') author = [].concat(author).map(a => a && a.name || '').filter(Boolean).join(', ');
+  let image = meta('og:image') || meta('twitter:image') || '';
+  if (!image && ld.image) image = [].concat(ld.image).map(i => typeof i === 'string' ? i : (i && i.url) || '')[0] || '';
   return {title: meta('og:title') || ld.headline || document.title, site: meta('og:site_name'),
           published: meta('article:published_time') || ld.datePublished || meta('datePublished') || meta('pubdate') || '',
-          author: String(author), text};
+          author: String(author), text, image: image ? new URL(image, location.href).href : '',
+          description: meta('og:description') || meta('description') || ld.description || ''};
 }"""
 
 
@@ -810,4 +815,5 @@ class NewsCrawler(BrowserCrawler):
         return {"title": (a.get("title") or "").strip(), "site": (a.get("site") or "").strip(),
                 "published_full": pub.astimezone(self.tz).strftime("%Y-%m-%d %H:%M") if pub else "",
                 "author": (a.get("author") or "").strip()[:200], "text": (a.get("text") or "").strip()[:_MAX_TEXT],
+                "image": (a.get("image") or "").strip()[:1000], "description": (a.get("description") or "").strip()[:2000],
                 "final_url": self.page.url}

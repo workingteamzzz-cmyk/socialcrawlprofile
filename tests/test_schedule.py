@@ -69,7 +69,7 @@ class FakeJob:
     def start_keywords(self, kws, start, end, tz, plats, options):
         return self._start("keywords", kws, start, end, tz, plats, options)
 
-    def start_crawl(self, text, start, end, tz, plats, detail):
+    def start_crawl(self, text, start, end, tz, plats, detail, template="standard"):
         return self._start("profiles", text, start, end, tz, plats, detail)
 
     def finish(self, count=12, error=""):

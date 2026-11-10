@@ -579,7 +579,7 @@ def test_fast_details_x_from_list_and_tiktok_youtube_in_background(tmp_path):
         c.page.goto("https://x.com/search?q=x")
         rows = c._x_rows()
         from crawler.browser import _x_listed
-        posts = [Post("https://x.com" + h, None, listed=_x_listed(g, v, cap)) for h, _t, g, v, cap in rows]
+        posts = [Post("https://x.com" + h, None, listed=_x_listed(g, v, cap)) for h, _t, g, v, cap, *_ in rows]
         navigations.clear()
         assert fill("x", posts) is False
         assert [p.details["likes"] for p in posts] == [10, 20, 30] and posts[2].details["views"] == 300

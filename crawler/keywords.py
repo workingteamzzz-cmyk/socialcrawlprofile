@@ -40,6 +40,7 @@ class SearchOptions:
     ig_keyword: bool = True             # Instagram: keyword search page
     cap: int = 300                      # max in-period links per keyword per platform (0 = no limit)
     detail: str = "links"               # "links" or "full" (also open each post for caption + engagement)
+    template: str = "standard"          # Excel layout: "standard" or the client's "medsos" layout (templates.py)
 
     @classmethod
     def from_dict(cls, d: dict) -> "SearchOptions":
@@ -61,6 +62,7 @@ class SearchOptions:
             cap=max(0, int(d.get("cap") or 0)),
             detail="full" if d.get("detail") == "full" else "links",
             must_mention=bool(d.get("must_mention", True)),
+            template="medsos" if d.get("template") == "medsos" else "standard",
         )
 
 
@@ -143,11 +145,12 @@ class KeywordCrawler(BrowserCrawler):
             # Only each tweet's own permalink (the link wrapping its timestamp), not quoted tweets.
             rows = self._x_rows()           # old and new X layouts
             out = []
-            for h, txt, grp, views, cap in rows:
+            for h, txt, grp, views, cap, avatar, kind in rows:
                 m = rx.match(h or "")
                 if m and m.group(1).lower() not in _RESERVED_X:
                     out.append(Post(f"https://x.com/{m.group(1)}/status/{m.group(2)}", x_status_time(m.group(2)), m.group(1),
-                                    text=txt or "", listed=_x_listed(grp, views, cap)))
+                                    text=txt or "", listed=_x_listed(grp, views, cap),
+                                    meta={"user_image": avatar, "sub_type": kind}))
             return out
 
         posts = self._scroll_collect(extract, older_needed=0, idle_limit=5, max_rounds=600, cap=opt.cap, keep=self._keep(opt))

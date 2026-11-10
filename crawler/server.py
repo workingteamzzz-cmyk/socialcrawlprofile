@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -17,7 +18,8 @@ def list_outputs() -> list[dict]:
     files = []
     if os.path.isdir(OUTPUT_DIR):
         for name in os.listdir(OUTPUT_DIR):
-            if name.endswith(".xlsx") and name.startswith(("post_links_", "keyword_links_", "news_links_")):
+            if name.endswith(".xlsx") and (name.startswith(("post_links_", "keyword_links_", "news_links_"))
+                                           or re.match(r"\d{8}_(Online|Medsos)_", name)):
                 st = os.stat(os.path.join(OUTPUT_DIR, name))
                 files.append({"name": name, "size": st.st_size, "mtime": int(st.st_mtime)})
     files.sort(key=lambda f: f["mtime"], reverse=True)
@@ -130,7 +132,8 @@ class Handler(BaseHTTPRequestHandler):
         elif u.path == "/api/start":
             text = store.lines_for(data.get("list", ""), data["ids"]) if data.get("ids") else data.get("text", "")
             err = JOB.start_crawl(text, data.get("start", ""), data.get("end", ""),
-                                  data.get("tz", "WIB"), data.get("platforms") or [], data.get("detail", "links"))
+                                  data.get("tz", "WIB"), data.get("platforms") or [], data.get("detail", "links"),
+                                  data.get("template", "standard"))
         elif u.path == "/api/news/start":
             err = JOB.start_news(data.get("keywords") or [], data.get("start", ""), data.get("end", ""),
                                  data.get("tz", "WIB"), data.get("options") or {})

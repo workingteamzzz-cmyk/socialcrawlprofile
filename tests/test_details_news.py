@@ -125,11 +125,13 @@ def test_detail_readers(browser_ctx):
     d = read_details(c, "instagram", "https://www.instagram.com/p/ABC/")
     assert (d["caption"], d["likes"], d["comments"]) == ("Caption Instagram", 1234, 56)
     d = read_details(c, "tiktok", "https://www.tiktok.com/@a/video/1")
-    assert d == {"caption": "Video caption #listrik", "likes": 1500, "comments": 12, "shares": 3, "views": 45000}
+    assert d == {"caption": "Video caption #listrik", "likes": 1500, "comments": 12, "shares": 3, "views": 45000,
+                 "sub_type": "post"}
     d = read_details(c, "youtube", "https://www.youtube.com/watch?v=abcdefghijk")
     assert d["caption"] == "Video Title\n\nLine 1\nLine 2" and d["views"] == 12345 and d["likes"] == 1200
     d = read_details(c, "threads", "https://www.threads.com/@u/post/CODE1")
-    assert d == {"caption": "Threads caption", "likes": 77, "comments": 5, "shares": 3, "views": None}
+    assert {k: v for k, v in d.items() if k not in ("sub_type", "user_id", "user_image")} == \
+        {"caption": "Threads caption", "likes": 77, "comments": 5, "shares": 3, "views": None}
     d = read_details(c, "facebook", "https://www.facebook.com/page/posts/1")
     assert (d["caption"], d["likes"], d["comments"], d["shares"]) == ("Facebook caption", 1200, 34, 5)
 
@@ -489,7 +491,7 @@ def test_instagram_details_when_logged_in(tmp_path):
         c.debug_dir = str(tmp_path / "debug")
         d = read_details(c, "instagram", "https://www.instagram.com/p/DfR8OCzNf/")
         assert d == {"caption": "Listrik kembali normal ✅ #PLN", "likes": 4321, "comments": 87, "shares": None,
-                     "views": 120000, "author": "pln_123"}
+                     "views": 120000, "author": "pln_123", "user_id": "1"}       # the owner's id, for the Medsos layout
         d = read_details(c, "instagram", "https://www.instagram.com/p/SCREEN1/")
         assert (d["caption"], d["likes"], d["comments"], d["author"]) == ("Normalisasi sungai selesai", 1235, 56, "bbws_citarum")
         d = read_details(c, "instagram", "https://www.instagram.com/p/NOTHING/")

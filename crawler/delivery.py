@@ -7,7 +7,8 @@ The request: POST <url>, Content-Type: application/json, body:
   {"event": "results.ready", "id": "<unique per delivery>", "sent_at": "...", "source": "post-link-collector",
    "kind": "news|keywords|profiles", "schedule": {...} or null, "period": {"start", "end", "tz"},
    "ok": true, "error": null, "count": 39, "file": "news_links_....xlsx", "download_path": "/download/...",
-   "links": [ {...one row per link, the same columns as the Excel...} ]}
+   "links": [ {...one row per link...} ],
+   + when the client's Excel layout was used: "layout": "online|medsos", "columns": [...], "rows": [{"DATE": ...}, ...]}
 With a token: `Authorization: Bearer <token>` and `X-Collector-Signature: sha256=<HMAC-SHA256 of the body with the
 token>`, so the receiver can check the data really comes from this app. Failed deliveries are retried
 (after 30 s, 2 min and 10 min); any 2xx answer counts as delivered.
@@ -38,11 +39,21 @@ def payload(job, kind: str, schedule: dict | None = None) -> dict:
         links = list((getattr(job, "data", {}).get(kind) or {}).get("links") or [])[:MAX_LINKS]
     except Exception:  # noqa: BLE001
         links = []
-    return {"event": "results.ready", "id": uuid.uuid4().hex, "sent_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    body = {"event": "results.ready", "id": uuid.uuid4().hex, "sent_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "source": "post-link-collector", "kind": kind, "schedule": schedule, "period": period or None,
             "ok": not st.get("error"), "error": st.get("error") or None, "count": mode.get("count", len(links)),
             "file": files[0] if files else None, "download_path": f"/download/{files[0]}" if files else None,
             "dashboard": os.environ.get("PUBLIC_URL", "").strip() or None, "links": links}
+    # The client's Excel layout (Online / Medsos), when the search used one: the same rows with the same column names.
+    layout = ((getattr(job, "data", {}).get(kind) or {}).get("meta") or {}).get("template") or "standard"
+    if layout != "standard" and links:
+        from datetime import timedelta, timezone
+
+        from . import templates
+        tz = timezone(timedelta(hours={"WIB": 7, "WITA": 8, "WIT": 9, "UTC": 0}.get((period or {}).get("tz"), 7)))
+        cols, values = templates.rows_for(layout, links, tz)
+        body.update({"layout": layout, "columns": cols, "rows": [dict(zip(cols, v)) for v in values]})
+    return body
 
 
 def _send_once(url: str, data: bytes, token: str) -> str | None:

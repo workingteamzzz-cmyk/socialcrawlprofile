@@ -184,6 +184,7 @@ class Scheduler:
     def _run(self, s: dict, now: float, manual: bool = False) -> str | None:
         start, end = period(s, now)
         p = s["payload"]
+        self.job._next_origin = "Manual" if manual else "Auto"         # file names: 20261108_Online_Auto_24.00
         if s["kind"] == "news":
             err = self.job.start_news(p.get("keywords") or [], start, end, p["tz"], p.get("options") or {})
         elif s["kind"] == "keywords":
@@ -192,8 +193,10 @@ class Scheduler:
         else:
             from . import store
             text = store.lines_for(p.get("list", ""), p["ids"]) if p.get("ids") else p.get("text", "")
-            err = self.job.start_crawl(text, start, end, p["tz"], p.get("platforms") or [], p.get("detail", "links"))
+            err = self.job.start_crawl(text, start, end, p["tz"], p.get("platforms") or [], p.get("detail", "links"),
+                                       p.get("template", "standard"))
         if err:
+            self.job.__dict__.pop("_next_origin", None)
             return err                                       # a scheduled one stays due and is tried again
         with self.lock:
             self.running_id = (s["id"], self.job.job_id, s["kind"], start, end)

@@ -362,7 +362,10 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
             <div class="card-bd"><div class="choices">
               <label class="choice"><input type="radio" name="pDetail" value="links" checked><span><b>Links only</b><small>Fastest — post link, date and time.</small></span></label>
               <label class="choice"><input type="radio" name="pDetail" value="full"><span><b>Links + caption &amp; engagement</b><small>Also opens every post to copy its caption and read likes, comments, shares/reposts and views. Slower (about 3–8 s per post); numbers are a snapshot.</small></span></label>
-            </div></div></div>
+            </div>
+            <div class="field" style="margin-top:12px"><label for="pTemplate">Excel layout</label>
+              <select id="pTemplate"><option value="standard">Standard (this app)</option><option value="medsos">Medsos (client format)</option></select>
+              <small class="hint">Medsos: the team's columns (Username, Text, Date, Time, Likes, Reply, Shares, Url, Platform, Sub Type, Views Count, Post ID…). Text and numbers need “caption &amp; engagement”.</small></div></div></div>
           <div class="card"><div class="card-hd"><h3>Before the first run</h3></div>
             <div class="card-bd"><ol class="steps">
               <li><span class="num">1</span><span>Click <b>Log in to platforms</b> (bottom left). Sign in on each tab, then close that browser window. Needed once — YouTube needs no login.</span></li>
@@ -479,6 +482,8 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
             <div class="card-bd">
               <div class="opt-row"><div class="t"><b>Output</b><small>Caption &amp; engagement opens every post — slower</small></div>
                 <select id="oDetail"><option value="links">Links only</option><option value="full">Links + caption &amp; engagement</option></select></div>
+              <div class="opt-row"><div class="t"><b>Excel layout</b><small>Medsos: the team's columns. Text and numbers need caption &amp; engagement</small></div>
+                <select id="oTemplate"><option value="standard">Standard (this app)</option><option value="medsos">Medsos (client format)</option></select></div>
               <div class="opt-row"><div class="t"><b>Max links per keyword per platform</b><small>Keeps runs short and protects your logged-in accounts</small></div>
                 <select id="oCap"><option value="50">50</option><option value="100">100</option><option value="300" selected>300</option><option value="1000">1,000</option><option value="0">No limit</option></select></div>
               <div class="opt-row"><div class="t"><b>Exact phrase</b><small>Multi-word keywords are searched as one phrase (X, YouTube, Facebook)</small></div>
@@ -553,7 +558,10 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
               <label class="choice"><input type="radio" name="nDetail" value="links"><span><b>Links only</b><small>Just the article links.</small></span></label>
               <label class="choice"><input type="radio" name="nDetail" value="basic" checked><span><b>Links + title, media &amp; date</b><small>Read from Google's result cards — no extra time.</small></span></label>
               <label class="choice"><input type="radio" name="nDetail" value="full"><span><b>Full article</b><small>Also opens every article to copy its title, author, published time and text. Slower (about 3–6 s per article); paywalled pages may be partial.</small></span></label>
-            </div></div></div>
+            </div>
+            <div class="field" style="margin-top:12px"><label for="nTemplate">Excel layout</label>
+              <select id="nTemplate"><option value="standard">Standard (this app)</option><option value="online">Online (client format)</option></select>
+              <small class="hint">Online: DATE, TIME, TITLE, URL, IMAGE, MEDIA, AUTHOR, SUMMARY, CONTENT… IMAGE, AUTHOR, SUMMARY and CONTENT need “Full article”. SENTIMENT / INFLUENCER / PERSON stay empty (no AI).</small></div></div></div>
         </div>
         <div style="display:flex;flex-direction:column;gap:16px">
           <div class="card"><div class="card-hd"><h3>Run</h3></div>
@@ -1013,6 +1021,8 @@ function bindRadio(name, key, onChange){
   document.querySelectorAll(`input[name="${name}"]`).forEach(r => r.addEventListener('change', () => { ls.set(key, radioValue(name)); onChange && onChange(); }));
 }
 bindRadio('pDetail', 'p_detail');
+(function(){ try { $('pTemplate').value = localStorage.getItem('p_template') || 'standard'; } catch (e) {} })();
+$('pTemplate').addEventListener('change', () => { try { localStorage.setItem('p_template', $('pTemplate').value); } catch (e) {} });
 const DETAIL_COLS = [['caption', 'Caption'], ['likes', 'Likes'], ['comments', 'Comments'], ['shares', 'Shares'], ['views', 'Views']];
 const num = v => v === null || v === undefined || v === '' ? '<span style="color:var(--faint)">—</span>' : fmt(+v);
 const detailCells = l => `<td class="cap" title="${esc(l.caption || l.error || '')}">${l.caption ? esc(l.caption) : (l.error ? '<span style="color:var(--bad)">' + esc(l.error) + '</span>' : '<span style="color:var(--faint)">—</span>')}</td>`
@@ -1024,7 +1034,7 @@ $('btnStart').onclick = async () => {
   const ids = runnable().map(a => a.id);
   if (!ids.length){ alertMsg('No accounts selected on the active platforms.'); return; }
   if (!P1.start || !P1.end){ alertMsg('Choose a start and end date.'); return; }
-  const r = await api('/api/start', {list: listId, ids, start: P1.start, end: P1.end, tz: P1.tz, platforms: [...platOn], detail: radioValue('pDetail')});
+  const r = await api('/api/start', {list: listId, ids, start: P1.start, end: P1.end, tz: P1.tz, platforms: [...platOn], detail: radioValue('pDetail'), template: $('pTemplate').value});
   if (r.error){ alertMsg(r.error); return; }
   alertMsg(''); $('log').textContent = ''; logCount = 0; toast('Collection started'); started();
 };
@@ -1118,12 +1128,12 @@ function kwOptions(){
   return { detail: $('oDetail').value, cap: +$('oCap').value, exact: $('oExact').checked, must_mention: $('oMention').checked,
     exclude: $('oExclude').value.split(',').map(w => w.trim().replace(/^-/, '')).filter(Boolean),
     x_lang: $('oLang').value, x_no_replies: $('oNoReplies').checked, x_no_reposts: $('oNoReposts').checked,
-    ig_hashtag: $('oIgTag').checked, ig_keyword: $('oIgKw').checked };
+    ig_hashtag: $('oIgTag').checked, ig_keyword: $('oIgKw').checked, template: $('oTemplate').value };
 }
-(function(){ const o = ls.get('kw_opts', null); if (o){ $('oDetail').value = o.detail || 'links'; $('oMention').checked = o.must_mention !== false; $('oCap').value = o.cap; $('oExact').checked = o.exact; $('oExclude').value = (o.exclude || []).join(', ');
+(function(){ const o = ls.get('kw_opts', null); if (o){ $('oDetail').value = o.detail || 'links'; $('oTemplate').value = o.template || 'standard'; $('oMention').checked = o.must_mention !== false; $('oCap').value = o.cap; $('oExact').checked = o.exact; $('oExclude').value = (o.exclude || []).join(', ');
   $('oLang').value = o.x_lang || ''; $('oNoReplies').checked = o.x_no_replies; $('oNoReposts').checked = o.x_no_reposts;
   $('oIgTag').checked = o.ig_hashtag; $('oIgKw').checked = o.ig_keyword; } })();
-['oDetail','oCap','oExact','oMention','oExclude','oLang','oNoReplies','oNoReposts','oIgTag','oIgKw'].forEach(id =>
+['oDetail','oTemplate','oCap','oExact','oMention','oExclude','oLang','oNoReplies','oNoReposts','oIgTag','oIgKw'].forEach(id =>
   $(id).addEventListener(id === 'oExclude' ? 'input' : 'change', () => { ls.set('kw_opts', kwOptions()); kwRender(); }));
 $('kwInput').addEventListener('keydown', e => {
   if ((e.key === 'Enter' || e.key === ',') && $('kwInput').value.trim()){ e.preventDefault(); kwAdd($('kwInput').value); $('kwInput').value = ''; }
@@ -1213,14 +1223,14 @@ function nwOptions(){
     sources: [['feed', 'nSrcFeed'], ['news_tab', 'nSrcNews'], ['all_tab', 'nSrcAll']].filter(([, id]) => $(id).checked).map(([k]) => k),
     media_only: $('nMediaOnly').checked, extra_media: $('nExtraMedia').value.split(',').map(w => w.trim()).filter(Boolean), region: $('nRegion').value, exact: $('nExact').checked,
     exclude: $('nExclude').value.split(',').map(w => w.trim().replace(/^-/, '')).filter(Boolean),
-    sites: $('nSites').value.split(',').map(w => w.trim()).filter(Boolean) };
+    sites: $('nSites').value.split(',').map(w => w.trim()).filter(Boolean), template: $('nTemplate').value };
 }
-(function(){ const o = ls.get('nw_opts', null); if (o){ $('nCap').value = String(o.cap ?? 100); $('nByDay').checked = o.by_day !== false; 
+(function(){ const o = ls.get('nw_opts', null); if (o){ $('nCap').value = String(o.cap ?? 100); $('nTemplate').value = o.template || 'standard'; $('nByDay').checked = o.by_day !== false; 
   const srcs = o.sources || ({news: ['feed'], search: ['news_tab'], both: ['feed', 'news_tab']}[o.source] || ['feed', 'news_tab', 'all_tab']);
   $('nSrcFeed').checked = srcs.includes('feed'); $('nSrcNews').checked = srcs.includes('news_tab'); $('nSrcAll').checked = srcs.includes('all_tab');
   $('nMediaOnly').checked = o.media_only !== false; $('nExtraMedia').value = (o.extra_media || []).join(', '); $('nResolve').checked = o.resolve !== false; $('nRegion').value = o.region || 'id';
   $('nExact').checked = !!o.exact; $('nExclude').value = (o.exclude || []).join(', '); $('nSites').value = (o.sites || []).join(', '); } })();
-['nCap','nByDay','nSrcFeed','nSrcNews','nSrcAll','nMediaOnly','nExtraMedia','nResolve','nRegion','nExact','nExclude','nSites'].forEach(id => $(id).addEventListener(['nExclude','nSites','nExtraMedia'].includes(id) ? 'input' : 'change',
+['nCap','nTemplate','nByDay','nSrcFeed','nSrcNews','nSrcAll','nMediaOnly','nExtraMedia','nResolve','nRegion','nExact','nExclude','nSites'].forEach(id => $(id).addEventListener(['nExclude','nSites','nExtraMedia'].includes(id) ? 'input' : 'change',
   () => { ls.set('nw_opts', nwOptions()); nwRender(); }));
 function nwRender(){
   if (!P3) return;
@@ -1407,7 +1417,7 @@ $('schSave').onclick = async () => {
 $('btnSched').onclick = () => {
   const ids = runnable().map(a => a.id);
   if (!ids.length){ alertMsg('No accounts selected on the active platforms.'); return; }
-  openSch('profiles', {list: listId, ids, tz: P1.tz, platforms: [...platOn], detail: radioValue('pDetail')},
+  openSch('profiles', {list: listId, ids, tz: P1.tz, platforms: [...platOn], detail: radioValue('pDetail'), template: $('pTemplate').value},
     `Post links of ${ids.length} accounts.`, `Accounts (${ids.length})`);
 };
 $('kBtnSched').onclick = () => {

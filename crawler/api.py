@@ -111,6 +111,8 @@ class CrawlRequest(BaseModel):
     list_id: str = Field("", alias="list", description="Account list id (GET /api/lists)")
     ids: list[str] = Field(default_factory=list, description="Account ids in that list (GET /api/accounts?list=...)")
     text: str = Field("", description="Or: profile links, one per line ('link | group' is fine)")
+    template: Literal["standard", "medsos"] = Field("standard", description="Excel layout: the app's own, or the "
+                                                                           "client's Medsos layout")
 
 
 class KeywordRequest(BaseModel):
@@ -393,7 +395,7 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
     @app.post("/api/start", tags=["jobs"], dependencies=auth, summary="Collect post links from accounts")
     def start(body: CrawlRequest, request: Request):
         text = store.lines_for(body.list_id, body.ids) if body.ids else body.text
-        err = JOB.start_crawl(text, body.start, body.end, body.tz, list(body.platforms), body.detail)
+        err = JOB.start_crawl(text, body.start, body.end, body.tz, list(body.platforms), body.detail, body.template)
         log(request, "started account collection" if not err else "start refused", period=f"{body.start}..{body.end}",
             accounts=len([ln for ln in text.splitlines() if ln.strip()]), detail=body.detail)
         return answer(err)

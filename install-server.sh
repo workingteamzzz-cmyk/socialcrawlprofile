@@ -120,7 +120,7 @@ if [ "${SKIP_START:-0}" != 1 ]; then
     IFS=',' read -ra names < .people_pending
     for name in "${names[@]}"; do
       role="operator"; if [ "$first" = 1 ]; then role="admin"; fi; first=0
-      pw=$(LC_ALL=C tr -dc 'A-HJ-NP-Za-km-z2-9' < /dev/urandom | head -c 14)
+      pw=$(openssl rand -hex 8)                       # (no pipe: with pipefail a SIGPIPE would stop the script)
       if docker compose exec -T -e NEW_PASSWORD="$pw" collector python serve.py add-user "$name" "$role" >/dev/null; then
         printf '  %-16s %-9s %s\n' "$name" "$role" "$pw" >> "$KEYS_FILE"
       else

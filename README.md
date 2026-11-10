@@ -257,7 +257,33 @@ use SSH keys (no password logins) and a firewall that only opens ports 22, 80 an
 encryption/backups if offered, and treat the `collector-data` volume (logins, results) as confidential.
 For data that must stay in Indonesia (UU PDP), choose a provider with an Indonesian data centre.
 
-### Start it
+### Quick server setup (one command)
+
+1. Rent a VPS with **Ubuntu 24.04**, 2 vCPU and 4 GB RAM or more (e.g. Biznet Gio NEO Lite MS 4.2, Jakarta,
+   monthly). Note its IP address and root password.
+2. On your computer (Windows PowerShell or Mac Terminal), copy the app to the server:
+
+```bash
+scp post-link-collector.zip root@<server-ip>:~
+```
+
+3. Log in to the server and run the installer:
+
+```bash
+ssh root@<server-ip>
+```
+
+```bash
+apt-get update && apt-get install -y unzip && unzip -o post-link-collector.zip && cd post-link-collector && bash install-server.sh
+```
+
+It asks for the names of the people who may use the app and an address (press Enter for a free HTTPS address like
+`103-1-2-3.sslip.io`, or type your own domain), then installs Docker, a firewall, automatic security updates and
+swap, starts everything and prints the address and each person's key (also saved in
+`/root/post-link-collector-keys.txt`). For a new version: upload the new zip, unzip it and run the same command —
+settings and data are kept.
+
+### Start it (manually)
 
 1. Get a VPS (2 vCPU / 4 GB RAM is enough) with Docker, and point a domain at it (DNS A record).
 2. Copy the app there, then:
@@ -344,5 +370,6 @@ All of them, with request examples, are in `/docs`.
 | `crawler/captcha.py` | Lets a person solve a verification from the dashboard when the browser runs on a server |
 | `crawler/cookies.py` | Reads exported cookies (Cookie-Editor JSON, storage state, cookies.txt) |
 | `Dockerfile`, `docker-compose.yml`, `Caddyfile`, `.env.example`, `requirements-server.txt` | Running it on a server (HTTPS, locked-down container) |
+| `install-server.sh` | One-command setup on a fresh Ubuntu VPS |
 | `data/lists/` | Account lists; `Ditjen SDA.csv` is the bundled example |
 | `tests/` | Unit, end-to-end and stress tests with fake platform pages (`python -m pytest tests`, about 2 minutes) |

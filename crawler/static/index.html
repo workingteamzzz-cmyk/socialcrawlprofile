@@ -689,6 +689,7 @@ body:not([data-role="admin"]) .need-admin{display:none!important}
             <small class="hint">Off = no time limit. Twitter and Threads are filtered at the source; other platforms are fetched and then filtered (they still cost credits).</small>
           </div></div>
           <div class="card"><div class="card-hd"><h3>Run</h3><div class="tools"><button class="btn sm" id="apBal">Check credit balance</button></div></div><div class="card-bd">
+            <div class="hint" id="apUsage" style="margin-bottom:6px"></div>
             <div class="hint" id="apBalOut" style="margin-bottom:10px"></div>
             <button class="btn primary lg need-op" id="apStart"><svg class="i"><use href="#i-play"/></svg>Start API scraper</button>
             <button class="btn danger lg need-op" id="apStop" style="display:none"><svg class="i"><use href="#i-stop"/></svg>Stop (keeps what was collected)</button>
@@ -697,7 +698,9 @@ body:not([data-role="admin"]) .need-admin{display:none!important}
           </div></div>
         </div>
         <div style="display:flex;flex-direction:column;gap:16px">
-          <div class="card"><div class="card-hd"><h3>Options</h3></div><div class="card-bd">
+          <div class="card"><div class="card-hd"><h3>Options</h3><div class="tools">
+            <button class="btn sm" id="apPresetSave" title="Fewest credits: 20 per keyword, cap 100, last 24 hours, no comments, no extra profile calls except a missing ID/photo">Hemat</button>
+            <button class="btn sm" id="apPresetFull" title="Most complete: 50 per keyword, max coverage, followers and comments — many more credits">Lengkap</button></div></div><div class="card-bd">
               <div class="opt-row"><div class="t"><b>Max/query</b><small>Results per keyword per platform (also per profile)</small></div>
                 <input type="number" id="apLimit" value="30" min="0" style="width:110px"></div>
               <div class="opt-row"><div class="t"><b>Credit cap per run</b><small>Non-Twitter requests; 0 = unlimited. The run stops there and keeps what it has</small></div>
@@ -756,6 +759,11 @@ body:not([data-role="admin"]) .need-admin{display:none!important}
           <input type="password" id="akTw" autocomplete="off" placeholder="enables Twitter keyword search and Twitter links"></div>
         <label style="display:flex;gap:8px;align-items:center;margin:6px 0 14px"><input type="checkbox" id="akTwClear"> remove the saved key</label>
         <div class="field"><label for="akBudget">Default credit cap per run (non-Twitter; 0 = unlimited)</label><input type="number" id="akBudget" min="0" style="width:140px"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+          <div class="field"><label for="akDay">Credit limit per day (all runs; 0 = none)</label><input type="number" id="akDay" min="0"></div>
+          <div class="field"><label for="akMonth">Credit limit per month (all runs; 0 = none)</label><input type="number" id="akMonth" min="0"></div></div>
+        <small class="hint">When a limit is reached, runs stop and new runs are refused until the next day / month. Account profiles already looked up are reused for 30 days (followers: 7 days), so the same accounts don't cost again.</small>
+        <div class="hint" id="akUsage" style="margin-top:8px"></div>
         <ul class="errs" id="akErrs"></ul>
         <div style="display:flex;gap:8px;margin-top:16px"><button class="btn primary" id="akSave">Save</button><button class="btn" id="akBal">Check credit balance</button></div>
         <div class="hint" id="akBalOut" style="margin-top:10px"></div>
@@ -1575,7 +1583,24 @@ async function loadApInfo(){
   na.textContent = apInfo.ready ? '' : (ROLE === 'admin' ? 'No API key yet — set it under API settings.' : 'No API key yet — ask an admin to set it under API settings.');
   na.className = 'alert' + (apInfo.ready ? '' : ' show err');
   $('apTwHint').textContent = apInfo.twitter ? '' : 'Twitter needs the optional Twitter API key (API settings).';
+  $('apUsage').textContent = usageText(apInfo);
+  if (!loadApInfo.done){ loadApInfo.done = 1; apPreset(false, true); }   // the page starts on Hemat
 }
+function usageText(d){
+  const u = d.used || {}, lim = [d.daily_cap ? `day limit ${fmt(d.daily_cap)}` : '', d.monthly_cap ? `month limit ${fmt(d.monthly_cap)}` : ''].filter(Boolean);
+  return `Credits used — today: ${fmt(u.today || 0)} · this month: ${fmt(u.month || 0)}` +
+    (lim.length ? ` (${lim.join(', ')}; ${fmt(d.left ?? 0)} left)` : ' (no daily/monthly limit)');
+}
+function apPreset(full, quiet){
+  const set = (id, v) => { const el = $(id); if (el.type === 'checkbox') el.checked = v; else el.value = v; };
+  const cap = apInfo ? apInfo.default_budget : 200;
+  set('apLimit', full ? 50 : 20); set('apBudget', full ? cap : Math.min(100, cap || 100)); $('apBudget').dataset.touched = 1;
+  set('apCov', full); set('apFoll', full); set('apCmt', full); set('apFill', true); set('apStrict', true); set('apDelta', false);
+  if (!full){ document.querySelector('[data-aprange="1"]').click(); } else { $('apTf').checked = false; }
+  if (!quiet) toast(full ? 'Lengkap: more data, many more credits' : 'Hemat: fewest credits');
+}
+$('apPresetSave').onclick = () => apPreset(false);
+$('apPresetFull').onclick = () => apPreset(true);
 $('apBudget').addEventListener('input', () => { $('apBudget').dataset.touched = 1; });
 $('apMode').onchange = () => { $('apPlatF').style.display = $('apMode').value === 'keyword' ? '' : 'none'; };
 const toLocalInput = d => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
@@ -1612,11 +1637,14 @@ async function loadApKeys(){
   $('akKeyState').textContent = d.api_key_set ? `(set ${d.api_key_tail})` : '(not set)';
   $('akTwState').textContent = d.twitter_set ? `(set ${d.twitter_tail})` : '(not set)';
   $('akBudget').value = d.default_budget ?? 200;
+  $('akDay').value = d.daily_cap ?? 0; $('akMonth').value = d.monthly_cap ?? 0;
+  const inf = await api('/api/apiscraper/info'); if (inf && inf.used) $('akUsage').textContent = usageText(inf);
   $('akKey').value = $('akTw').value = ''; $('akKeyClear').checked = $('akTwClear').checked = false;
 }
 $('akSave').onclick = async () => {
   const r = await api('/api/apiscraper/settings', {api_key: $('akKey').value.trim(), twitter_api_key: $('akTw').value.trim(),
-    default_budget: $('akBudget').value === '' ? null : +$('akBudget').value, clear_api_key: $('akKeyClear').checked, clear_twitter: $('akTwClear').checked});
+    default_budget: $('akBudget').value === '' ? null : +$('akBudget').value, clear_api_key: $('akKeyClear').checked, clear_twitter: $('akTwClear').checked,
+    daily_cap: $('akDay').value === '' ? null : +$('akDay').value, monthly_cap: $('akMonth').value === '' ? null : +$('akMonth').value});
   if (!r.ok){ $('akErrs').innerHTML = `<li>${esc(r.error || 'Could not save')}</li>`; return; }
   $('akErrs').innerHTML = ''; toast('API settings saved'); loadApKeys(); loadApInfo();
 };

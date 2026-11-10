@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 import threading
 import time
@@ -21,6 +22,51 @@ def engine():
 def platforms() -> list[str]:
     eng = engine()
     return ["ALL platforms"] + list(eng.PLATFORMS.keys()) + [eng.IG_KW_PLATFORM, eng.FB_PLATFORM, eng.TW_PLATFORM]
+
+
+def info() -> dict:
+    """For the dashboard: ready?, platforms, the default cap, the limits and what was used."""
+    pub = settings.public()
+    return {"ready": pub["api_key_set"], "twitter": pub["twitter_set"], "default_budget": pub["default_budget"],
+            "daily_cap": pub["daily_cap"], "monthly_cap": pub["monthly_cap"], "left": settings.credits_left(),
+            "used": settings.usage(), "platforms": platforms()}
+
+
+# ---------- saving credits: profiles already looked up are not paid for again ----------
+PROFILE_DAYS = 30          # user ID / image of an account rarely change
+FOLLOWER_DAYS = 7          # follower counts do: refresh them weekly
+
+
+def _load_profiles(eng, path: str, followers: bool) -> int:
+    try:
+        with open(path, encoding="utf-8") as f:
+            saved = json.load(f)
+    except (OSError, ValueError):
+        return 0
+    max_age = (FOLLOWER_DAYS if followers else PROFILE_DAYS) * 86400
+    n = 0
+    for k, e in (saved.items() if isinstance(saved, dict) else ()):
+        plat, _, user = k.partition("\t")
+        if isinstance(e, dict) and e.get("v") and time.time() - e.get("t", 0) < max_age:
+            eng._prof_cache[(plat, user)] = e["v"]
+            n += 1
+    return n
+
+
+def _save_profiles(eng, path: str) -> None:
+    try:
+        with open(path, encoding="utf-8") as f:
+            saved = json.load(f)
+        saved = saved if isinstance(saved, dict) else {}
+    except (OSError, ValueError):
+        saved = {}
+    now = time.time()
+    for (plat, user), v in list(eng._prof_cache.items()):
+        k = f"{plat}\t{user}"
+        if v and (k not in saved or saved[k].get("v") != v):
+            saved[k] = {"v": v, "t": now}
+    saved = {k: e for k, e in saved.items() if now - e.get("t", 0) < PROFILE_DAYS * 86400}
+    settings._write(path, saved)
 
 
 class _Lines(io.TextIOBase):
@@ -77,7 +123,15 @@ def run(cfg: dict, log, progress, stop_event: threading.Event, out_dir: str, dat
     f.platform_w.value = plat
     f.queries_w.value = cfg.get("queries", "")
     f.limit_w.value = int(cfg.get("limit", 30))
-    f.budget_w.value = int(cfg.get("budget", keys.get("default_budget", 200)))
+    budget = int(cfg.get("budget", keys.get("default_budget", 200)) or 0)
+    left = settings.credits_left()
+    if left is not None:
+        if left <= 0:
+            raise RuntimeError("The daily/monthly credit limit is used up — an admin can raise it under API settings.")
+        if not budget or budget > left:
+            log(f"💳 Credit cap for this run: {left} (what the daily/monthly limit still allows)")
+            budget = left
+    f.budget_w.value = budget
     tf = bool(cfg.get("time_from") or cfg.get("time_to"))
     f.timefilter_w.value = tf
     (sy, smo, sd), (sh, smi) = _split_dt(cfg.get("time_from", ""))
@@ -121,8 +175,13 @@ def run(cfg: dict, log, progress, stop_event: threading.Event, out_dir: str, dat
             time.sleep(0.5)
     done = threading.Event()
     threading.Thread(target=watch, daemon=True).start()
+    prof_path = os.path.join(data_dir, "api_profiles.json")
+    reused = _load_profiles(eng, prof_path, bool(cfg.get("foll")))
+    if reused and (cfg.get("fillid", True) or cfg.get("foll")):
+        log(f"♻️ {reused} account profile(s) already known — looked up again only if missing (saves credits)")
     before = set(os.listdir(out_dir))
     out = _Lines(log)
+    eng._REQN["other"] = eng._REQN["twitter"] = 0
     try:
         with contextlib.redirect_stdout(out):
             eng.on_click(None)
@@ -130,6 +189,11 @@ def run(cfg: dict, log, progress, stop_event: threading.Event, out_dir: str, dat
         out.flush()
         done.set()
         colab_shim.HOOK["fn"] = None
+        settings.record_usage(eng._REQN["other"], eng._REQN["twitter"])
+        try:
+            _save_profiles(eng, prof_path)
+        except OSError:
+            pass
     return sorted(n for n in os.listdir(out_dir) if n not in before and n.endswith((".xlsx", ".csv")))
 
 

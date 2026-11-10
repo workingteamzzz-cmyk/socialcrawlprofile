@@ -263,6 +263,15 @@ with User ID, Username, Follower, User Image, **Sentiment and Emotion**, plus *R
 - Sentiment/Emotion use the team's lexicon analysis (the AI models need a GPU and are not loaded on the server).
   The same analysis also fills **Sentiment/Emotion** in the normal Medsos layout and **SENTIMENT** in the Online layout.
 - Stop ends the run like the credit cap does: what was collected is still saved.
+- The post's own ID column is named **Post ID** (as in the Medsos upload template); the rest is the team's layout.
+- **Saving credits**:
+  - the page opens on the **Hemat** preset: 20 per keyword, cap 100, last 24 hours, no comments, and a
+    profile call only when an ID/photo is missing. **Lengkap** is 50 per keyword, max coverage, followers and comments.
+  - account profiles already looked up are reused (user ID/photo 30 days, followers 7 days), so the same
+    accounts are not paid for again in the next runs (`api_profiles.json` in the data folder).
+  - admins set a **credit limit per day and per month** under API settings; a run gets at most what is left,
+    and new runs are refused once it is used up. Credits used today / this month show on the page.
+  - filters (time, strict, language, negative words, duplicates) run *before* the profile calls, so dropped rows cost nothing extra.
 - Updating to a new version of the team's script: `python tools/port_scraper.py social_scraper_advanced_vNN_en.py`
   regenerates `crawler/apiscraper/engine.py` (the tool stops if a place it changes is different in the new version).
 - API: `GET /api/apiscraper/info`, `POST /api/apiscraper/start`, `GET /api/apiscraper/balance` (operator);

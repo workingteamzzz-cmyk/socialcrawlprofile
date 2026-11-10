@@ -2412,7 +2412,7 @@ SAMPLE_ORDER = ["No","Sentiment","Username","User ID","Follower","Text","Date","
 RENAME_MAP = {"username":"Username","user_id":"User ID","followers":"Follower","text":"Text","date":"Date",
               "time":"Time","likes":"Likes","comments":"Reply","shares":"Shares","url":"Url",
               "profile_image":"User Image","platform":"Platform","type":"Sub Type","views":"Views Count",
-              "parent_id":"Parent ID","id":"ID","user_id_parent":"User ID Parent",
+              "parent_id":"Parent ID","id":"Post ID","user_id_parent":"User ID Parent",
               "query":"Query","raw_json":"Raw JSON"}
 MANUAL_COLS = ["Gender","Age Category","Content Location","Religion","Ethnic","Phsychography"]
 
@@ -2522,7 +2522,7 @@ def add_rekap_codebook(xp, df):
         ("Views Count", "Jumlah tayangan (bila platform menyediakan)"),
         ("Gender s/d Phsychography", "Kolom coding manual — sengaja kosong, diisi peneliti"),
         ("Parent ID", "Untuk komentar: ID unggahan induknya"),
-        ("ID", "ID unik unggahan/komentar ini"),
+        ("Post ID", "ID unik unggahan/komentar ini"),
         ("User ID Parent", "User ID pemilik unggahan induk (post: user id sendiri) — untuk cluster percakapan"),
         ("Query", "Sumber baris: keyword pencarian, (by link), profile:..., (comment), (reply)"),
     ]
@@ -2571,7 +2571,7 @@ def to_sample_layout(df):
         df["Sub Type"] = "post"
     df.insert(0, "No", range(1, len(df) + 1))
     front = [c for c in SAMPLE_ORDER if c in df.columns]
-    _pref = ["ID", "User ID Parent", "Query", "Raw JSON"]
+    _pref = ["Post ID", "User ID Parent", "Query", "Raw JSON"]
     extras = [c for c in _pref if c in df.columns and c not in front]
     extras += [c for c in df.columns if c not in front and c not in extras]
     return df[front + extras]
@@ -3282,7 +3282,7 @@ def on_click(b):
                           "Url": 40, "Emotion": 12, "User Image": 30, "Platform": 10, "Sub Type": 10,
                           "Views Count": 12, "Gender": 9, "Age Category": 13, "Content Location": 16,
                           "Religion": 9, "Ethnic": 9, "Phsychography": 14, "Parent ID": 20,
-                          "ID": 20, "User ID Parent": 18, "Query": 16, "Raw JSON": 30}
+                          "Post ID": 20, "User ID Parent": 18, "Query": 16, "Raw JSON": 30}
                 for i, col in enumerate(df.columns, 1):
                     ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = widths.get(col, 14)
                 wb.save(xp)

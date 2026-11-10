@@ -232,6 +232,8 @@ class ApiKeys(BaseModel):
     default_budget: int | None = None
     clear_api_key: bool = False
     clear_twitter: bool = False
+    daily_cap: int | None = Field(None, description="max credits per day over all runs (0 = no limit)")
+    monthly_cap: int | None = Field(None, description="max credits per month over all runs (0 = no limit)")
 
 
 class SignIn(BaseModel):
@@ -630,10 +632,8 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
     @app.get("/api/apiscraper/info", tags=["api scraper"], dependencies=op,
              summary="Whether the API scraper is ready, and its platforms")
     def apiscraper_info():
-        from .apiscraper import runner, settings as api_settings
-        pub = api_settings.public()
-        return {"ready": pub["api_key_set"], "twitter": pub["twitter_set"], "default_budget": pub["default_budget"],
-                "platforms": runner.platforms()}
+        from .apiscraper import runner
+        return runner.info()
 
     @app.get("/api/apiscraper/balance", tags=["api scraper"], dependencies=op, summary="Credit balance of the API key")
     def apiscraper_balance():
@@ -658,8 +658,9 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
     def apiscraper_settings_save(body: ApiKeys, request: Request):
         from .apiscraper import settings as api_settings
         pub = api_settings.save(body.api_key or None, body.twitter_api_key or None, body.default_budget,
-                                body.clear_api_key, body.clear_twitter)
+                                body.clear_api_key, body.clear_twitter, body.daily_cap, body.monthly_cap)
         log(request, "changed the API scraper keys", api_key=bool(body.api_key), twitter=bool(body.twitter_api_key),
+            daily_cap=body.daily_cap, monthly_cap=body.monthly_cap,
             cleared=[k for k, v in (("api", body.clear_api_key), ("twitter", body.clear_twitter)) if v])
         return {"ok": True, **pub}
 

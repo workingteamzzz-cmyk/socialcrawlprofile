@@ -64,7 +64,7 @@ def test_keys_stay_on_the_server(tmp_path, monkeypatch):
     assert settings.public()["api_key_set"] is False
     pub = settings.save(api_key="secret-key-abcd", twitter_api_key="tw-key-9876", default_budget=50)
     assert pub == {"api_key_set": True, "api_key_tail": "…abcd", "twitter_set": True, "twitter_tail": "…9876",
-                   "default_budget": 50}
+                   "default_budget": 50, "daily_cap": 0, "monthly_cap": 0}
     assert oct(os.stat(tmp_path / "api_scraper.json").st_mode)[-3:] == "600"
     assert settings.save(clear_twitter=True)["twitter_set"] is False and settings.load()["api_key"] == "secret-key-abcd"
 
@@ -82,6 +82,8 @@ def test_run_gives_the_team_excel_with_ids_and_emotion(tmp_path, fake_api):
     ws = wb["Sheet1"]
     head = [c.value for c in ws[1]]
     rows = [dict(zip(head, [c.value for c in r])) for r in ws.iter_rows(min_row=2)]
+    assert "Post ID" in head and "ID" not in head and head.index("Post ID") == head.index("Parent ID") + 1
+    assert {str(r["Post ID"]) for r in rows} == {"7705797219735129365", "7705797219735129366"}
     by_user = {r["Username"]: r for r in rows}
     k = by_user["kaltimpostnews"]
     assert str(k["User ID"]) == "7370322159623865350" and k["Follower"] in (5100, "5100")
@@ -121,3 +123,34 @@ def test_roles_for_the_api_scraper(tmp_path, monkeypatch):
     got = admin.get("/api/apiscraper/settings").text
     assert "sk-live-000011112222" not in got and "…2222" in got
     assert op.get("/api/apiscraper/info").json()["ready"] is True
+
+
+def test_credit_saving(tmp_path, fake_api):
+    """Daily limit caps the run and is counted; known profiles are not paid for again."""
+    settings.save(api_key="test-key-123", daily_cap=50)
+    cfg = {"mode": "keyword", "platform": "TikTok (keyword)", "queries": "listrik", "limit": 10, "budget": 0,
+           "fillid": True, "foll": True}
+    out, data = str(tmp_path / "out"), str(tmp_path / "data")
+    logs = []
+    runner.run(cfg, logs.append, lambda *a: None, threading.Event(), out, data)
+    assert any("Credit cap for this run: 50" in ln for ln in logs)
+    first = len(fake_api)
+    profiles = [p for p, _ in fake_api if "/profile" in p]
+    assert profiles                                              # followers looked up once per account
+    used = settings.usage()["today"]
+    assert used == first and settings.credits_left() == 50 - used
+    saved = json.load(open(tmp_path / "data" / "api_profiles.json"))
+    assert saved and oct(os.stat(tmp_path / "data" / "api_profiles.json").st_mode)[-3:] == "600"
+    # second run: same accounts -> no profile requests (the fake API returns no profile, so make it known)
+    for k in saved:
+        saved[k]["v"] = {"followers": 10, "user_id": "1", "profile_image": "x"}
+    json.dump(saved, open(tmp_path / "data" / "api_profiles.json", "w"))
+    fake_api.clear()
+    logs.clear()
+    runner.run(cfg, logs.append, lambda *a: None, threading.Event(), out, data)
+    assert not [p for p, _ in fake_api if "/profile" in p]
+    assert any("already known" in ln for ln in logs)
+    # limit used up -> refused
+    settings.save(daily_cap=settings.usage()["today"])
+    with pytest.raises(RuntimeError, match="limit is used up"):
+        runner.run(cfg, print, lambda *a: None, threading.Event(), out, data)

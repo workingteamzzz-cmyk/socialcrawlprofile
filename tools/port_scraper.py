@@ -9,7 +9,8 @@ The team's code stays as it is — scraping, cleaning, sentiment/emotion, the Ex
   4. no password box (the dashboard's sign-in and roles protect it);
   5. a Stop flag (the dashboard's Stop button) that ends the run like the credit cap does — data so far is kept;
   6. the AI language models are off by default (a 4 GB server cannot load them); the team's lexicon analysis is used;
-  7. the form display at the end of the script is left out (the dashboard shows the form).
+  7. the form display at the end of the script is left out (the dashboard shows the form);
+  8. the post's own ID column is named "Post ID" (as in the team's Medsos upload template) instead of "ID".
 Every edit must match exactly once, so a new version that changed those places stops here instead of being ported
 wrongly.
 """
@@ -84,6 +85,11 @@ _out_path = os.path.join        # (on_click has its own local "import os", so it
         '''            df.to_csv(_out_path(OUT_DIR, base + ".csv"), index=False); saved.append(_out_path(OUT_DIR, base + ".csv"))''')
     sub('''        print("To stop early: press the ■ (interrupt) button or Runtime → Interrupt execution. Data collected so far is still saved.")''',
         '''        print("To stop early: press Stop on the dashboard. Data collected so far is still saved (Exports).")''')
+    # 8. "ID" -> "Post ID" (the Medsos upload template's name for it)
+    sub('''"parent_id":"Parent ID","id":"ID",''', '''"parent_id":"Parent ID","id":"Post ID",''')
+    sub('''        ("ID", "ID unik unggahan/komentar ini"),''', '''        ("Post ID", "ID unik unggahan/komentar ini"),''')
+    sub('''    _pref = ["ID", "User ID Parent", "Query", "Raw JSON"]''', '''    _pref = ["Post ID", "User ID Parent", "Query", "Raw JSON"]''')
+    sub('''"ID": 20, "User ID Parent": 18,''', '''"Post ID": 20, "User ID Parent": 18,''')
     cut = s.find("\nbtn.on_click(on_click)\n")
     if cut < 0:
         raise SystemExit("port_scraper: 'btn.on_click(on_click)' not found")

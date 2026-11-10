@@ -97,10 +97,8 @@ class Handler(BaseHTTPRequestHandler):
             from .schedule import get
             return self._json({"schedules": get().list(), "now": int(_time.time())})
         if u.path == "/api/apiscraper/info":
-            from .apiscraper import runner, settings
-            pub = settings.public()
-            return self._json({"ready": pub["api_key_set"], "twitter": pub["twitter_set"],
-                               "default_budget": pub["default_budget"], "platforms": runner.platforms()})
+            from .apiscraper import runner
+            return self._json(runner.info())
         if u.path == "/api/apiscraper/settings":
             from .apiscraper import settings
             return self._json(settings.public())
@@ -189,7 +187,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, **settings.save(
                 data.get("api_key") or None, data.get("twitter_api_key") or None,
                 int(data["default_budget"]) if str(data.get("default_budget", "")).strip() else None,
-                bool(data.get("clear_api_key")), bool(data.get("clear_twitter")))})
+                bool(data.get("clear_api_key")), bool(data.get("clear_twitter")),
+                *[int(data[k]) if str(data.get(k, "")).strip() else None for k in ("daily_cap", "monthly_cap")])})
         elif u.path == "/api/tools/decode":
             import base64
             try:

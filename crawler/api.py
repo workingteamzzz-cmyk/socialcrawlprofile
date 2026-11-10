@@ -167,6 +167,27 @@ class CaptchaAction(BaseModel):
     dy: float = Field(400, description="scroll: pixels down (negative = up)")
 
 
+class ScheduleIn(BaseModel):
+    """A search that runs by itself. `payload` is what the matching start endpoint takes, without start/end."""
+    id: str = Field("", description="Empty = a new schedule; an id = change that schedule")
+    name: str = ""
+    kind: Literal["news", "keywords", "profiles"]
+    payload: dict = Field(..., examples=[{"keywords": ["tarif listrik", "PLN"], "tz": "WIB",
+                                          "options": {"sources": ["feed"], "cap": 300}}])
+    repeat: Literal["daily", "hours"] = "daily"
+    time: str = Field("07:00", description="daily: HH:MM in the payload's time zone")
+    hours: int = Field(6, description="hours: run every N hours (1-24)")
+    window: Literal["yesterday", "today", "yesterday_today", "last_7_days"] = "yesterday"
+    enabled: bool = True
+    webhook: str = Field("", description="When a run finishes, POST the results as JSON here (a client's API, n8n...)")
+    webhook_token: str = Field("", description="Sent as 'Authorization: Bearer <token>' and used to sign the body "
+                                               "(X-Collector-Signature: sha256=HMAC)")
+
+
+class ScheduleRef(BaseModel):
+    id: str
+
+
 class SignIn(BaseModel):
     key: str
 
@@ -180,6 +201,7 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
     keys = {"admin": api_keys} if isinstance(api_keys, str) else dict(api_keys or {})
     nets = [ipaddress.ip_network(n, strict=False) for n in (allowed_ips or [])]
     audit = Audit(audit_path)
+    app_state = {"audit": audit}
     failures = _Failures()
     app = FastAPI(title="Post Link Collector API", version="1.1", docs_url=None, redoc_url=None, openapi_url=None,
                   description="Collect post links (and optionally caption & engagement) from Instagram, X, TikTok, "
@@ -425,6 +447,41 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
             log(request, "worked on a verification", site=CAPTCHA.label)
         return answer(err)
 
+    # ---------- schedules ----------
+    from . import schedule as sched_mod
+
+    def sched_call(fn):
+        try:
+            return fn()
+        except sched_mod.ScheduleError as e:
+            return {"ok": False, "error": str(e)}
+
+    @app.get("/api/schedules", tags=["schedules"], dependencies=auth, summary="Searches that run by themselves")
+    def schedules():
+        return {"schedules": sched_mod.get().list(), "now": int(time.time())}
+
+    @app.post("/api/schedules/save", tags=["schedules"], dependencies=auth, summary="Create or change a schedule")
+    def schedule_save(body: ScheduleIn, request: Request):
+        def go():
+            s = sched_mod.get().save(body.model_dump())
+            log(request, "changed a schedule" if body.id else "created a schedule", name=s["name"])
+            return {"ok": True, "schedule": s}
+        return sched_call(go)
+
+    @app.post("/api/schedules/delete", tags=["schedules"], dependencies=auth)
+    def schedule_delete(body: ScheduleRef, request: Request):
+        ok = sched_mod.get().delete(body.id)
+        if ok:
+            log(request, "deleted a schedule", id=body.id)
+        return {"ok": ok, "error": None if ok else "That schedule no longer exists."}
+
+    @app.post("/api/schedules/run", tags=["schedules"], dependencies=auth, summary="Run a schedule now")
+    def schedule_run(body: ScheduleRef, request: Request):
+        err = sched_mod.get().run_now(body.id)
+        if not err:
+            log(request, "ran a schedule now", id=body.id)
+        return answer(err)
+
     # ---------- logins ----------
     @app.get("/api/logins", tags=["logins"], dependencies=auth, summary="Which platforms the server is signed in to")
     def logins(request: Request):
@@ -496,6 +553,7 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
         log(request, "deleted a list", list=body.id)
         return list_change(lambda: {"ok": store.delete_list(body.id)})
 
+    app.state.audit = app_state["audit"]
     return app
 
 

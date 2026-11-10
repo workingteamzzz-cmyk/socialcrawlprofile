@@ -133,6 +133,12 @@ class Job:
             finally:
                 self.running = False
                 self.current = ""
+                if kind in MODES:
+                    try:                                  # RESULTS_WEBHOOK_URL: every finished search goes to that server
+                        from .delivery import deliver_finished_job
+                        deliver_finished_job(self, kind)
+                    except Exception:  # noqa: BLE001
+                        pass
         self.thread = threading.Thread(target=wrap, daemon=True)
         self.thread.start()
         return None

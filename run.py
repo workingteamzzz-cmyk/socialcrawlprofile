@@ -45,6 +45,11 @@ def main():
               f"The app is probably already running in another window — open {url} in your browser, "
               "or close the other window and start again.")
         return
+    try:
+        from crawler import schedule
+        schedule.get().start()                # scheduled searches run while this window is open
+    except Exception as e:  # noqa: BLE001
+        print(f"Note: schedules are not running ({e}).")
     print(f"Account lists and results: {os.path.dirname(paths.LISTS_DIR)}")
     print(f"App running at {url}  (keep this window open; close it to stop)")
     if "--no-browser" not in sys.argv:

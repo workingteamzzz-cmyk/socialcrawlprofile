@@ -224,6 +224,50 @@ the site's current layout. Check it first — it can show the name of the accoun
   back-to-back runs.
 - Collab posts created by other accounts, stories and deleted posts are not included.
 
+## Schedules (searches that run by themselves)
+
+Set a search up on the **News Search**, **Keyword Search** or **Collect** page as usual, then click
+**Schedule it (runs by itself)…** instead of Start. Choose how often (every day at a set time, or every 1–12 hours)
+and which period each run collects (yesterday, today so far, yesterday + today, or the 7 days before). The
+**Schedules** page lists them with the next run and the last result; *Run now*, *Pause* and *Delete* are there too.
+
+- Each run saves its own Excel file (Exports). One search runs at a time: a schedule that comes due while another
+  search runs starts right after it; runs missed while the app was off are done once when it is back.
+- On the server they run 24 hours a day; on a laptop only while the app is open.
+- `NOTIFY_WEBHOOK_URL` (Slack/Teams/n8n) gets a short message when a scheduled run finishes.
+
+## Sending the results to another server (a client's API, n8n, Make, Zapier)
+
+When a search finishes, its links can be **pushed** as JSON to another server:
+
+- per schedule: *When finished, send the results to* (+ optional *access token*) in the schedule window;
+- every finished search, scheduled or by hand: `RESULTS_WEBHOOK_URL` (+ `RESULTS_WEBHOOK_TOKEN`) in `.env`.
+
+```
+POST <their URL>
+Content-Type: application/json
+Authorization: Bearer <token>                       (when a token is set)
+X-Collector-Signature: sha256=<HMAC-SHA256 of the body, key = token>
+
+{"event": "results.ready", "id": "…unique…", "sent_at": "2026-11-10T07:00:41+0700", "source": "post-link-collector",
+ "kind": "news", "schedule": {"id": "…", "name": "News: tarif listrik"},
+ "period": {"start": "2026-11-09", "end": "2026-11-09", "tz": "WIB"},
+ "ok": true, "error": null, "count": 39, "file": "news_links_….xlsx", "download_path": "/download/news_links_….xlsx",
+ "links": [{"keyword": "tarif listrik", "url": "https://…", "title": "…", "media": "…", "published": "2026-11-09"}, …]}
+```
+
+`links` has the same columns as the Excel file (up to 5,000 rows; the file itself can be fetched from
+`download_path` with an `X-API-Key`). Any 2xx answer counts as delivered; otherwise it is retried after 30 s, 2 min
+and 10 min, and the Schedules page shows ✓ or ✗. The receiver can check the signature, e.g. in Python:
+
+```python
+import hashlib, hmac
+ok = hmac.compare_digest(request.headers["X-Collector-Signature"],
+                         "sha256=" + hmac.new(TOKEN.encode(), request.body, hashlib.sha256).hexdigest())
+```
+
+They can also **pull** whenever they like: `GET /api/results?mode=news` with their own key (see *Using the API*).
+
 ## Run as an API server (FastAPI, Docker)
 
 The same app can run on a VPS/cloud machine as an API (FastAPI) — always on, without your laptop: the same dashboard,
@@ -345,6 +389,7 @@ curl -H "X-API-Key: $KEY" "$URL/api/outputs"                # Excel files; downl
 | `GET /api/status`, `/api/results?mode=profiles\|keywords\|news`, `/api/outputs`, `/download/<file>` | Progress, results, files |
 | `GET /api/logins`, `POST /api/logins/cookies` | Signed-in status (and who you are); import cookies |
 | `GET /api/audit` | Who did what |
+| `GET /api/schedules`, `POST /api/schedules/save` / `delete` / `run` | Searches that run by themselves |
 | `GET /api/captcha/screenshot`, `POST /api/captcha` | The waiting verification's picture; click/type/key/scroll/skip |
 | `GET/POST /api/lists...`, `/api/accounts...` | Account lists |
 | `GET /api/health` | Up? (no key needed — for uptime monitors) |
@@ -368,6 +413,8 @@ All of them, with request examples, are in `/docs`.
 | `crawler/api.py`, `serve.py` | The FastAPI server (keys per person, audit log, `/docs`, cookie import) |
 | `crawler/retention.py` | Deletes old result files and page copies on a server |
 | `crawler/captcha.py` | Lets a person solve a verification from the dashboard when the browser runs on a server |
+| `crawler/schedule.py` | Searches that run by themselves (Schedules page) |
+| `crawler/delivery.py` | Sends finished results to another server as JSON (token, signature, retries) |
 | `crawler/cookies.py` | Reads exported cookies (Cookie-Editor JSON, storage state, cookies.txt) |
 | `Dockerfile`, `docker-compose.yml`, `Caddyfile`, `.env.example`, `requirements-server.txt` | Running it on a server (HTTPS, locked-down container) |
 | `install-server.sh` | One-command setup on a fresh Ubuntu VPS |

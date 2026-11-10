@@ -175,12 +175,18 @@ def _perform(page, act: dict):
 
 
 def _notify(label: str):
-    url = os.environ.get("CAPTCHA_WEBHOOK_URL", "").strip()
+    link = os.environ.get("PUBLIC_URL", "").strip()
+    notify(f"Post Link Collector: {label} is asking for a verification. Open {link or 'the dashboard'} to solve it.",
+           os.environ.get("CAPTCHA_WEBHOOK_URL", ""))
+
+
+def notify(text: str, url: str | None = None):
+    """POST {"text": ...} to a webhook (Slack/Teams incoming webhook, n8n/Make...) in the background.
+    Default: NOTIFY_WEBHOOK_URL, else CAPTCHA_WEBHOOK_URL. Nothing is sent when neither is set."""
+    url = (url or os.environ.get("NOTIFY_WEBHOOK_URL") or os.environ.get("CAPTCHA_WEBHOOK_URL") or "").strip()
     if not url:
         return
-    link = os.environ.get("PUBLIC_URL", "").strip()
-    body = json.dumps({"text": f"Post Link Collector: {label} is asking for a verification. "
-                               f"Open {link or 'the dashboard'} to solve it."}).encode()
+    body = json.dumps({"text": text}).encode()
 
     def send():
         try:

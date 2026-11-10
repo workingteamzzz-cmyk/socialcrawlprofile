@@ -13,6 +13,9 @@ Environment:
   CAPTCHA_WAIT_MINUTES how long a verification waits for a person before that search is skipped (default 10)
   CAPTCHA_WEBHOOK_URL  optional: gets {"text": ...} when a verification is waiting (Slack/Teams/n8n)
   PUBLIC_URL           the dashboard's address, used in that message
+  NOTIFY_WEBHOOK_URL   optional: gets {"text": ...} when a scheduled run finishes
+  RESULTS_WEBHOOK_URL  optional: every finished search's links are POSTed here as JSON (a client's server, n8n...)
+  RESULTS_WEBHOOK_TOKEN  optional: sent as "Authorization: Bearer ..." and used to sign the body
   HOST / PORT          default 0.0.0.0 / 8770
   COOKIE_SECURE        1 behind HTTPS (docker-compose sets it): sign-in cookie HTTPS-only, HSTS
   CRAWLER_HOME         folder for the browser profile, account lists, results and audit.log (Docker: /data)
@@ -73,6 +76,11 @@ def main():
     app = create_app(keys or None, secure_cookie=os.environ.get("COOKIE_SECURE", "") in ("1", "true", "yes"),
                      allowed_ips=allowed or None, audit_path=os.path.join(paths.APP_DATA, "audit.log"),
                      session_days=float(os.environ.get("SESSION_DAYS", "7") or 7))
+    from crawler import schedule
+    sched = schedule.get()
+    sched.audit = lambda who, action, **kw: app.state.audit.add(who, action, "", **kw)
+    sched.start()
+    print(f"Schedules: {len(sched.items)}")
     print(f"Data folder: {os.path.dirname(paths.LISTS_DIR)}  ·  server mode: {'on' if paths.SERVER_MODE else 'off'}")
     print(f"People with a key: {', '.join(sorted(keys)) or '-'}  ·  allowed addresses: {', '.join(allowed) or 'any'}")
     print(f"Results kept {days:g} days (0 = forever), page copies {debug_days:g} days")

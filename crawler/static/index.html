@@ -303,6 +303,7 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
       <button data-p="nwsearch"><svg class="i"><use href="#i-news"/></svg>News Search</button>
       <button data-p="nwlinks"><svg class="i"><use href="#i-link"/></svg>News Links<span class="count" id="navNews">0</span></button>
       <div class="sep">System</div>
+      <button data-p="schedules"><svg class="i"><use href="#i-cal"/></svg>Schedules<span class="count" id="navSch">0</span></button>
       <button data-p="exports"><svg class="i"><use href="#i-file"/></svg>Exports</button>
       <button data-p="log"><svg class="i"><use href="#i-term"/></svg>Activity Log</button>
     </nav>
@@ -347,6 +348,7 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
                 <div class="stat"><b id="sDays">0</b><small>days</small></div>
               </div>
               <button class="btn primary lg" id="btnStart"><svg class="i"><use href="#i-play"/></svg>Start collecting</button>
+              <button class="btn lg" id="btnSched" style="margin-top:8px" title="Run this search by itself, every day or every few hours"><svg class="i"><use href="#i-cal"/></svg>Schedule it (runs by itself)…</button>
               <button class="btn danger lg" id="btnStop" style="display:none"><svg class="i"><use href="#i-stop"/></svg>Stop (keeps what was collected)</button>
               <div class="alert" id="runMsg"></div>
               <div class="prog" id="prog">
@@ -464,6 +466,7 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
                 <div class="stat"><b id="kS3">0</b><small>searches</small></div>
               </div>
               <button class="btn primary lg" id="kBtnStart"><svg class="i"><use href="#i-search"/></svg>Start keyword search</button>
+              <button class="btn lg" id="kBtnSched" style="margin-top:8px" title="Run this search by itself, every day or every few hours"><svg class="i"><use href="#i-cal"/></svg>Schedule it (runs by itself)…</button>
               <button class="btn danger lg" id="kBtnStop" style="display:none"><svg class="i"><use href="#i-stop"/></svg>Stop (keeps what was collected)</button>
               <div class="alert" id="kMsg"></div>
               <div class="prog" id="kProg">
@@ -561,6 +564,7 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
                 <div class="stat"><b id="nS3">0</b><small>days</small></div>
               </div>
               <button class="btn primary lg" id="nBtnStart"><svg class="i"><use href="#i-news"/></svg>Start news search</button>
+              <button class="btn lg" id="nBtnSched" style="margin-top:8px" title="Run this search by itself, every day or every few hours"><svg class="i"><use href="#i-cal"/></svg>Schedule it (runs by itself)…</button>
               <button class="btn danger lg" id="nBtnStop" style="display:none"><svg class="i"><use href="#i-stop"/></svg>Stop (keeps what was collected)</button>
               <div class="alert" id="nMsg"></div>
               <div class="prog" id="nProg">
@@ -632,6 +636,13 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
         <div class="card-hd"><h3>Access log</h3><div class="tools"><small class="hint">Who did what on this server — newest first</small></div></div>
         <div class="card-bd" style="overflow-x:auto"><table class="tbl" id="auditTbl"><thead><tr><th>Time</th><th>Who</th><th>Action</th><th>Details</th><th>Address</th></tr></thead><tbody></tbody></table></div>
       </div>
+    </section>
+
+    <!-- SCHEDULES -->
+    <section class="page" id="p-schedules">
+      <div class="pagehead"><div><h1>Schedules</h1><p>Searches that run by themselves — e.g. news for yesterday, every morning. Set a search up on its page, then click <b>Schedule it</b>. Each run saves its own Excel file (Exports).</p></div></div>
+      <div class="card"><div class="card-bd" style="overflow-x:auto"><table class="tbl" id="schTbl"><thead><tr><th>Name</th><th>What</th><th>When</th><th>Next run</th><th>Last run</th><th></th></tr></thead><tbody></tbody></table></div></div>
+      <p class="hint" id="schHint" style="margin-top:12px"></p>
     </section>
 
     <!-- LOG -->
@@ -728,6 +739,33 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
     </div>
   </div>
 </div>
+<div class="modal" id="schModal" role="dialog" aria-modal="true" aria-labelledby="schTitle">
+  <div class="card" style="width:min(560px,100%)">
+    <div class="card-hd"><h3 id="schTitle">Schedule this search</h3><div class="tools"><button class="iconbtn" id="schClose" aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div></div>
+    <div class="card-bd">
+      <p class="hint" style="margin-top:0" id="schWhat"></p>
+      <div class="field"><label for="schName">Name</label><input id="schName" maxlength="80"></div>
+      <div class="field"><label for="schRepeat">How often</label>
+        <select id="schRepeat"><option value="daily">Every day at a set time</option><option value="hours">Every few hours</option></select></div>
+      <div class="field" id="schTimeF"><label for="schTime">Time (<span id="schTz">WIB</span>)</label><input id="schTime" type="time" value="07:00"></div>
+      <div class="field" id="schHoursF" style="display:none"><label for="schHours">Every</label>
+        <select id="schHours"><option value="1">1 hours</option><option value="2">2 hours</option><option value="3">3 hours</option><option value="4">4 hours</option><option value="6">6 hours</option><option value="8">8 hours</option><option value="12">12 hours</option></select></div>
+      <div class="field"><label for="schWindow">Period collected at each run</label>
+        <select id="schWindow"><option value="yesterday">Yesterday (best for a daily run)</option><option value="today">Today so far</option>
+          <option value="yesterday_today">Yesterday + today</option><option value="last_7_days">The 7 days before</option></select></div>
+      <div class="field"><label for="schHook">When finished, send the results to (optional)</label>
+        <input id="schHook" placeholder="https://… e.g. an n8n / Make / Zapier webhook URL">
+        <small class="hint">The links arrive as JSON — a client's server, or an automation (n8n/Make) that puts them in Google Sheets, email or Telegram/WhatsApp.</small></div>
+      <div class="field"><label for="schToken">Access token for that server (optional)</label>
+        <input id="schToken" type="password" autocomplete="off" placeholder="If the receiving server asks for one">
+        <small class="hint">Sent as “Authorization: Bearer …”, and used to sign each delivery so the receiver can check it came from here.</small></div>
+      <ul class="errs" id="schErrs"></ul>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+        <button class="btn" id="schCancel">Cancel</button><button class="btn primary" id="schSave">Save schedule</button>
+      </div>
+    </div>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -783,6 +821,7 @@ function go(p){
   document.querySelectorAll('.page').forEach(s => s.classList.toggle('on', s.id === 'p-' + p));
   ls.set('page', p); window.scrollTo(0, 0);
   if (p === 'exports'){ loadExports(); if (SERVER) loadAudit(); }
+  if (p === 'schedules') loadSchedules();
 }
 document.querySelectorAll('#nav button').forEach(b => b.onclick = () => go(b.dataset.p));
 document.addEventListener('click', e => { const g = e.target.closest('[data-go]'); if (g){ e.preventDefault(); go(g.dataset.go); } });
@@ -1344,6 +1383,76 @@ $('capView').onclick = () => { capFocus = !capFocus; capViewLabel(); capRefresh(
 $('capClose').onclick = () => { capDismissed = cap.since; capModal.classList.remove('show'); clearTimeout(capTimer);
   toast('The search keeps waiting — the panel opens again on the next verification'); };
 
+/* ---------- schedules ---------- */
+const schModal = $('schModal');
+let schDraft = null;
+const closeSch = () => schModal.classList.remove('show');
+$('schClose').onclick = closeSch; $('schCancel').onclick = closeSch;
+schModal.addEventListener('click', e => { if (e.target === schModal) closeSch(); });
+$('schRepeat').onchange = () => { const d = $('schRepeat').value === 'daily';
+  $('schTimeF').style.display = d ? '' : 'none'; $('schHoursF').style.display = d ? 'none' : ''; };
+function openSch(kind, payload, what, name){
+  schDraft = {kind, payload};
+  $('schWhat').textContent = what; $('schName').value = name; $('schTz').textContent = payload.tz || 'WIB';
+  $('schErrs').innerHTML = ''; $('schRepeat').value = 'daily'; $('schRepeat').onchange();
+  $('schWindow').value = 'yesterday'; $('schHook').value = ''; $('schToken').value = ''; schModal.classList.add('show');
+}
+$('schSave').onclick = async () => {
+  const r = await api('/api/schedules/save', {...schDraft, name: $('schName').value.trim(), repeat: $('schRepeat').value,
+    time: $('schTime').value || '07:00', hours: +$('schHours').value, window: $('schWindow').value, enabled: true,
+    webhook: $('schHook').value.trim(), webhook_token: $('schToken').value.trim()});
+  if (!r.ok){ $('schErrs').innerHTML = `<li>${esc(r.error || 'Could not save')}</li>`; return; }
+  closeSch(); toast('Schedule saved — it runs by itself'); go('schedules');
+};
+$('btnSched').onclick = () => {
+  const ids = runnable().map(a => a.id);
+  if (!ids.length){ alertMsg('No accounts selected on the active platforms.'); return; }
+  openSch('profiles', {list: listId, ids, tz: P1.tz, platforms: [...platOn], detail: radioValue('pDetail')},
+    `Post links of ${ids.length} accounts.`, `Accounts (${ids.length})`);
+};
+$('kBtnSched').onclick = () => {
+  if ($('kwInput').value.trim()){ kwAdd($('kwInput').value); $('kwInput').value = ''; }
+  if (!keywords.length){ kwAlert('Add at least one keyword.'); return; }
+  if (!kwPlatOn.size){ kwAlert('Choose at least one platform.'); return; }
+  const plats = KW_PLATS.map(p => p.k).filter(k => kwPlatOn.has(k));
+  openSch('keywords', {keywords: [...keywords], tz: P2.tz, platforms: plats, options: kwOptions()},
+    `Keyword search: ${keywords.join(', ')} — on ${plats.length} platforms, with the options set on the page.`, 'Keywords: ' + keywords.join(', ').slice(0, 50));
+};
+$('nBtnSched').onclick = () => {
+  NW.flush();
+  if (!NW.items.length){ nwAlert('Add at least one keyword.'); return; }
+  if (!nwOptions().sources.length){ nwAlert('Turn on at least one source.'); return; }
+  openSch('news', {keywords: [...NW.items], tz: P3.tz, options: nwOptions()},
+    `News search: ${NW.items.join(', ')} — with the sources and options set on the page.`, 'News: ' + NW.items.join(', ').slice(0, 50));
+};
+const KIND_LABEL = {news: 'News', keywords: 'Keyword search', profiles: 'Accounts'};
+const when = t => t ? new Date(t * 1000).toLocaleString('en-GB', {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'}) : '—';
+let schList = [];
+async function loadSchedules(){
+  const d = await api('/api/schedules');
+  schList = d.schedules || [];
+  $('navSch').textContent = schList.length;
+  $('schTbl').querySelector('tbody').innerHTML = schList.map((s, i) => {
+    const p = s.payload || {}, what = s.kind === 'profiles' ? `${(p.ids || []).length} accounts` : (p.keywords || []).join(', ');
+    return `<tr><td><b>${esc(s.name)}</b>${s.enabled ? '' : ' <span class="hint">(paused)</span>'}</td>
+      <td>${esc(KIND_LABEL[s.kind])}<br><small class="hint">${esc(what)}</small></td><td>${esc(s.describe)}${s.webhook ? '<br><small class="hint">→ results sent to ' + esc(new URL(s.webhook).host) + '</small>' : ''}</td>
+      <td>${s.enabled ? when(s.next_run) : '—'}</td>
+      <td>${s.running ? '<b>running now</b>' : when(s.last_run)}<br><small class="hint">${esc(s.last_result || '')}</small></td>
+      <td style="white-space:nowrap"><button class="btn sm" data-run="${i}">Run now</button>
+        <button class="btn sm" data-tog="${i}">${s.enabled ? 'Pause' : 'Resume'}</button>
+        <button class="btn sm ghost" data-del="${i}" style="color:var(--bad)">Delete</button></td></tr>`;
+  }).join('') || '<tr><td colspan="6" class="hint">No schedules yet. Set up a search on the News Search, Keyword Search or Collect page and click “Schedule it”.</td></tr>';
+  $('schHint').textContent = SERVER ? 'The server runs these by itself, 24 hours a day. A schedule that comes due while another search is running starts right after it.'
+    : 'These run while this app is open on this computer. For runs while the computer is off, use the server version.';
+  const tb = $('schTbl');
+  tb.querySelectorAll('[data-run]').forEach(b => b.onclick = async () => { const r = await api('/api/schedules/run', {id: schList[+b.dataset.run].id});
+    if (r.error) toast(r.error); else { toast('Started'); started(); loadSchedules(); } });
+  tb.querySelectorAll('[data-tog]').forEach(b => b.onclick = async () => { const s = schList[+b.dataset.tog];
+    const r = await api('/api/schedules/save', {...s, enabled: !s.enabled}); if (r.error) toast(r.error); loadSchedules(); });
+  tb.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => { const s = schList[+b.dataset.del];
+    if (!confirm(`Delete the schedule “${s.name}”?`)) return; await api('/api/schedules/delete', {id: s.id}); loadSchedules(); });
+}
+
 /* ---------- sign-in status ---------- */
 async function loadLogins(){
   const d = await api('/api/logins');
@@ -1415,7 +1524,7 @@ async function poll(){
     if (!running && s.error && s.job_id !== shownErrJob){           // also catches jobs that failed within a second
       shownErrJob = s.job_id; (isKw ? kwAlert : isNews ? nwAlert : alertMsg)(s.error); if (s.kind === 'login') toast(s.error);
     }
-    if (was && !running){ refreshResults(); refreshKw(); refreshNews(); loadExports(); loadLogins();
+    if (was && !running){ refreshResults(); refreshKw(); refreshNews(); loadExports(); loadLogins(); loadSchedules();
       if (!s.error) toast(s.kind === 'login' ? 'Login sessions saved' : isKw ? 'Keyword search finished — results saved'
         : isNews ? 'News search finished — results saved' : 'Collection finished — results saved'); }
   } catch(e){}
@@ -1425,7 +1534,7 @@ async function poll(){
 }
 
 go(document.getElementById('p-' + ls.get('page', 'collect')) ? ls.get('page', 'collect') : 'collect');
-loadLists().then(loadAccounts); loadLogins(); renderResults(); kwRender(); renderKw(); nwRender(); renderNews(); poll();
+loadLists().then(loadAccounts); loadLogins(); loadSchedules(); renderResults(); kwRender(); renderKw(); nwRender(); renderNews(); poll();
 </script>
 </body>
 </html>

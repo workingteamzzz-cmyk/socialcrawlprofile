@@ -88,6 +88,11 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/old-profiles":
             from .paths import find_old_profiles
             return self._json({"profiles": find_old_profiles()[:10]})
+        if u.path == "/api/schedules":
+            import time as _time
+
+            from .schedule import get
+            return self._json({"schedules": get().list(), "now": int(_time.time())})
         if u.path == "/api/lists":
             return self._json({"lists": store.lists()})
         if u.path == "/api/accounts":
@@ -151,6 +156,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": False, "error": "Wait until the current job has finished (or Stop it) and try again."})
             from .paths import import_profile
             err = import_profile(data.get("path", ""), JOB.log) or None
+        elif u.path in ("/api/schedules/save", "/api/schedules/delete", "/api/schedules/run"):
+            from .schedule import ScheduleError, get
+            try:
+                if u.path.endswith("/save"):
+                    return self._json({"ok": True, "schedule": get().save(data)})
+                if u.path.endswith("/delete"):
+                    ok = get().delete(data.get("id", ""))
+                    return self._json({"ok": ok, "error": None if ok else "That schedule no longer exists."})
+                err = get().run_now(data.get("id", ""))
+            except ScheduleError as e:
+                return self._json({"ok": False, "error": str(e)})
         elif u.path == "/api/logins/cookies":
             c = data.get("cookies", "")
             return self._json(JOB.import_cookies(c if isinstance(c, str) else json.dumps(c)))

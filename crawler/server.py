@@ -20,7 +20,7 @@ def list_outputs() -> list[dict]:
         for name in os.listdir(OUTPUT_DIR):
             if name.endswith(".xlsx") and (name.startswith(("post_links_", "keyword_links_", "news_links_"))
                                            or re.match(r"\d{8}_(Online|Medsos)_", name)) \
-                    or re.search(r"_decoded\.(xlsx|csv|txt)$", name):
+                    or re.search(r"_decoded\.(xlsx|csv|txt)$", name) or re.match(r"Data .+\.xlsx$", name):
                 st = os.stat(os.path.join(OUTPUT_DIR, name))
                 files.append({"name": name, "size": st.st_size, "mtime": int(st.st_mtime)})
     files.sort(key=lambda f: f["mtime"], reverse=True)
@@ -96,6 +96,17 @@ class Handler(BaseHTTPRequestHandler):
 
             from .schedule import get
             return self._json({"schedules": get().list(), "now": int(_time.time())})
+        if u.path == "/api/apiscraper/info":
+            from .apiscraper import runner, settings
+            pub = settings.public()
+            return self._json({"ready": pub["api_key_set"], "twitter": pub["twitter_set"],
+                               "default_budget": pub["default_budget"], "platforms": runner.platforms()})
+        if u.path == "/api/apiscraper/settings":
+            from .apiscraper import settings
+            return self._json(settings.public())
+        if u.path == "/api/apiscraper/balance":
+            from .apiscraper import runner
+            return self._json(runner.balance())
         if u.path == "/api/lists":
             return self._json({"lists": store.lists()})
         if u.path == "/api/accounts":
@@ -171,6 +182,14 @@ class Handler(BaseHTTPRequestHandler):
                 err = get().run_now(data.get("id", ""))
             except ScheduleError as e:
                 return self._json({"ok": False, "error": str(e)})
+        elif u.path == "/api/apiscraper/start":
+            err = JOB.start_apiscrape(data)
+        elif u.path == "/api/apiscraper/settings":
+            from .apiscraper import settings
+            return self._json({"ok": True, **settings.save(
+                data.get("api_key") or None, data.get("twitter_api_key") or None,
+                int(data["default_budget"]) if str(data.get("default_budget", "")).strip() else None,
+                bool(data.get("clear_api_key")), bool(data.get("clear_twitter")))})
         elif u.path == "/api/tools/decode":
             import base64
             try:

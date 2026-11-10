@@ -70,10 +70,11 @@ class Job:
     # ---------- shared ----------
     def log(self, msg: str):
         line = f"[{datetime.now().strftime('%H:%M:%S')}] {msg}"
-        try:
-            print(line, flush=True)
-        except Exception:  # noqa: BLE001  (e.g. a console that cannot show emoji)
-            pass
+        if not self.__dict__.get("_quiet"):          # (the API scraper's own print()s already come through here)
+            try:
+                print(line, flush=True)
+            except Exception:  # noqa: BLE001  (e.g. a console that cannot show emoji)
+                pass
         with self.lock:
             self.logs.append(line)
             self.log_total += 1
@@ -805,6 +806,36 @@ class Job:
         self.decoded_file = os.path.basename(out)
         self.log(f"✅ {ok} link(s) decoded" + (f", {failed} could not be (left as they were — see the Decode Log)"
                                               if failed else "") + f" → {os.path.basename(out)} (Exports)")
+
+    # ---------- the team's API scraper (crawler/apiscraper) ----------
+    def start_apiscrape(self, cfg: dict) -> str | None:
+        from .apiscraper import settings
+        if not settings.load().get("api_key"):
+            return "No API key set yet — an admin sets it under API settings."
+        if not str(cfg.get("queries", "")).strip() and not str(cfg.get("import", "")).strip():
+            return "Type at least one keyword, post link or profile link."
+        return self._start("apiscrape", self._apiscrape, dict(cfg))
+
+    def _apiscrape(self, cfg: dict):
+        from .apiscraper import runner
+        from .paths import APP_DATA
+
+        def progress(done, total, label):
+            if total:
+                self.total, self.done = total, min(done or 0, total)
+            if label:
+                self.current = label[:160]
+        self._quiet = True
+        self.log(f"API scraper — {cfg.get('mode', 'keyword')} · {cfg.get('platform') or ''}".rstrip(" ·"))
+        try:
+            files = runner.run(cfg, self.log, progress, self.stop_flag, OUTPUT_DIR, APP_DATA)
+        finally:
+            self._quiet = False
+        self.api_files = files
+        if files:
+            self.log("✅ Files in Exports: " + ", ".join(files))
+        elif self.stop_flag.is_set():
+            self.log("⏹ Stopped before any file was written.")
 
     def _second_pass(self, seen: dict, b: dict):
         """Links still on news.google.com get a second try from the server itself (the team's decoder method),

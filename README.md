@@ -249,6 +249,25 @@ with pauses and retries when Google says "too many requests"). For older files: 
 file** — choose an `.xlsx`, `.csv` or `.txt`; every `news.google.com/…/articles/…` link is replaced, other cells stay
 as they are, and a `Decode Log` sheet lists each link. The result appears in Exports as `…_decoded.xlsx`.
 
+## API Scraper (the team's Social Scraper, via the scraping API)
+
+A separate section of the dashboard (**API scraper → API Scraper**, operators and admins) runs the team's Colab
+*Social Scraper* (v58) on the server: TikTok, YouTube, Threads, Instagram, Facebook and Twitter through
+ScrapeCreators (and the optional Twitter API), with the same options as the Colab form — keyword / BY LINK /
+BY PROFILE / MIXED, time filter, credit cap, language and negative words, comments, followers, retweets, import.
+The output is the team's file, unchanged: `Data <Platform>_<date time>.xlsx` (Sheet1 in the Sample_Crawling layout
+with User ID, Username, Follower, User Image, **Sentiment and Emotion**, plus *Rekap* and *Codebook*) and a CSV, in Exports.
+
+- **API settings** (admins only; hidden for others) holds the API keys. They are stored on the server only
+  (`api_scraper.json`, mode 600) and shown back as the last 4 characters. *Check credit balance* costs nothing.
+- Sentiment/Emotion use the team's lexicon analysis (the AI models need a GPU and are not loaded on the server).
+  The same analysis also fills **Sentiment/Emotion** in the normal Medsos layout and **SENTIMENT** in the Online layout.
+- Stop ends the run like the credit cap does: what was collected is still saved.
+- Updating to a new version of the team's script: `python tools/port_scraper.py social_scraper_advanced_vNN_en.py`
+  regenerates `crawler/apiscraper/engine.py` (the tool stops if a place it changes is different in the new version).
+- API: `GET /api/apiscraper/info`, `POST /api/apiscraper/start`, `GET /api/apiscraper/balance` (operator);
+  `GET/POST /api/apiscraper/settings` (admin).
+
 ## Schedules (searches that run by themselves)
 
 Set a search up on the **News Search**, **Keyword Search** or **Collect** page as usual, then click

@@ -43,7 +43,8 @@ def test_online_layout(tmp_path):
                       "https://www.mediasulsel.com/img.jpg", "mediasulsel.com"]
     assert r2[8] == "Ambang Ardi" and r2[9].startswith("Pemadaman listrik yang kerap")
     assert r2[10] == "<p>Pemadaman listrik yang kerap terjadi di Kabupaten.</p><p>Warga <kecewa> & mengadu.</p>"
-    assert r2[6] is None and r2[7] is None and r2[11] is None             # INFLUENCER / PERSON / SENTIMENT: no AI
+    assert r2[6] is None and r2[7] is None                                # INFLUENCER / PERSON: not detected
+    assert r2[11] == "negative"                                           # SENTIMENT: the team's lexicon
     r3 = [v.value for v in ws[3]]
     assert r3[:2] == ["09-Nov-2026", "01:04:33"] and r3[5] == "mataram.antaranews.com"
     r4 = [v.value for v in ws[4]]
@@ -87,7 +88,9 @@ def test_medsos_layout(tmp_path):
     assert (val(5, "Post ID"), val(5, "Follower")) == ("7705797219735129365", 5100)
     assert (val(6, "Post ID"), val(6, "Username"), val(6, "Date"), val(6, "Time")) == ("ZpirBuN6RJM", "plnchannel", "2026-11-08", "19:30:00")
     assert val(7, "Sub Type") == "video" and val(8, "Sub Type") == "video" and val(8, "Post ID") == "1144895638031825"
-    for h in ("Sentiment", "Emotion", "Gender", "Age Category", "Religion", "Ethnic", "Phsychography", "Parent ID"):
+    assert val(2, "Sentiment") == "negative" and val(2, "Emotion")     # the team's lexicon analysis
+    assert val(5, "Sentiment") is None and val(5, "Emotion") is None    # no text -> left empty
+    for h in ("Gender", "Age Category", "Religion", "Ethnic", "Phsychography", "Parent ID"):
         assert val(2, h) is None
 
 

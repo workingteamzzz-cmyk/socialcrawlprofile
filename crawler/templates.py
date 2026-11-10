@@ -144,7 +144,19 @@ def online_row(r: dict, tz) -> list:
     summary = oc.clean_summary(r.get("description") or (re.sub(r"\s+", " ", text)[:400] if text else ""), title)
     return [date_s, time_s, title, url, (r.get("image") or "").strip(), oc.media_from_url(url),
             oc.format_names(r.get("influencer")), oc.format_names(r.get("person")), (r.get("author") or "").strip(),
-            summary, oc.content_html(text, title, r.get("author") or ""), (r.get("sentiment") or "").lower().strip()]
+            summary, oc.content_html(text, title, r.get("author") or ""),
+            (r.get("sentiment") or analyze(f"{title}. {summary}")[0]).lower().strip()]
+
+
+def analyze(text: str) -> tuple[str, str]:
+    """(sentiment, emotion) with the team's lexicon analysis (the API scraper's engine); ("", "") if unavailable."""
+    if not (text or "").strip():
+        return "", ""
+    try:
+        from .apiscraper.engine import analyze_text
+    except Exception:                                    # pandas/requests missing on an old install
+        return "", ""
+    return analyze_text(text)
 
 
 def medsos_row(i: int, r: dict, tz) -> list:
@@ -157,8 +169,9 @@ def medsos_row(i: int, r: dict, tz) -> list:
         date_s, time_s = (dt.strftime("%Y-%m-%d"), dt.strftime("%H:%M:%S")) if dt else ("", "")
     uid = str(r.get("user_id") or "")
     text = r.get("caption") or r.get("text") or ""
-    return [i, "", r.get("author") or r.get("handle") or "", uid, _num(r.get("followers")), text, date_s, time_s,
-            _num(r.get("likes")), _num(r.get("comments")), _num(r.get("shares")), r.get("url") or "", "",
+    sent, emo = (r.get("sentiment") or "", r.get("emotion") or "") if r.get("sentiment") else analyze(text)
+    return [i, sent, r.get("author") or r.get("handle") or "", uid, _num(r.get("followers")), text, date_s, time_s,
+            _num(r.get("likes")), _num(r.get("comments")), _num(r.get("shares")), r.get("url") or "", emo,
             r.get("user_image") or "", PLATFORM_NAME.get(plat, plat), sub_type(plat, r.get("url"), r.get("sub_type") or ""),
             _num(r.get("views")), "", "", "", "", "", "", "", post_id(plat, r.get("url"), uid), uid]
 

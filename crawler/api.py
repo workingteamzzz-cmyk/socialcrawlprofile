@@ -195,6 +195,45 @@ class DecodeFile(BaseModel):
     data: str = Field(..., description="The file, base64 (a data: URL is fine)")
 
 
+class ApiScrape(BaseModel):
+    """The team's API scraper — the same options as its Colab form."""
+    mode: Literal["keyword", "link", "profile", "mixed"] = "keyword"
+    platform: str = Field("ALL platforms", description="keyword mode: 'ALL platforms' or one from GET /api/apiscraper/info")
+    queries: str = Field("", description="keywords (per line or comma), or post / profile links (one per line)")
+    limit: int = Field(30, description="Max/query")
+    budget: int = Field(200, description="Credit cap per run (non-Twitter); 0 = unlimited")
+    time_from: str = Field("", description="'YYYY-MM-DD HH:MM' (WIB), empty = no time filter")
+    time_to: str = ""
+    strict: bool = True
+    lang: Literal["", "id", "en"] = ""
+    neg_use: bool = False
+    neg_kw: str = ""
+    dedup: bool = True
+    coverage: bool = False
+    delta: bool = False
+    comments: bool = False
+    cmt_top: int = 20
+    cmt_max: int = 30
+    cmt_kw: bool = False
+    cmt_kw_txt: str = ""
+    foll: bool = False
+    fillid: bool = True
+    twrt: bool = True
+    twrt_cap: int = 0
+    twrt_tot: int = 0
+    twrt_link: bool = False
+    import_: str = Field("", alias="import", description="links / link<TAB>text you already have (0 credits)")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class ApiKeys(BaseModel):
+    api_key: str = ""
+    twitter_api_key: str = ""
+    default_budget: int | None = None
+    clear_api_key: bool = False
+    clear_twitter: bool = False
+
+
 class SignIn(BaseModel):
     username: str = ""
     password: str = ""
@@ -586,6 +625,43 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
                 return answer("Wait until the current job has finished (or Stop it) and try again.")
             from .paths import import_profile as do_import
             return answer(do_import(body.get("path", ""), JOB.log) or None)
+
+    # ---------- the team's API scraper ----------
+    @app.get("/api/apiscraper/info", tags=["api scraper"], dependencies=op,
+             summary="Whether the API scraper is ready, and its platforms")
+    def apiscraper_info():
+        from .apiscraper import runner, settings as api_settings
+        pub = api_settings.public()
+        return {"ready": pub["api_key_set"], "twitter": pub["twitter_set"], "default_budget": pub["default_budget"],
+                "platforms": runner.platforms()}
+
+    @app.get("/api/apiscraper/balance", tags=["api scraper"], dependencies=op, summary="Credit balance of the API key")
+    def apiscraper_balance():
+        from .apiscraper import runner
+        return runner.balance()
+
+    @app.post("/api/apiscraper/start", tags=["api scraper"], dependencies=op, summary="Run the API scraper")
+    def apiscraper_start(body: ApiScrape, request: Request):
+        cfg = body.model_dump(by_alias=True)
+        err = JOB.start_apiscrape(cfg)
+        log(request, "started the API scraper" if not err else "API scraper refused", mode=body.mode,
+            platform=body.platform, budget=body.budget)
+        return answer(err)
+
+    @app.get("/api/apiscraper/settings", tags=["api scraper"], dependencies=admin_only,
+             summary="API keys (only whether they are set and their last 4 characters)")
+    def apiscraper_settings():
+        from .apiscraper import settings as api_settings
+        return api_settings.public()
+
+    @app.post("/api/apiscraper/settings", tags=["api scraper"], dependencies=admin_only, summary="Set the API keys")
+    def apiscraper_settings_save(body: ApiKeys, request: Request):
+        from .apiscraper import settings as api_settings
+        pub = api_settings.save(body.api_key or None, body.twitter_api_key or None, body.default_budget,
+                                body.clear_api_key, body.clear_twitter)
+        log(request, "changed the API scraper keys", api_key=bool(body.api_key), twitter=bool(body.twitter_api_key),
+            cleared=[k for k, v in (("api", body.clear_api_key), ("twitter", body.clear_twitter)) if v])
+        return {"ok": True, **pub}
 
     # ---------- users (sign-in accounts and their rights) ----------
     def user_call(fn):

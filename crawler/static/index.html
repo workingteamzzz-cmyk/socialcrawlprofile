@@ -306,6 +306,9 @@ body:not([data-role="admin"]) .need-admin{display:none!important}
       <div class="sep">News</div>
       <button data-p="nwsearch"><svg class="i"><use href="#i-news"/></svg>News Search</button>
       <button data-p="nwlinks"><svg class="i"><use href="#i-link"/></svg>News Links<span class="count" id="navNews">0</span></button>
+      <div class="sep need-op">API scraper</div>
+      <button data-p="apiscrape" class="need-op"><svg class="i"><use href="#i-pulse"/></svg>API Scraper</button>
+      <button data-p="apikeys" class="need-admin"><svg class="i"><use href="#i-login"/></svg>API settings</button>
       <div class="sep">System</div>
       <button data-p="schedules"><svg class="i"><use href="#i-cal"/></svg>Schedules<span class="count" id="navSch">0</span></button>
       <button data-p="exports"><svg class="i"><use href="#i-file"/></svg>Exports</button>
@@ -662,6 +665,103 @@ body:not([data-role="admin"]) .need-admin{display:none!important}
       </div>
     </section>
 
+
+    <!-- API SCRAPER (the team's Social Scraper, via ScrapeCreators / Twitter API) -->
+    <section class="page" id="p-apiscrape">
+      <div class="pagehead"><div><h1>API Scraper</h1><p>The team's Social Scraper (v58): posts from TikTok, YouTube, Threads, Instagram, Facebook and Twitter through the scraping API — complete with User ID, Username, Follower, User Image, engagement, and <b>Sentiment &amp; Emotion</b>. Uses API credits. Output: the team's Excel (Sheet1 + Rekap + Codebook) in Exports.</p></div></div>
+      <div class="alert" id="apNotReady"></div>
+      <div class="collect">
+        <div style="display:flex;flex-direction:column;gap:16px">
+          <div class="card"><div class="card-hd"><h3>What to scrape</h3></div><div class="card-bd">
+            <div class="field"><label for="apMode">Mode</label>
+              <select id="apMode"><option value="keyword">Keyword search</option><option value="link">BY LINK — paste post links</option>
+                <option value="profile">BY PROFILE — paste profile links</option><option value="mixed">MIXED — keywords + post links + profile links</option></select></div>
+            <div class="field" id="apPlatF" style="margin-top:10px"><label for="apPlat">Platform</label><select id="apPlat"></select></div>
+            <div class="field" style="margin-top:10px"><label for="apQ">Keywords / links</label>
+              <textarea id="apQ" rows="5" placeholder="keywords or #hashtags — one per line or comma separated; in BY LINK / BY PROFILE / MIXED paste the links (one per line)"></textarea></div>
+          </div></div>
+          <div class="card"><div class="card-hd"><h3>Time filter (WIB)</h3><div class="tools"><label class="switch"><input type="checkbox" id="apTf"><span></span></label></div></div><div class="card-bd">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+              <button class="btn sm" data-aprange="1">Last 24 hours</button><button class="btn sm" data-aprange="3">Last 3 days</button><button class="btn sm" data-aprange="7">Last 7 days</button></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div class="field"><label for="apFrom">From</label><input type="datetime-local" id="apFrom"></div>
+              <div class="field"><label for="apTo">To</label><input type="datetime-local" id="apTo"></div></div>
+            <small class="hint">Off = no time limit. Twitter and Threads are filtered at the source; other platforms are fetched and then filtered (they still cost credits).</small>
+          </div></div>
+          <div class="card"><div class="card-hd"><h3>Run</h3><div class="tools"><button class="btn sm" id="apBal">Check credit balance</button></div></div><div class="card-bd">
+            <div class="hint" id="apBalOut" style="margin-bottom:10px"></div>
+            <button class="btn primary lg need-op" id="apStart"><svg class="i"><use href="#i-play"/></svg>Start API scraper</button>
+            <button class="btn danger lg need-op" id="apStop" style="display:none"><svg class="i"><use href="#i-stop"/></svg>Stop (keeps what was collected)</button>
+            <div class="alert" id="apMsg"></div>
+            <small class="hint">Progress and the cost estimate show in the Activity Log; the file appears in Exports as <code>Data …xlsx</code>.</small>
+          </div></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:16px">
+          <div class="card"><div class="card-hd"><h3>Options</h3></div><div class="card-bd">
+              <div class="opt-row"><div class="t"><b>Max/query</b><small>Results per keyword per platform (also per profile)</small></div>
+                <input type="number" id="apLimit" value="30" min="0" style="width:110px"></div>
+              <div class="opt-row"><div class="t"><b>Credit cap per run</b><small>Non-Twitter requests; 0 = unlimited. The run stops there and keeps what it has</small></div>
+                <input type="number" id="apBudget" value="200" min="0" style="width:110px"></div>
+              <div class="opt-row"><div class="t"><b>Strict keyword match</b><small>Whole phrase only</small></div>
+                <label class="switch"><input type="checkbox" id="apStrict" checked><span></span></label></div>
+              <div class="opt-row"><div class="t"><b>Language filter</b><small>All platforms</small></div>
+                <select id="apLang"><option value="">Any language</option><option value="id">Indonesian only</option><option value="en">English only</option></select></div>
+              <div class="opt-row"><div class="t"><b>Negative keywords</b><small>Drop posts containing these words</small></div>
+                <label class="switch"><input type="checkbox" id="apNegUse"><span></span></label></div>
+              <div class="opt-row"><div class="t"><small>Words, comma separated</small></div><input type="text" id="apNeg" placeholder="word, word"></div>
+              <div class="opt-row"><div class="t"><b>Merge duplicate links</b><small>One row per unique link</small></div>
+                <label class="switch"><input type="checkbox" id="apDedup" checked><span></span></label></div>
+              <div class="opt-row"><div class="t"><b>Max coverage / anti-missed-clip</b><small>More search tasks — more credits</small></div>
+                <label class="switch"><input type="checkbox" id="apCov"><span></span></label></div>
+              <div class="opt-row"><div class="t"><b>Only NEW rows</b><small>Skip results already collected in earlier runs</small></div>
+                <label class="switch"><input type="checkbox" id="apDelta"><span></span></label></div>
+              <div class="opt-row"><div class="t"><b>Require User ID &amp; User Image</b><small>Filled from the profile when missing — extra credits</small></div>
+                <label class="switch"><input type="checkbox" id="apFill" checked><span></span></label></div>
+              <div class="opt-row"><div class="t"><b>Fill followers via profile</b><small>Extra credits</small></div>
+                <label class="switch"><input type="checkbox" id="apFoll"><span></span></label></div>
+            </div></div>
+          <div class="card"><div class="card-hd"><h3>Comments</h3><div class="tools"><label class="switch"><input type="checkbox" id="apCmt"><span></span></label></div></div><div class="card-bd">
+              <div class="opt-row"><div class="t"><b>Top-N posts</b><small>Comments of the N most engaged posts (0 = all)</small></div>
+                <input type="number" id="apCmtTop" value="20" min="0" style="width:110px"></div>
+              <div class="opt-row"><div class="t"><b>Max comments per post</b><small>0 = all (expensive)</small></div>
+                <input type="number" id="apCmtMax" value="30" min="0" style="width:110px"></div>
+              <div class="opt-row"><div class="t"><b>Only comments containing keywords</b><small>Saves space</small></div>
+                <label class="switch"><input type="checkbox" id="apCmtKw"><span></span></label></div>
+              <div class="opt-row"><div class="t"><small>Filter words (empty = the search keywords)</small></div><input type="text" id="apCmtKwTxt" placeholder="word, word"></div>
+          </div></div>
+          <div class="card"><div class="card-hd"><h3>Twitter</h3></div><div class="card-bd">
+              <div class="opt-row"><div class="t"><b>Include retweets</b><small>In Twitter search results</small></div>
+                <label class="switch"><input type="checkbox" id="apRt" checked><span></span></label></div>
+              <div class="opt-row"><div class="t"><b>Max RT per original tweet</b><small>0 = no limit</small></div>
+                <input type="number" id="apRtCap" value="0" min="0" style="width:110px"></div>
+              <div class="opt-row"><div class="t"><b>Max total retweets</b><small>0 = no limit</small></div>
+                <input type="number" id="apRtTot" value="0" min="0" style="width:110px"></div>
+              <div class="opt-row"><div class="t"><b>BY LINK: also pull retweeters</b><small>Of the Twitter posts pasted</small></div>
+                <label class="switch"><input type="checkbox" id="apRtLink"><span></span></label></div>
+            <small class="hint" id="apTwHint"></small></div></div>
+          <div class="card"><div class="card-hd"><h3>Import data you already have</h3></div><div class="card-bd">
+            <textarea id="apImport" rows="3" placeholder="Optional, 0 credits: one per line — a link, or link<TAB>text. Merged and analysed (sentiment/emotion) with the results."></textarea></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- API SETTINGS (admin only) -->
+    <section class="page" id="p-apikeys">
+      <div class="pagehead"><div><h1>API settings</h1><p>Keys for the API scraper. They stay on the server and are never shown again in full — only the last 4 characters. Admins only.</p></div></div>
+      <div class="card" style="max-width:720px"><div class="card-bd">
+        <div class="field"><label for="akKey">Scraping API key (ScrapeCreators) <span class="hint" id="akKeyState"></span></label>
+          <input type="password" id="akKey" autocomplete="off" placeholder="paste a new key to set or replace it"></div>
+        <label style="display:flex;gap:8px;align-items:center;margin:6px 0 14px"><input type="checkbox" id="akKeyClear"> remove the saved key</label>
+        <div class="field"><label for="akTw">Twitter API key (optional) <span class="hint" id="akTwState"></span></label>
+          <input type="password" id="akTw" autocomplete="off" placeholder="enables Twitter keyword search and Twitter links"></div>
+        <label style="display:flex;gap:8px;align-items:center;margin:6px 0 14px"><input type="checkbox" id="akTwClear"> remove the saved key</label>
+        <div class="field"><label for="akBudget">Default credit cap per run (non-Twitter; 0 = unlimited)</label><input type="number" id="akBudget" min="0" style="width:140px"></div>
+        <ul class="errs" id="akErrs"></ul>
+        <div style="display:flex;gap:8px;margin-top:16px"><button class="btn primary" id="akSave">Save</button><button class="btn" id="akBal">Check credit balance</button></div>
+        <div class="hint" id="akBalOut" style="margin-top:10px"></div>
+      </div></div>
+    </section>
+
     <!-- SCHEDULES -->
     <section class="page" id="p-schedules">
       <div class="pagehead"><div><h1>Schedules</h1><p>Searches that run by themselves — e.g. news for yesterday, every morning. Set a search up on its page, then click <b>Schedule it</b>. Each run saves its own Excel file (Exports).</p></div></div>
@@ -880,6 +980,8 @@ function go(p){
   if (p === 'exports'){ loadExports(); if (SERVER) loadAudit(); }
   if (p === 'schedules') loadSchedules();
   if (p === 'users') loadUsers();
+  if (p === 'apiscrape') loadApInfo();
+  if (p === 'apikeys') loadApKeys();
 }
 document.querySelectorAll('#nav button').forEach(b => b.onclick = () => go(b.dataset.p));
 document.addEventListener('click', e => { const g = e.target.closest('[data-go]'); if (g){ e.preventDefault(); go(g.dataset.go); } });
@@ -1459,6 +1561,67 @@ $('decGo').onclick = () => {
   rd.readAsDataURL(f);
 };
 
+/* ---------- API scraper (the team's Social Scraper) ---------- */
+let apInfo = null;
+function apAlert(t, kind){ const m = $('apMsg'); m.textContent = t || ''; m.className = 'alert' + (t ? ' show ' + (kind || 'err') : ''); }
+async function loadApInfo(){
+  apInfo = await api('/api/apiscraper/info');
+  if (!apInfo || !apInfo.platforms) return;
+  const cur = $('apPlat').value;
+  $('apPlat').innerHTML = apInfo.platforms.map(p => `<option>${esc(p)}</option>`).join('');
+  if (cur) $('apPlat').value = cur;
+  if (!$('apBudget').dataset.touched) $('apBudget').value = apInfo.default_budget;
+  const na = $('apNotReady');
+  na.textContent = apInfo.ready ? '' : (ROLE === 'admin' ? 'No API key yet — set it under API settings.' : 'No API key yet — ask an admin to set it under API settings.');
+  na.className = 'alert' + (apInfo.ready ? '' : ' show err');
+  $('apTwHint').textContent = apInfo.twitter ? '' : 'Twitter needs the optional Twitter API key (API settings).';
+}
+$('apBudget').addEventListener('input', () => { $('apBudget').dataset.touched = 1; });
+$('apMode').onchange = () => { $('apPlatF').style.display = $('apMode').value === 'keyword' ? '' : 'none'; };
+const toLocalInput = d => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+document.querySelectorAll('[data-aprange]').forEach(b => b.onclick = () => {
+  const now = new Date(), from = new Date(now.getTime() - (+b.dataset.aprange) * 86400000);
+  $('apFrom').value = toLocalInput(from); $('apTo').value = toLocalInput(now); $('apTf').checked = true;
+});
+const apDt = v => v ? v.replace('T', ' ') : '';
+function apCfg(){
+  const tf = $('apTf').checked, n = id => +$(id).value || 0, c = id => $(id).checked;
+  return { mode: $('apMode').value, platform: $('apPlat').value, queries: $('apQ').value, limit: n('apLimit'), budget: n('apBudget'),
+    time_from: tf ? apDt($('apFrom').value) : '', time_to: tf ? apDt($('apTo').value) : '',
+    strict: c('apStrict'), lang: $('apLang').value, neg_use: c('apNegUse'), neg_kw: $('apNeg').value,
+    dedup: c('apDedup'), coverage: c('apCov'), delta: c('apDelta'), fillid: c('apFill'), foll: c('apFoll'),
+    comments: c('apCmt'), cmt_top: n('apCmtTop'), cmt_max: n('apCmtMax'), cmt_kw: c('apCmtKw'), cmt_kw_txt: $('apCmtKwTxt').value,
+    twrt: c('apRt'), twrt_cap: n('apRtCap'), twrt_tot: n('apRtTot'), twrt_link: c('apRtLink'), import: $('apImport').value };
+}
+$('apStart').onclick = async () => {
+  if (!$('apQ').value.trim() && !$('apImport').value.trim()){ apAlert('Type at least one keyword or link.'); $('apQ').focus(); return; }
+  if ($('apTf').checked && !$('apFrom').value && !$('apTo').value){ apAlert('Time filter is on: choose From / To (or a quick range), or turn the filter off.'); return; }
+  const r = await api('/api/apiscraper/start', apCfg());
+  if (r.error){ apAlert(r.error); return; }
+  apAlert(''); $('log').textContent = ''; logCount = 0; toast('API scraper started'); started(); go('log');
+};
+$('apStop').onclick = () => api('/api/stop', {});
+async function showBalance(el){
+  el.textContent = 'Checking…';
+  const r = await api('/api/apiscraper/balance');
+  el.textContent = r.ok ? `Credit balance: ${fmt(r.credits)}` : (r.error || 'Could not read the balance');
+}
+$('apBal').onclick = () => showBalance($('apBalOut'));
+async function loadApKeys(){
+  const d = await api('/api/apiscraper/settings');
+  $('akKeyState').textContent = d.api_key_set ? `(set ${d.api_key_tail})` : '(not set)';
+  $('akTwState').textContent = d.twitter_set ? `(set ${d.twitter_tail})` : '(not set)';
+  $('akBudget').value = d.default_budget ?? 200;
+  $('akKey').value = $('akTw').value = ''; $('akKeyClear').checked = $('akTwClear').checked = false;
+}
+$('akSave').onclick = async () => {
+  const r = await api('/api/apiscraper/settings', {api_key: $('akKey').value.trim(), twitter_api_key: $('akTw').value.trim(),
+    default_budget: $('akBudget').value === '' ? null : +$('akBudget').value, clear_api_key: $('akKeyClear').checked, clear_twitter: $('akTwClear').checked});
+  if (!r.ok){ $('akErrs').innerHTML = `<li>${esc(r.error || 'Could not save')}</li>`; return; }
+  $('akErrs').innerHTML = ''; toast('API settings saved'); loadApKeys(); loadApInfo();
+};
+$('akBal').onclick = () => showBalance($('akBalOut'));
+
 /* ---------- schedules ---------- */
 const schModal = $('schModal');
 let schDraft = null;
@@ -1641,10 +1804,12 @@ async function poll(){
     $('btnStop').style.display = running && isProf ? '' : 'none';
     $('kBtnStop').style.display = running && isKw ? '' : 'none';
     $('nBtnStop').style.display = running && isNews ? '' : 'none';
+    $('apStop').style.display = running && s.kind === 'apiscrape' ? '' : 'none';
+    $('apStart').style.display = running ? 'none' : '';
     $('btnLogin').disabled = running;
     $('stDot').classList.toggle('run', running);
     const mp = s.modes || {};
-    $('stTitle').textContent = running ? (s.kind === 'login' ? 'Login mode' : s.kind === 'decode' ? 'Fixing Google News links' : isKw ? 'Keyword search' : isNews ? 'News search' : 'Collecting') : 'Ready';
+    $('stTitle').textContent = running ? (s.kind === 'login' ? 'Login mode' : s.kind === 'decode' ? 'Fixing Google News links' : s.kind === 'apiscrape' ? 'API scraper' : isKw ? 'Keyword search' : isNews ? 'News search' : 'Collecting') : 'Ready';
     $('stSub').textContent = running ? (s.kind === 'login' ? 'Close the browser when done'
       : `${s.done}/${s.total} ${isKw ? 'searches' : isNews ? 'keywords' : 'accounts'} · ${fmt((mp[s.kind] || {}).count || 0)} links`) : 'No job running';
     const progFor = (pref, mine, unit, count) => {

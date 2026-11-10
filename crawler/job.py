@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import random
+import re
 import threading
 import time
 import traceback
@@ -752,11 +753,87 @@ class Job:
                     break
                 if i + 1 < len(kws):
                     self._pause_between()
+            if not stopped and opt.resolve:
+                self._second_pass(seen, b)
         finally:
             files = self._finish_files(save, [xlsx, csvp], bool(statuses))
             self._close(ctx, pw)
         b["files"] = files
         self.log(("⏹ Stopped. " if stopped else "✅ Done. ") + f"Total {len(seen)} unique news links" + (f" → {files[0]}" if files else ""))
+
+    def start_decode(self, name: str, data: bytes) -> str | None:
+        """Fix the Google News links in an uploaded .xlsx/.csv/.txt file (the team's decoder, inside the app)."""
+        base, ext = os.path.splitext(os.path.basename(name or "file"))
+        ext = ext.lower()
+        if ext not in (".xlsx", ".xlsm", ".csv", ".txt"):
+            return "Choose an .xlsx, .csv or .txt file."
+        if not data:
+            return "The file is empty."
+        if len(data) > 15_000_000:
+            return "The file is larger than 15 MB."
+        base = re.sub(r"[^\w.\- ]+", "_", base)[:80] or "file"
+        os.makedirs(os.path.join(OUTPUT_DIR, "uploads"), exist_ok=True)
+        src = os.path.join(OUTPUT_DIR, "uploads", f"{int(time.time())}_{base}{ext}")
+        with open(src, "wb") as f:
+            f.write(data)
+        out = os.path.join(OUTPUT_DIR, f"{base}_decoded{'.xlsx' if ext == '.xlsm' else ext}")
+        return self._start("decode", self._decode_file, src, out)
+
+    def _decode_file(self, src: str, out: str):
+        from .gnews import fix_file
+        self.log(f"Fixing Google News links in {os.path.basename(src).split('_', 1)[-1]} ...")
+
+        def progress(i, n):
+            self.done, self.total = i, n
+            self.current = f"Decoding link {i}/{n}"
+        try:
+            ok, failed = fix_file(src, out, self.log, self.stop_flag, progress)
+        finally:
+            try:
+                os.remove(src)
+            except OSError:
+                pass
+        self.decoded_file = os.path.basename(out)
+        self.log(f"✅ {ok} link(s) decoded" + (f", {failed} could not be (left as they were — see the Decode Log)"
+                                              if failed else "") + f" → {os.path.basename(out)} (Exports)")
+
+    def _second_pass(self, seen: dict, b: dict):
+        """Links still on news.google.com get a second try from the server itself (the team's decoder method),
+        after Google has had time to cool down. A decoded link that another keyword already found is merged."""
+        from .gnews import Decoder, is_gnews
+        from .news import _key
+        left = [(k, r) for k, r in list(seen.items()) if is_gnews(r.get("url"))]
+        if not left:
+            return
+        self.log(f"🔁 Second pass: decoding {len(left)} link(s) still on news.google.com...")
+        dec = Decoder(stop=self.stop_flag)
+        ok = 0
+        for j, (k, r) in enumerate(left, 1):
+            if self.stop_flag.is_set():
+                break
+            self.current = f"Decoding Google News links {j}/{len(left)}"
+            real, status = dec.decode(r["url"])
+            if status != "OK":
+                continue
+            ok += 1
+            with self.lock:
+                new_key = _key(real)
+                other = seen.get(new_key)
+                if other is not None and other is not r:          # the same article was found by another keyword
+                    for kw in r.get("keywords", []):
+                        if kw not in other["keywords"]:
+                            other["keywords"].append(kw)
+                    other["keyword"] = ", ".join(other["keywords"])
+                    seen.pop(k, None)
+                    b["links"] = [x for x in b["links"] if x is not r]
+                else:
+                    r["url"] = real
+                    seen.pop(k, None)
+                    seen[new_key] = r
+                b["version"] += 1
+        still = len(left) - ok
+        self.log(f"   second pass: {ok}/{len(left)} decoded" + (f"; {still} stay as news.google.com links (they still "
+                                                                  "open the article)" if still else ""))
 
 
 JOB = Job()

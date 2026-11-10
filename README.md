@@ -224,6 +224,31 @@ the site's current layout. Check it first — it can show the name of the accoun
   back-to-back runs.
 - Collab posts created by other accounts, stories and deleted posts are not included.
 
+## Excel layouts (the team's format)
+
+Under *Output* every search page has **Excel layout**:
+
+- **Standard** — this app's own files (several sheets: links, status, info).
+- **Online (client format)** for news — one sheet with `DATE` (09-Nov-2026), `TIME` (HH:MM:SS), `TITLE`, `URL`, `IMAGE`,
+  `MEDIA`, `INFLUENCER`, `PERSON`, `AUTHOR`, `SUMMARY`, `CONTENT` (`<p>…</p>`), `SENTIMENT`. IMAGE, AUTHOR, SUMMARY and
+  CONTENT are filled with *Full article*.
+- **Medsos (client format)** for keyword searches and accounts — `No`, `Sentiment`, `Username`, `User ID`, `Follower`,
+  `Text`, `Date`, `Time`, `Likes`, `Reply`, `Shares`, `Url`, `Emotion`, `User Image`, `Platform` (twitter, instagram,
+  threads, facebook, tiktok, youtube), `Sub Type`, `Views Count`, `Gender`, … `Post ID`, `User ID Parent`. Text and
+  numbers are filled with *caption & engagement*; User ID / Follower / User Image where the page shows them.
+
+Files are named like the team's: `20261108_Online_Manual_24.00.xlsx` (period end date, layout, *Manual* or *Auto* for
+schedules, `24.00` for a whole past day). Columns that need text analysis (sentiment, emotion, people, demographics)
+stay empty — the app does not use an AI model. Deliveries to another server carry the same rows in that layout.
+
+## Google News links (news.google.com / rss) → the media's own link
+
+Every news search turns Google News links into the media's own links. Whatever the browser could not decode gets a
+**second pass** at the end of the search, from the server itself (the same method as the team's decoder notebook,
+with pauses and retries when Google says "too many requests"). For older files: **Exports → Fix Google News links in a
+file** — choose an `.xlsx`, `.csv` or `.txt`; every `news.google.com/…/articles/…` link is replaced, other cells stay
+as they are, and a `Decode Log` sheet lists each link. The result appears in Exports as `…_decoded.xlsx`.
+
 ## Schedules (searches that run by themselves)
 
 Set a search up on the **News Search**, **Keyword Search** or **Collect** page as usual, then click
@@ -415,6 +440,8 @@ All of them, with request examples, are in `/docs`.
 | `crawler/captcha.py` | Lets a person solve a verification from the dashboard when the browser runs on a server |
 | `crawler/schedule.py` | Searches that run by themselves (Schedules page) |
 | `crawler/delivery.py` | Sends finished results to another server as JSON (token, signature, retries) |
+| `crawler/templates.py` | The team's Excel layouts (Online, Medsos) |
+| `crawler/gnews.py` | Server-side Google News link decoder (second pass, file tool) |
 | `crawler/cookies.py` | Reads exported cookies (Cookie-Editor JSON, storage state, cookies.txt) |
 | `Dockerfile`, `docker-compose.yml`, `Caddyfile`, `.env.example`, `requirements-server.txt` | Running it on a server (HTTPS, locked-down container) |
 | `install-server.sh` | One-command setup on a fresh Ubuntu VPS |

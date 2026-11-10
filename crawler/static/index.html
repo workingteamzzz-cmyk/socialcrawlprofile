@@ -640,6 +640,16 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
     <section class="page" id="p-exports">
       <div class="pagehead"><div><h1>Exports</h1><p>Excel files from earlier collections — saved in <b id="outDir">Documents/Post Link Collector/outputs</b>.</p></div></div>
       <div class="card"><div class="card-bd exports" id="exports" style="padding-top:14px"></div></div>
+      <div class="card" style="margin-top:16px">
+        <div class="card-hd"><h3>Fix Google News links in a file</h3></div>
+        <div class="card-bd">
+          <p class="hint" style="margin-top:0">An older Excel/CSV still has <code>news.google.com/rss/articles/…</code> links? Choose the file: every such link is replaced by the media's own link (other cells stay as they are), with a <b>Decode Log</b> sheet. The fixed file appears in the list above as <code>…_decoded.xlsx</code>. New searches already do this by themselves.</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <input id="decFile" type="file" accept=".xlsx,.xlsm,.csv,.txt">
+            <button class="btn primary" id="decGo">Fix the links</button>
+          </div>
+        </div>
+      </div>
       <div class="card" id="auditCard" style="display:none;margin-top:16px">
         <div class="card-hd"><h3>Access log</h3><div class="tools"><small class="hint">Who did what on this server — newest first</small></div></div>
         <div class="card-bd" style="overflow-x:auto"><table class="tbl" id="auditTbl"><thead><tr><th>Time</th><th>Who</th><th>Action</th><th>Details</th><th>Address</th></tr></thead><tbody></tbody></table></div>
@@ -1393,6 +1403,21 @@ $('capView').onclick = () => { capFocus = !capFocus; capViewLabel(); capRefresh(
 $('capClose').onclick = () => { capDismissed = cap.since; capModal.classList.remove('show'); clearTimeout(capTimer);
   toast('The search keeps waiting — the panel opens again on the next verification'); };
 
+/* ---------- fix Google News links in a file ---------- */
+$('decGo').onclick = () => {
+  const f = $('decFile').files[0];
+  if (!f){ toast('Choose a file first'); return; }
+  if (f.size > 15e6){ toast('The file is larger than 15 MB'); return; }
+  const rd = new FileReader();
+  rd.onload = async () => {
+    const r = await api('/api/tools/decode', {name: f.name, data: rd.result});
+    if (r.error){ toast(r.error); return; }
+    $('decFile').value = ''; $('log').textContent = ''; logCount = 0;
+    toast('Fixing the links — the file appears in Exports when done'); started(); go('log');
+  };
+  rd.readAsDataURL(f);
+};
+
 /* ---------- schedules ---------- */
 const schModal = $('schModal');
 let schDraft = null;
@@ -1508,7 +1533,7 @@ async function poll(){
     $('btnLogin').disabled = running;
     $('stDot').classList.toggle('run', running);
     const mp = s.modes || {};
-    $('stTitle').textContent = running ? (s.kind === 'login' ? 'Login mode' : isKw ? 'Keyword search' : isNews ? 'News search' : 'Collecting') : 'Ready';
+    $('stTitle').textContent = running ? (s.kind === 'login' ? 'Login mode' : s.kind === 'decode' ? 'Fixing Google News links' : isKw ? 'Keyword search' : isNews ? 'News search' : 'Collecting') : 'Ready';
     $('stSub').textContent = running ? (s.kind === 'login' ? 'Close the browser when done'
       : `${s.done}/${s.total} ${isKw ? 'searches' : isNews ? 'keywords' : 'accounts'} · ${fmt((mp[s.kind] || {}).count || 0)} links`) : 'No job running';
     const progFor = (pref, mine, unit, count) => {

@@ -19,7 +19,8 @@ def list_outputs() -> list[dict]:
     if os.path.isdir(OUTPUT_DIR):
         for name in os.listdir(OUTPUT_DIR):
             if name.endswith(".xlsx") and (name.startswith(("post_links_", "keyword_links_", "news_links_"))
-                                           or re.match(r"\d{8}_(Online|Medsos)_", name)):
+                                           or re.match(r"\d{8}_(Online|Medsos)_", name)) \
+                    or re.search(r"_decoded\.(xlsx|csv|txt)$", name):
                 st = os.stat(os.path.join(OUTPUT_DIR, name))
                 files.append({"name": name, "size": st.st_size, "mtime": int(st.st_mtime)})
     files.sort(key=lambda f: f["mtime"], reverse=True)
@@ -170,6 +171,13 @@ class Handler(BaseHTTPRequestHandler):
                 err = get().run_now(data.get("id", ""))
             except ScheduleError as e:
                 return self._json({"ok": False, "error": str(e)})
+        elif u.path == "/api/tools/decode":
+            import base64
+            try:
+                raw = base64.b64decode(str(data.get("data", "")).split(",", 1)[-1], validate=False)
+            except ValueError:
+                raw = b""
+            err = JOB.start_decode(data.get("name", ""), raw)
         elif u.path == "/api/logins/cookies":
             c = data.get("cookies", "")
             return self._json(JOB.import_cookies(c if isinstance(c, str) else json.dumps(c)))

@@ -190,6 +190,11 @@ class ScheduleRef(BaseModel):
     id: str
 
 
+class DecodeFile(BaseModel):
+    name: str = Field(..., examples=["20261108_Online_Manual_24.00.xlsx"])
+    data: str = Field(..., description="The file, base64 (a data: URL is fine)")
+
+
 class SignIn(BaseModel):
     key: str
 
@@ -383,7 +388,7 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
     def download(name: str, request: Request):
         name = os.path.basename(name)
         path = os.path.join(OUTPUT_DIR, name)
-        if not name or not name.endswith((".xlsx", ".csv")) or not os.path.isfile(path):
+        if not name or not name.endswith((".xlsx", ".csv", ".txt")) or not os.path.isfile(path):
             raise HTTPException(404, "file not found")
         log(request, "downloaded", file=name)
         return FileResponse(path, filename=name)
@@ -412,6 +417,18 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
         err = JOB.start_news(body.keywords, body.start, body.end, body.tz, body.options)
         log(request, "started news search" if not err else "start refused", period=f"{body.start}..{body.end}",
             keywords=body.keywords[:20])
+        return answer(err)
+
+    @app.post("/api/tools/decode", tags=["jobs"], dependencies=auth,
+              summary="Fix the Google News links in a file (.xlsx/.csv/.txt, base64); the result appears in Exports")
+    def decode_file(body: DecodeFile, request: Request):
+        import base64
+        try:
+            raw = base64.b64decode(body.data.split(",", 1)[-1], validate=False)
+        except ValueError:
+            raw = b""
+        err = JOB.start_decode(body.name, raw)
+        log(request, "started fixing Google News links in a file" if not err else "file fix refused", file=body.name[:80])
         return answer(err)
 
     @app.post("/api/stop", tags=["jobs"], dependencies=auth, summary="Stop the running job (results so far are kept)")

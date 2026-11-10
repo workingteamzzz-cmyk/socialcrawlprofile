@@ -176,24 +176,40 @@ def _perform(page, act: dict):
 
 def _notify(label: str):
     link = os.environ.get("PUBLIC_URL", "").strip()
-    notify(f"Post Link Collector: {label} is asking for a verification. Open {link or 'the dashboard'} to solve it.",
-           os.environ.get("CAPTCHA_WEBHOOK_URL", ""))
+    mins = os.environ.get("CAPTCHA_WAIT_MINUTES", "10")
+    notify(f"🧩 Post Link Collector: {label} is asking for a verification (\"I'm not a robot\"). "
+           f"Open {link or 'the dashboard'} within {mins} minutes and tap the picture to solve it.",
+           os.environ.get("CAPTCHA_WEBHOOK_URL", "") or None)
 
 
 def notify(text: str, url: str | None = None):
-    """POST {"text": ...} to a webhook (Slack/Teams incoming webhook, n8n/Make...) in the background.
-    Default: NOTIFY_WEBHOOK_URL, else CAPTCHA_WEBHOOK_URL. Nothing is sent when neither is set."""
+    """Tell people, in the background: a verification is waiting, or a scheduled search finished.
+    - Telegram (free, to your phone): TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID (one or more ids, comma separated);
+    - a webhook that takes {"text": ...} (Slack/Teams incoming webhook, n8n/Make): NOTIFY_WEBHOOK_URL,
+      else CAPTCHA_WEBHOOK_URL (or the url given).
+    Nothing is sent when none is set."""
     url = (url or os.environ.get("NOTIFY_WEBHOOK_URL") or os.environ.get("CAPTCHA_WEBHOOK_URL") or "").strip()
-    if not url:
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    chats = [c.strip() for c in os.environ.get("TELEGRAM_CHAT_ID", "").split(",") if c.strip()]
+    posts = []
+    if url:
+        posts.append((url, {"text": text}))
+    if token and chats:
+        base = os.environ.get("TELEGRAM_API_BASE", "https://api.telegram.org").rstrip("/")
+        for chat in chats:
+            posts.append((f"{base}/bot{token}/sendMessage", {"chat_id": chat, "text": text,
+                                                               "disable_web_page_preview": True}))
+    if not posts:
         return
-    body = json.dumps({"text": text}).encode()
 
     def send():
-        try:
-            req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
-            urllib.request.urlopen(req, timeout=8).close()
-        except Exception:  # noqa: BLE001
-            pass
+        for u, payload in posts:
+            try:
+                req = urllib.request.Request(u, data=json.dumps(payload).encode(),
+                                             headers={"Content-Type": "application/json"})
+                urllib.request.urlopen(req, timeout=10).close()
+            except Exception:  # noqa: BLE001
+                pass
     threading.Thread(target=send, daemon=True).start()
 
 

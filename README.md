@@ -403,7 +403,11 @@ Verify); type text if asked. The job continues by itself once the page is throug
 - Nobody within `CAPTCHA_WAIT_MINUTES` (default 10) → that search is skipped. For news, Google Search is then left
   alone for the rest of the run (more requests only make the block longer) while the **Google News feed** keeps
   working — the feed rarely asks for a verification (tested from a cloud server: hundreds of links without one).
-- To be told when it happens, set `CAPTCHA_WEBHOOK_URL` (a Slack/Teams incoming webhook, or an n8n/Make webhook that
+- **Telegram to your phone (free):** create a bot with **@BotFather** (it gives a token), send `/start` to
+  **@userinfobot** to see your chat id, then set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` (several ids comma
+  separated) in `.env` and run `sudo docker compose up -d`. You get a message when a verification is waiting and
+  when a scheduled search finishes. Raise `CAPTCHA_WAIT_MINUTES` (e.g. 60) if you don't always reply quickly.
+- To be told by another service, set `CAPTCHA_WEBHOOK_URL` (a Slack/Teams incoming webhook, or an n8n/Make webhook that
   forwards to WhatsApp/Telegram) and `PUBLIC_URL` (the dashboard's address). It receives `{"text": "..."}`.
 - Fewer verifications: start with the Google News feed as the source, keep periods and keyword lists modest, import
   Google cookies of a signed-in account, and prefer a VPS in Indonesia.

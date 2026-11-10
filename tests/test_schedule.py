@@ -303,3 +303,49 @@ def test_the_real_job_delivers_when_it_finishes(tmp_path, monkeypatch):
     j.thread.join(5)
     assert rx.wait() and rx.got[0][2]["kind"] == "news"
     rx.httpd.shutdown()
+
+
+def test_telegram_messages_for_verifications_and_finished_schedules(tmp_path, monkeypatch):
+    """TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID: a message to each chat (via the Bot API's sendMessage)."""
+    import json
+    import time
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    from crawler import captcha
+    got = []
+
+    class TG(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_POST(self):
+            got.append((self.path, json.loads(self.rfile.read(int(self.headers["Content-Length"])))))
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'{"ok":true}')
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), TG)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    monkeypatch.setenv("TELEGRAM_API_BASE", f"http://127.0.0.1:{httpd.server_address[1]}")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:ABC")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "111, 222")
+    monkeypatch.setenv("PUBLIC_URL", "https://collector.example")
+    for k in ("NOTIFY_WEBHOOK_URL", "CAPTCHA_WEBHOOK_URL"):
+        monkeypatch.delenv(k, raising=False)
+
+    def wait(n):
+        for _ in range(50):
+            if len(got) >= n:
+                return
+            time.sleep(0.1)
+    captcha._notify("Google Search")
+    wait(2)
+    assert sorted(b["chat_id"] for _, b in got) == ["111", "222"] and got[0][0] == "/bot123:ABC/sendMessage"
+    assert "Google Search" in got[0][1]["text"] and "https://collector.example" in got[0][1]["text"]
+    job = FakeJob()
+    s = sch.Scheduler(str(tmp_path / "s.json"), job, notify=captcha.notify)
+    s.run_now(s.save(NEWS)["id"])
+    job.finish(count=42)
+    s.tick()
+    wait(4)
+    assert any("finished — 42 links" in b["text"] for _, b in got[2:])
+    httpd.shutdown()

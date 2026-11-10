@@ -16,6 +16,7 @@ Environment:
   COLLECTOR_SERVER     1 = no screen: hidden browser, logins by cookie import, verifications solved from the dashboard
   CAPTCHA_WAIT_MINUTES how long a verification waits for a person before that search is skipped (default 10)
   CAPTCHA_WEBHOOK_URL  optional: gets {"text": ...} when a verification is waiting (Slack/Teams/n8n)
+  TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID  optional: the same messages to Telegram (bot from @BotFather)
   PUBLIC_URL           the dashboard's address, used in that message
   NOTIFY_WEBHOOK_URL   optional: gets {"text": ...} when a scheduled run finishes
   RESULTS_WEBHOOK_URL  optional: every finished search's links are POSTed here as JSON (a client's server, n8n...)

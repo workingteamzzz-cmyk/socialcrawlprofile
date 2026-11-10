@@ -28,6 +28,8 @@ class CaptchaGate:
         self.since = 0.0
         self.until = 0.0
         self.shot = b""
+        self.focus_shot = b""
+        self.focus = None            # (x, y, w, h) of the check itself on the page, when it can be found
         self.version = 0
         self.size = (0, 0)
         self.last_view = 0.0
@@ -37,12 +39,17 @@ class CaptchaGate:
         with self.lock:
             return {"pending": self.pending, "label": self.label, "since": int(self.since), "until": int(self.until),
                     "version": self.version,
-                    "width": self.size[0], "height": self.size[1]}
+                    "width": self.size[0], "height": self.size[1],
+                    "focus": list(self.focus) if self.focus else None}
 
-    def screenshot(self) -> bytes:
+    def screenshot(self, view: str = "full") -> tuple[bytes, tuple]:
+        """The latest picture and the part of the page it shows (x, y, w, h) — "focus" is a close-up of the check
+        itself (for phones), "full" the whole page."""
         with self.lock:
             self.last_view = time.time()
-            return self.shot
+            if view == "focus" and self.focus_shot and self.focus:
+                return self.focus_shot, self.focus
+            return self.shot, (0, 0, self.size[0], self.size[1])
 
     def act(self, action: dict) -> str | None:
         if not self.pending:
@@ -63,7 +70,7 @@ class CaptchaGate:
         with self.lock:
             self.pending, self.label, self.since = True, label, time.time()
             self.until = self.since + wait_s
-            self.shot, self.size = b"", (0, 0)
+            self.shot, self.focus_shot, self.focus, self.size = b"", b"", None, (0, 0)
         while not self.actions.empty():
             self.actions.get_nowait()
         crawler.log(f"   🧩 {label} is asking for a verification — open the dashboard to solve it "
@@ -102,11 +109,53 @@ class CaptchaGate:
         try:
             png = page.screenshot(type="png")
             vp = page.viewport_size or {"width": 1280, "height": 900}
+            focus = _find_check(page, vp["width"], vp["height"])
+            close = page.screenshot(type="png", clip=dict(zip(("x", "y", "width", "height"), focus))) if focus else b""
         except Exception:  # noqa: BLE001  (page busy navigating)
             return
         with self.lock:
             self.shot, self.size = png, (vp["width"], vp["height"])
+            self.focus_shot, self.focus = close, focus
             self.version += 1
+
+
+_FIND_CHECK_JS = r"""() => {
+  // Where the check is: the image challenge first, then the tick box, then any captcha box (Google, reCAPTCHA,
+  // hCaptcha, Cloudflare, TikTok's slider).
+  const groups = [
+    'iframe[src*="recaptcha"][src*="bframe"], iframe[title*="challenge" i]',
+    'iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="challenges.cloudflare"]',
+    '#captcha-form, #captcha_container, .captcha_verify_container, .captcha-verify-container',
+    '[id*="captcha" i], [class*="captcha" i], [class*="verify" i][class*="container" i]'];
+  const W = innerWidth, H = innerHeight;
+  const seen = e => { const r = e.getBoundingClientRect(), st = getComputedStyle(e);
+    return r.width >= 40 && r.height >= 30 && r.bottom > 0 && r.top < H && r.right > 0 && r.left < W
+      && st.visibility !== 'hidden' && st.display !== 'none' && +st.opacity > 0.05 ? r : null; };
+  for (const g of groups) {
+    const rs = [...document.querySelectorAll(g)].map(seen).filter(Boolean);
+    if (!rs.length) continue;
+    const r = rs.reduce((a, b) => (a.width * a.height >= b.width * b.height ? a : b));
+    return [r.left, r.top, r.width, r.height];
+  }
+  return null;
+}"""
+
+
+def _find_check(page, vw: int, vh: int):
+    """(x, y, w, h) around the check, with some room around it; None if there is none or it fills the page."""
+    try:
+        r = page.evaluate(_FIND_CHECK_JS)
+    except Exception:  # noqa: BLE001
+        return None
+    if not r:
+        return None
+    x, y, w, h = r
+    w2, h2 = max(w + 48, 360), max(h + 48, 260)           # some room around it, and not too small
+    if w2 * h2 > vw * vh * 0.6:
+        return None                                         # the check is most of the page anyway
+    x2 = min(max(0, x + w / 2 - w2 / 2), max(0, vw - w2))
+    y2 = min(max(0, y + h / 2 - h2 / 2), max(0, vh - h2))
+    return (round(x2), round(y2), round(min(w2, vw)), round(min(h2, vh)))
 
 
 def _perform(page, act: dict):

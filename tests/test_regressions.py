@@ -672,3 +672,33 @@ def test_server_verification_solved_from_the_dashboard(tmp_path, monkeypatch):
     finally:
         ctx.close()
         pw.stop()
+
+
+@pytest.mark.skipif(_browser_path() is None, reason="no local Chromium")
+def test_verification_close_up_for_phones(tmp_path):
+    """The picture for phones is a close-up of the check (an image challenge in a frame), and its X-Clip-style
+    position maps a tap on the close-up to the right point of the page."""
+    from playwright.sync_api import sync_playwright
+
+    from crawler.captcha import _find_check, CaptchaGate
+    frame = "<html><body style='margin:0'><button style='width:280px;height:340px' onclick=\"parent.document.title='hit'\">tiles</button></body></html>"
+    page_html = ("<html><body style='margin:0'><p>unusual traffic</p><iframe title='recaptcha challenge expires in two minutes' "
+                 f"srcdoc=\"{frame.replace('"', '&quot;')}\" style='position:absolute;left:490px;top:220px;width:300px;height:380px;border:0'></iframe></body></html>")
+    os.environ["CRAWLER_BROWSER_PATH"] = _browser_path()
+    with sync_playwright() as pw:
+        b = pw.chromium.launch(executable_path=_browser_path())
+        page = b.new_page(viewport={"width": 1280, "height": 900})
+        page.set_content(page_html)
+        x, y, w, h = _find_check(page, 1280, 900)
+        assert x <= 490 and y <= 220 and x + w >= 790 and y + h >= 600 and w < 500 and h < 500
+        gate = CaptchaGate()
+        gate._picture(page)
+        close, clip = gate.screenshot("focus")
+        full, whole = gate.screenshot("full")
+        assert close and full and len(close) < len(full) and whole == (0, 0, 1280, 900) and clip == (x, y, w, h)
+        # a tap in the middle of the close-up = the middle of the check on the page
+        page.mouse.click(clip[0] + 0.5 * clip[2], clip[1] + 0.5 * clip[3])
+        assert page.title() == "hit"
+        page.set_content("<html><body><h1>Normal page</h1></body></html>")
+        assert _find_check(page, 1280, 900) is None
+        b.close()

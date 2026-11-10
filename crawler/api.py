@@ -288,7 +288,7 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
         h.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
         if request.url.path != "/docs":       # the docs page loads Swagger UI from a CDN
             h.setdefault("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; "
-                         "style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; "
+                         "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; "
                          "frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
         if secure_cookie:
             h.setdefault("Strict-Transport-Security", "max-age=31536000")
@@ -400,14 +400,18 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
     solving: dict = {}
     @app.get("/api/captcha/screenshot", tags=["verification"], dependencies=auth,
              summary="Live picture of the page that asks for a verification")
-    def captcha_picture():
+    def captcha_picture(view: Literal["full", "focus"] = "full"):
+        """`view=focus`: a close-up of the check itself (for phones). The `X-Clip` header says which part of the page
+        (x,y,w,h in page pixels) the picture shows — a click at (px, py) on the picture is page point
+        (x + px/picture_width*w, y + py/picture_height*h)."""
         from fastapi import Response
 
         from .captcha import CAPTCHA
-        png = CAPTCHA.screenshot()
+        png, clip = CAPTCHA.screenshot(view)
         if not png:
             raise HTTPException(404, "No picture yet")
-        return Response(png, media_type="image/png", headers={"Cache-Control": "no-store"})
+        return Response(png, media_type="image/png", headers={"Cache-Control": "no-store",
+                                                              "X-Clip": ",".join(str(int(v)) for v in clip)})
 
     @app.post("/api/captcha", tags=["verification"], dependencies=auth,
               summary="Click / type / press a key on that page, or skip it")
@@ -502,7 +506,8 @@ _SIGN_IN_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 @media (prefers-color-scheme:dark){:root{--bg:#0b1220;--card:#111a2e;--ink:#e2e8f0;--mute:#94a3b8;--line:#1e293b}}
 body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--ink);
   font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;padding:16px;box-sizing:border-box}
-form{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:28px;width:min(380px,100%)}
+form{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:28px;width:min(380px,100%);
+  box-sizing:border-box}
 h1{font-size:20px;margin:0 0 4px}p{color:var(--mute);margin:0 0 18px}
 input{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid var(--line);border-radius:10px;
   background:transparent;color:inherit;font:inherit}

@@ -245,8 +245,11 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
   .nav{flex-direction:row;overflow-x:auto;border-top:1px solid var(--line)}
   .nav .sep{display:none}
   .nav button{white-space:nowrap}
-  .side-foot{flex-direction:row;align-items:center}
-  .side-foot .btn-block{flex:1}
+  .side-foot{flex-direction:row;align-items:center;flex-wrap:wrap}
+  .side-foot .btn-block{flex:1 1 160px}
+  .side-foot .logins{flex:1 1 100%;order:3}
+  .modal{padding:8px}
+  .modal .card-bd{padding:14px}
   .main{padding:16px}
 }
 </style>
@@ -719,6 +722,7 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
         <button class="btn" id="capEnter">Press Enter</button>
         <button class="btn" id="capDown">Scroll down</button>
         <button class="btn" id="capUp">Scroll up</button>
+        <button class="btn" id="capView" style="display:none">Whole page</button>
         <button class="btn" id="capSkip" style="margin-left:auto">Skip this search</button>
       </div>
     </div>
@@ -1285,12 +1289,27 @@ async function loadAudit(){
 /* ---------- verification solved from the dashboard (server) ---------- */
 const capModal = $('capModal');
 let cap = {pending: false}, capDismissed = 0, capTimer = null, capBusy = false;
-function capRefresh(){
+let capClip = [0, 0, 1280, 900], capUrl = '';
+// Phones get a close-up of the check itself (the whole page would be tiny); the button switches views.
+let capFocus = window.innerWidth < 760;
+function capViewLabel(){
+  $('capView').style.display = cap.focus ? '' : 'none';
+  $('capView').textContent = capFocus ? 'Whole page' : 'Close-up of the check';
+}
+async function capRefresh(){
   clearTimeout(capTimer);
   if (!capModal.classList.contains('show')) return;
-  const img = new Image();
-  img.onload = () => { $('capImg').src = img.src; $('capWait').style.display = 'none'; };
-  img.src = '/api/captcha/screenshot?t=' + Date.now();
+  try {
+    const r = await fetch('/api/captcha/screenshot?view=' + (capFocus ? 'focus' : 'full') + '&t=' + Date.now());
+    if (r.ok){
+      const clip = (r.headers.get('X-Clip') || '').split(',').map(Number);
+      const url = URL.createObjectURL(await r.blob());
+      if (clip.length === 4 && clip[2] > 0) capClip = clip;             // which part of the page this picture shows
+      $('capImg').src = url; if (capUrl) URL.revokeObjectURL(capUrl); capUrl = url;
+      $('capWait').style.display = 'none';
+    }
+  } catch (e) { /* next round */ }
+  capViewLabel();
   const left = Math.max(0, Math.round((cap.until - Date.now() / 1000) / 60));
   $('capLeft').textContent = cap.until ? `(about ${left} min left before it is skipped)` : '';
   capTimer = setTimeout(capRefresh, 1300);
@@ -1313,13 +1332,15 @@ function capUpdate(c){
 }
 $('capImg').addEventListener('click', e => {
   const r = e.target.getBoundingClientRect();
-  capSend({type: 'click', x: (e.clientX - r.left) / r.width * (cap.width || 1280), y: (e.clientY - r.top) / r.height * (cap.height || 900)});
+  capSend({type: 'click', x: capClip[0] + (e.clientX - r.left) / r.width * capClip[2],
+           y: capClip[1] + (e.clientY - r.top) / r.height * capClip[3]});
 });
 $('capType').onclick = () => { const t = $('capText').value; if (t){ capSend({type: 'type', text: t}); $('capText').value = ''; } };
 $('capEnter').onclick = () => capSend({type: 'key', key: 'Enter'});
 $('capDown').onclick = () => capSend({type: 'scroll', dy: 400});
 $('capUp').onclick = () => capSend({type: 'scroll', dy: -400});
 $('capSkip').onclick = () => capSend({type: 'skip'});
+$('capView').onclick = () => { capFocus = !capFocus; capViewLabel(); capRefresh(); };
 $('capClose').onclick = () => { capDismissed = cap.since; capModal.classList.remove('show'); clearTimeout(capTimer);
   toast('The search keeps waiting — the panel opens again on the next verification'); };
 

@@ -1,8 +1,10 @@
 """FastAPI version of the app, for running on a server (see serve.py and the README section "Run as an API server").
 
 Same dashboard and the same JSON endpoints as the local app, plus:
-- an API key (COLLECTOR_API_KEY) on everything except /api/health: send it as the `X-API-Key` header (scripts,
-  n8n, Power Query...) or sign in once on the dashboard (an HttpOnly cookie);
+- a key per person (COLLECTOR_API_KEYS="ana=...,budi=...", or one COLLECTOR_API_KEY) on everything except
+  /api/health: the `X-API-Key` header for scripts (n8n, Power Query...), or sign in on the dashboard (an HttpOnly
+  cookie that expires); removing a person's key from the settings locks them out, cookies included;
+- optional allowed addresses (ALLOWED_IPS), an audit log of who did what (never cookie values), security headers;
 - interactive API docs at /docs (after signing in);
 - POST /api/logins/cookies to sign the server's browser in with cookies exported from your own browser.
 """
@@ -10,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import threading
@@ -31,9 +34,47 @@ COOKIE = "plc_session"
 _key_header = APIKeyHeader(name="X-API-Key", auto_error=False, description="The server's COLLECTOR_API_KEY")
 
 
-def _session_value(key: str) -> str:
-    """What the sign-in cookie holds: derived from the key, never the key itself."""
-    return hmac.new(key.encode(), b"post-link-collector-session", hashlib.sha256).hexdigest()
+def _session_value(name: str, key: str, issued: int | None = None) -> str:
+    """What the sign-in cookie holds: who, when, and a signature made with that person's key — never the key
+    itself. Changing or removing the key makes the cookie worthless."""
+    issued = int(time.time()) if issued is None else issued
+    sig = hmac.new(key.encode(), f"post-link-collector-session|{name}|{issued}".encode(), hashlib.sha256).hexdigest()
+    return f"{name}.{issued}.{sig}"
+
+
+class Audit:
+    """Append-only record of who did what (JSON lines). Cookie values and keys are never written."""
+    def __init__(self, path: str | None):
+        self.path = path
+        self.lock = threading.Lock()
+
+    def add(self, who: str, action: str, ip: str = "", **info):
+        if not self.path:
+            return
+        line = json.dumps({"time": time.strftime("%Y-%m-%d %H:%M:%S"), "who": who, "ip": ip, "action": action, **info},
+                          ensure_ascii=False)
+        with self.lock:
+            try:
+                os.makedirs(os.path.dirname(self.path), exist_ok=True)
+                if os.path.exists(self.path) and os.path.getsize(self.path) > 5_000_000:
+                    os.replace(self.path, self.path + ".1")          # keep it bounded: current + one older file
+                with open(self.path, "a", encoding="utf-8") as f:
+                    f.write(line + "\n")
+            except OSError:
+                pass
+
+    def tail(self, n: int = 200) -> list[dict]:
+        if not self.path or not os.path.exists(self.path):
+            return []
+        with self.lock, open(self.path, encoding="utf-8") as f:
+            lines = f.readlines()[-n:]
+        out = []
+        for ln in reversed(lines):
+            try:
+                out.append(json.loads(ln))
+            except ValueError:
+                pass
+        return out
 
 
 class _Failures:
@@ -121,44 +162,94 @@ class SignIn(BaseModel):
     key: str
 
 
-def create_app(api_key: str | None = None, secure_cookie: bool = False) -> FastAPI:
-    """api_key=None only for a copy that listens on 127.0.0.1 (then everything is open, like the local app)."""
+def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, allowed_ips: list | None = None,
+               audit_path: str | None = None, session_days: float = 7) -> FastAPI:
+    """api_keys: {person: key} (a single key string means {"admin": key}). None only for a copy that listens on
+    127.0.0.1 — then everything is open, like the local app. allowed_ips: addresses/networks that may connect
+    (None = any)."""
     from .paths import SERVER_MODE
+    keys = {"admin": api_keys} if isinstance(api_keys, str) else dict(api_keys or {})
+    nets = [ipaddress.ip_network(n, strict=False) for n in (allowed_ips or [])]
+    audit = Audit(audit_path)
     failures = _Failures()
-    app = FastAPI(title="Post Link Collector API", version="1.0", docs_url=None, redoc_url=None, openapi_url=None,
+    app = FastAPI(title="Post Link Collector API", version="1.1", docs_url=None, redoc_url=None, openapi_url=None,
                   description="Collect post links (and optionally caption & engagement) from Instagram, X, TikTok, "
                               "YouTube, Threads and Facebook, and news links from Google — without platform APIs. "
                               "One job runs at a time: start it, poll `/api/status`, then read `/api/results` or "
                               "download the Excel file.")
 
-    def signed_in(request: Request, header_key: str | None) -> bool:
-        if not api_key:
+    def client_ip(request: Request) -> str:
+        return request.client.host if request.client else "?"
+
+    def ip_allowed(ip: str) -> bool:
+        if not nets:
             return True
+        try:
+            addr = ipaddress.ip_address(ip)
+        except ValueError:
+            return False
+        return any(addr in n for n in nets)
+
+    def key_owner(given: str | None) -> str | None:
+        if not given:
+            return None
+        found = None
+        for name, key in keys.items():                    # compare with every key (constant time per key)
+            if hmac.compare_digest(given.encode(), key.encode()):
+                found = name
+        return found
+
+    def cookie_owner(value: str) -> str | None:
+        try:
+            name, issued, _sig = value.split(".", 2)
+            issued_i = int(issued)
+        except ValueError:
+            return None
+        key = keys.get(name)
+        if not key or time.time() - issued_i > session_days * 86400 or issued_i > time.time() + 60:
+            return None
+        return name if hmac.compare_digest(value.encode(), _session_value(name, key, issued_i).encode()) else None
+
+    def who(request: Request, header_key: str | None) -> str | None:
+        """The person making the request, or None. Raises 403 for a cookie request sent from another site."""
+        if not keys:
+            return "local"
         bearer = (request.headers.get("authorization") or "")
         if bearer.lower().startswith("bearer "):
             header_key = header_key or bearer[7:].strip()
-        if header_key and hmac.compare_digest(header_key.encode(), api_key.encode()):
-            return True
-        cookie = request.cookies.get(COOKIE) or ""
-        if cookie and hmac.compare_digest(cookie.encode(), _session_value(api_key).encode()):
-            if request.method not in ("GET", "HEAD", "OPTIONS"):
-                # a signed-in browser: only this app's own page may send changes (no cross-site requests)
-                origin = request.headers.get("origin") or request.headers.get("referer") or ""
-                if not origin or urlparse(origin).netloc != request.headers.get("host", ""):
-                    raise HTTPException(403, "forbidden: request from another site")
-            return True
-        return False
+        name = key_owner(header_key)
+        if name:
+            return name
+        name = cookie_owner(request.cookies.get(COOKIE) or "")
+        if name and request.method not in ("GET", "HEAD", "OPTIONS"):
+            # a signed-in browser: only this app's own page may send changes (no cross-site requests)
+            origin = request.headers.get("origin") or request.headers.get("referer") or ""
+            if not origin or urlparse(origin).netloc != request.headers.get("host", ""):
+                raise HTTPException(403, "forbidden: request from another site")
+        return name
 
-    def require(request: Request, key: str | None = Depends(_key_header)):
-        if not api_key and urlparse("//" + request.headers.get("host", "")).hostname not in ("127.0.0.1", "localhost", "::1"):
+    def signed_in(request: Request, header_key: str | None) -> bool:
+        return who(request, header_key) is not None
+
+    def require(request: Request, key: str | None = Depends(_key_header)) -> str:
+        if not keys and urlparse("//" + request.headers.get("host", "")).hostname not in ("127.0.0.1", "localhost", "::1"):
             raise HTTPException(403, "forbidden")      # open local copy: only requests addressed to this computer
-        ip = request.client.host if request.client else "?"
+        ip = client_ip(request)
+        if not ip_allowed(ip):
+            raise HTTPException(403, "This address may not use the server.")
         if failures.blocked(ip):
             raise HTTPException(429, "Too many wrong keys — try again in a few minutes.")
-        if not signed_in(request, key):
-            if key or request.cookies.get(COOKIE):
+        name = who(request, key)
+        if name is None:
+            if key or request.cookies.get(COOKIE) or request.headers.get("authorization"):
                 failures.add(ip)
+                audit.add("?", "rejected", ip, path=request.url.path)
             raise HTTPException(401, "Missing or wrong API key (send the X-API-Key header, or sign in on the dashboard).")
+        request.state.who = name
+        return name
+
+    def log(request: Request, action: str, **info):
+        audit.add(getattr(request.state, "who", "?"), action, client_ip(request), **info)
 
     auth = [Depends(require)]
 
@@ -167,28 +258,60 @@ def create_app(api_key: str | None = None, secure_cookie: bool = False) -> FastA
         return JSONResponse({"ok": False, "error": exc.detail}, status_code=exc.status_code)
 
     # ---------- open ----------
+    @app.get("/favicon.ico", include_in_schema=False)
+    def favicon():
+        from fastapi import Response
+        return Response(status_code=204)
+
     @app.get("/api/health", tags=["server"], summary="Is the server up (no key needed)")
     def health():
         return {"ok": True, "running": JOB.running}
 
+    @app.middleware("http")
+    async def _security_headers(request: Request, call_next):
+        if nets and request.url.path != "/api/health" and not ip_allowed(client_ip(request)):
+            return JSONResponse({"ok": False, "error": "This address may not use the server."}, status_code=403)
+        resp = await call_next(request)
+        h = resp.headers
+        h.setdefault("X-Content-Type-Options", "nosniff")
+        h.setdefault("X-Frame-Options", "DENY")
+        h.setdefault("Referrer-Policy", "no-referrer")
+        h.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        if request.url.path != "/docs":       # the docs page loads Swagger UI from a CDN
+            h.setdefault("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+                         "style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; "
+                         "frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+        if secure_cookie:
+            h.setdefault("Strict-Transport-Security", "max-age=31536000")
+        if request.url.path.startswith(("/api/", "/download/")):
+            h.setdefault("Cache-Control", "no-store")
+        return resp
+
     @app.get("/", include_in_schema=False)
     def dashboard(request: Request):
-        if api_key and not signed_in(request, None):
-            return HTMLResponse(_SIGN_IN_PAGE)
+        if not ip_allowed(client_ip(request)):
+            raise HTTPException(403, "This address may not use the server.")
+        if keys and not signed_in(request, None):
+            return HTMLResponse(_SIGN_IN_PAGE, headers={"Cache-Control": "no-store"})
         return FileResponse(os.path.join(STATIC, "index.html"), media_type="text/html",
                             headers={"Cache-Control": "no-store"})
 
     @app.post("/auth", include_in_schema=False)
     def sign_in(body: SignIn, request: Request):
-        ip = request.client.host if request.client else "?"
+        ip = client_ip(request)
+        if not ip_allowed(ip):
+            raise HTTPException(403, "This address may not use the server.")
         if failures.blocked(ip):
             raise HTTPException(429, "Too many wrong keys — try again in a few minutes.")
-        if not api_key or not hmac.compare_digest(body.key.strip().encode(), api_key.encode()):
+        name = key_owner(body.key.strip())
+        if not name:
             failures.add(ip)
+            audit.add("?", "sign-in failed", ip)
             raise HTTPException(401, "Wrong key.")
-        resp = JSONResponse({"ok": True})
-        resp.set_cookie(COOKIE, _session_value(api_key), httponly=True, samesite="strict", secure=secure_cookie,
-                        max_age=30 * 24 * 3600)
+        audit.add(name, "signed in", ip)
+        resp = JSONResponse({"ok": True, "who": name})
+        resp.set_cookie(COOKIE, _session_value(name, keys[name]), httponly=True, samesite="strict", secure=secure_cookie,
+                        max_age=int(session_days * 86400))
         return resp
 
     @app.post("/logout", include_in_schema=False)
@@ -196,6 +319,10 @@ def create_app(api_key: str | None = None, secure_cookie: bool = False) -> FastA
         resp = JSONResponse({"ok": True})
         resp.delete_cookie(COOKIE)
         return resp
+
+    @app.get("/api/audit", tags=["server"], dependencies=auth, summary="Who did what on this server (newest first)")
+    def audit_log(limit: int = 200):
+        return {"entries": audit.tail(max(1, min(limit, 2000)))}
 
     # ---------- docs (signed in) ----------
     @app.get("/openapi.json", include_in_schema=False, dependencies=auth)
@@ -220,11 +347,12 @@ def create_app(api_key: str | None = None, secure_cookie: bool = False) -> FastA
         return {"files": list_outputs()}
 
     @app.get("/download/{name}", tags=["files"], dependencies=auth, summary="Download an Excel/CSV result file")
-    def download(name: str):
+    def download(name: str, request: Request):
         name = os.path.basename(name)
         path = os.path.join(OUTPUT_DIR, name)
         if not name or not name.endswith((".xlsx", ".csv")) or not os.path.isfile(path):
             raise HTTPException(404, "file not found")
+        log(request, "downloaded", file=name)
         return FileResponse(path, filename=name)
 
     # ---------- start / stop ----------
@@ -232,33 +360,46 @@ def create_app(api_key: str | None = None, secure_cookie: bool = False) -> FastA
         return {"ok": err is None, "error": err}
 
     @app.post("/api/start", tags=["jobs"], dependencies=auth, summary="Collect post links from accounts")
-    def start(body: CrawlRequest):
+    def start(body: CrawlRequest, request: Request):
         text = store.lines_for(body.list_id, body.ids) if body.ids else body.text
-        return answer(JOB.start_crawl(text, body.start, body.end, body.tz, list(body.platforms), body.detail))
+        err = JOB.start_crawl(text, body.start, body.end, body.tz, list(body.platforms), body.detail)
+        log(request, "started account collection" if not err else "start refused", period=f"{body.start}..{body.end}",
+            accounts=len([ln for ln in text.splitlines() if ln.strip()]), detail=body.detail)
+        return answer(err)
 
     @app.post("/api/keywords/start", tags=["jobs"], dependencies=auth, summary="Keyword search on the platforms")
-    def keywords(body: KeywordRequest):
-        return answer(JOB.start_keywords(body.keywords, body.start, body.end, body.tz, list(body.platforms), body.options))
+    def keywords(body: KeywordRequest, request: Request):
+        err = JOB.start_keywords(body.keywords, body.start, body.end, body.tz, list(body.platforms), body.options)
+        log(request, "started keyword search" if not err else "start refused", period=f"{body.start}..{body.end}",
+            keywords=body.keywords[:20], platforms=list(body.platforms))
+        return answer(err)
 
     @app.post("/api/news/start", tags=["jobs"], dependencies=auth, summary="News links from Google")
-    def news(body: NewsRequest):
-        return answer(JOB.start_news(body.keywords, body.start, body.end, body.tz, body.options))
+    def news(body: NewsRequest, request: Request):
+        err = JOB.start_news(body.keywords, body.start, body.end, body.tz, body.options)
+        log(request, "started news search" if not err else "start refused", period=f"{body.start}..{body.end}",
+            keywords=body.keywords[:20])
+        return answer(err)
 
     @app.post("/api/stop", tags=["jobs"], dependencies=auth, summary="Stop the running job (results so far are kept)")
-    def stop():
+    def stop(request: Request):
         JOB.stop()
+        log(request, "stopped the job")
         return answer(None)
 
     # ---------- logins ----------
     @app.get("/api/logins", tags=["logins"], dependencies=auth, summary="Which platforms the server is signed in to")
-    def logins():
-        return {**logins_info(), "server": SERVER_MODE}
+    def logins(request: Request):
+        return {**logins_info(), "server": SERVER_MODE, "who": getattr(request.state, "who", "")}
 
     @app.post("/api/logins/cookies", tags=["logins"], dependencies=auth,
               summary="Sign the server in with cookies exported from your browser")
-    def import_cookies(body: CookieImport):
+    def import_cookies(body: CookieImport, request: Request):
         text = body.cookies if isinstance(body.cookies, str) else json.dumps(body.cookies)
-        return JOB.import_cookies(text)
+        res = JOB.import_cookies(text)
+        log(request, "imported cookies" if res.get("ok") else "cookie import failed",   # never the cookie values
+            count=res.get("added", 0), signed_in=[p for p, v in (res.get("platforms") or {}).items() if v])
+        return res
 
     @app.post("/api/login", include_in_schema=False, dependencies=auth)
     def login():
@@ -295,22 +436,26 @@ def create_app(api_key: str | None = None, secure_cookie: bool = False) -> FastA
         return {"accounts": store.load(list)}
 
     @app.post("/api/accounts/add", tags=["account lists"], dependencies=auth)
-    def accounts_add(body: AccountsAdd):
+    def accounts_add(body: AccountsAdd, request: Request):
+        log(request, "added accounts", list=body.list_id)
         return list_change(lambda: store.add(body.list_id, body.text, body.group))
 
     @app.post("/api/accounts/remove", tags=["account lists"], dependencies=auth)
-    def accounts_remove(body: AccountsRemove):
+    def accounts_remove(body: AccountsRemove, request: Request):
+        log(request, "removed accounts", list=body.list_id, count=len(body.ids))
         return list_change(lambda: {"removed": store.remove(body.list_id, body.ids)})
 
     @app.post("/api/lists/create", tags=["account lists"], dependencies=auth)
-    def lists_create(body: ListCreate):
+    def lists_create(body: ListCreate, request: Request):
+        log(request, "created a list", name=body.name)
         def go():
             list_id, err = store.create_list(body.name)
             return {"ok": err is None, "error": err, "id": list_id}
         return list_change(go)
 
     @app.post("/api/lists/delete", tags=["account lists"], dependencies=auth)
-    def lists_delete(body: ListDelete):
+    def lists_delete(body: ListDelete, request: Request):
+        log(request, "deleted a list", list=body.id)
         return list_change(lambda: {"ok": store.delete_list(body.id)})
 
     return app

@@ -1,18 +1,49 @@
-# docker compose up -d   (put COLLECTOR_API_KEY=... in a .env file next to this one first)
+# Post Link Collector on a server, behind Caddy (automatic HTTPS certificates from Let's Encrypt).
+#   1. point your domain (DNS A record) at the server
+#   2. cp .env.example .env   and fill in DOMAIN and the keys
+#   3. docker compose up -d --build
 services:
   collector:
     build: .
     image: post-link-collector
     restart: unless-stopped
+    env_file: .env
     environment:
-      COLLECTOR_API_KEY: ${COLLECTOR_API_KEY:?Set COLLECTOR_API_KEY in .env (openssl rand -hex 24)}
-      COOKIE_SECURE: ${COOKIE_SECURE:-0}
-    ports:
-      # Only this machine can reach it; put HTTPS (Caddy/Nginx) in front to open it to the internet.
-      - "127.0.0.1:8770:8770"
+      COOKIE_SECURE: "1"            # only ever reached through HTTPS (Caddy)
+      FORWARDED_ALLOW_IPS: "*"      # the app port is not published: only Caddy can reach it
+    expose:
+      - "8770"
     volumes:
       - collector-data:/data
-    shm_size: "1gb"          # Chromium needs more shared memory than Docker's default 64 MB
+    shm_size: "1gb"                 # Chromium needs more shared memory than Docker's default 64 MB
+    # Locked down: read-only system files, no extra privileges; only /data (and RAM scratch space) is writable.
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /home/pwuser:uid=1000,gid=1000,mode=0700
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 4g
+    pids_limit: 2048
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - collector
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env (e.g. collector.example.com)}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
 
 volumes:
   collector-data:
+  caddy-data:
+  caddy-config:

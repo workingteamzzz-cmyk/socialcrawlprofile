@@ -4,7 +4,7 @@
 # When changing the image version, change the playwright pin in requirements-server.txt to the same version.
 FROM mcr.microsoft.com/playwright/python:v1.64.1-noble
 
-ENV PYTHONUNBUFFERED=1 PYTHONIOENCODING=utf-8 PIP_BREAK_SYSTEM_PACKAGES=1 \
+ENV PYTHONUNBUFFERED=1 PYTHONIOENCODING=utf-8 PYTHONDONTWRITEBYTECODE=1 PIP_BREAK_SYSTEM_PACKAGES=1 \
     COLLECTOR_SERVER=1 CRAWLER_HOME=/data HOST=0.0.0.0 PORT=8770 TZ=Asia/Jakarta
 
 WORKDIR /app

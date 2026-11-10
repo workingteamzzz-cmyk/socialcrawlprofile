@@ -625,6 +625,10 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
     <section class="page" id="p-exports">
       <div class="pagehead"><div><h1>Exports</h1><p>Excel files from earlier collections — saved in <b id="outDir">Documents/Post Link Collector/outputs</b>.</p></div></div>
       <div class="card"><div class="card-bd exports" id="exports" style="padding-top:14px"></div></div>
+      <div class="card" id="auditCard" style="display:none;margin-top:16px">
+        <div class="card-hd"><h3>Access log</h3><div class="tools"><small class="hint">Who did what on this server — newest first</small></div></div>
+        <div class="card-bd" style="overflow-x:auto"><table class="tbl" id="auditTbl"><thead><tr><th>Time</th><th>Who</th><th>Action</th><th>Details</th><th>Address</th></tr></thead><tbody></tbody></table></div>
+      </div>
     </section>
 
     <!-- LOG -->
@@ -752,7 +756,7 @@ function go(p){
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.p === p));
   document.querySelectorAll('.page').forEach(s => s.classList.toggle('on', s.id === 'p-' + p));
   ls.set('page', p); window.scrollTo(0, 0);
-  if (p === 'exports') loadExports();
+  if (p === 'exports'){ loadExports(); if (SERVER) loadAudit(); }
 }
 document.querySelectorAll('#nav button').forEach(b => b.onclick = () => go(b.dataset.p));
 document.addEventListener('click', e => { const g = e.target.closest('[data-go]'); if (g){ e.preventDefault(); go(g.dataset.go); } });
@@ -1248,6 +1252,14 @@ $('ckGo').onclick = async () => {
 };
 $('btnSignOut').onclick = async () => { await fetch('/logout', {method: 'POST'}); location.reload(); };
 
+async function loadAudit(){
+  const d = await api('/api/audit?limit=200');
+  const skip = new Set(['time', 'who', 'action', 'ip']);
+  $('auditTbl').querySelector('tbody').innerHTML = (d.entries || []).map(e => `<tr><td>${esc(e.time)}</td><td><b>${esc(e.who)}</b></td>
+    <td>${esc(e.action)}</td><td>${esc(Object.entries(e).filter(([k]) => !skip.has(k)).map(([k, v]) => k + ': ' + (Array.isArray(v) ? v.join(', ') : v)).join(' · '))}</td>
+    <td>${esc(e.ip)}</td></tr>`).join('') || '<tr><td colspan="5" class="hint">Nothing yet</td></tr>';
+}
+
 /* ---------- sign-in status ---------- */
 async function loadLogins(){
   const d = await api('/api/logins');
@@ -1256,6 +1268,8 @@ async function loadLogins(){
     $('btnLogin').lastChild.textContent = 'Import cookies';
     $('btnLogin').title = 'Sign the server in with cookies exported from your own browser';
     $('btnImport').style.display = 'none'; $('btnSignOut').style.display = '';
+    $('auditCard').style.display = '';
+    if (d.who) $('btnSignOut').textContent = `Sign out (${d.who})`;
   }
   if (d.outputs_dir) $('outDir').textContent = d.outputs_dir;
   const st = d.platforms || {};

@@ -1,43 +1,81 @@
-"""Run the app as an API server (FastAPI + uvicorn) — for a VPS/cloud machine, usually through Docker.
-
-    COLLECTOR_API_KEY=<long random key> COLLECTOR_SERVER=1 python serve.py
+"""Run the app as an API server (FastAPI + uvicorn) — for a VPS/cloud machine, usually through Docker
+(docker-compose.yml puts it behind Caddy with automatic HTTPS).
 
 Environment:
-  COLLECTOR_API_KEY  required unless HOST is 127.0.0.1 — at least 16 characters (e.g. `openssl rand -hex 24`)
-  COLLECTOR_SERVER   1 = no screen: hidden browser, logins by cookie import, captchas reported instead of waited for
-  HOST / PORT        default 0.0.0.0 / 8770
-  COOKIE_SECURE      1 when the server is behind HTTPS (recommended), so the dashboard's sign-in cookie is HTTPS-only
-  CRAWLER_HOME       folder for the browser profile, account lists and results (Docker: /data)
+  COLLECTOR_API_KEYS   one key per person: "ana=<key>,budi=<key>" (each key 16+ random characters,
+                       e.g. `openssl rand -hex 24`). Remove a person's entry and restart to lock them out.
+  COLLECTOR_API_KEY    or a single key (person "admin"). One of the two is required unless HOST is 127.0.0.1.
+  ALLOWED_IPS          optional: only these addresses/networks may connect, e.g. "203.0.113.7,198.51.100.0/24"
+  SESSION_DAYS         how long a dashboard sign-in lasts (default 7)
+  RETENTION_DAYS       delete result files older than this many days (default 30; 0 = keep)
+  DEBUG_RETENTION_DAYS delete page copies in outputs/debug older than this (default 7; 0 = keep)
+  COLLECTOR_SERVER     1 = no screen: hidden browser, logins by cookie import, captchas reported instead of waited for
+  HOST / PORT          default 0.0.0.0 / 8770
+  COOKIE_SECURE        1 behind HTTPS (docker-compose sets it): sign-in cookie HTTPS-only, HSTS
+  CRAWLER_HOME         folder for the browser profile, account lists, results and audit.log (Docker: /data)
 """
+import ipaddress
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
+def read_keys(env=os.environ) -> dict:
+    """{person: key} from COLLECTOR_API_KEYS / COLLECTOR_API_KEY. Exits with a clear message on a bad entry."""
+    keys = {}
+    for entry in filter(None, (e.strip() for e in env.get("COLLECTOR_API_KEYS", "").split(","))):
+        name, sep, key = entry.partition("=")
+        name, key = name.strip().lower(), key.strip()
+        if not sep or not re.fullmatch(r"[a-z0-9_-]{1,32}", name):
+            sys.exit(f"COLLECTOR_API_KEYS: write each entry as name=key (name: letters, digits, - or _), not {entry[:12]!r}...")
+        keys[name] = key
+    if env.get("COLLECTOR_API_KEY", "").strip():
+        keys.setdefault("admin", env["COLLECTOR_API_KEY"].strip())
+    for name, key in keys.items():
+        if len(key) < 16:
+            sys.exit(f"The key of {name!r} is too short — use at least 16 random characters (openssl rand -hex 24).")
+    if len(set(keys.values())) < len(keys):
+        sys.exit("Two people have the same key — give everyone their own key.")
+    return keys
+
+
 def main():
     host = os.environ.get("HOST", "0.0.0.0")
     port = int(os.environ.get("PORT", "8770"))
-    key = os.environ.get("COLLECTOR_API_KEY", "").strip() or None
+    keys = read_keys()
     local_only = host in ("127.0.0.1", "localhost", "::1")
-    if not key and not local_only:
-        sys.exit("COLLECTOR_API_KEY is not set. Anyone who can reach this server could use your signed-in accounts — "
-                 "set a long random key (e.g. `openssl rand -hex 24`), or use HOST=127.0.0.1.")
-    if key and len(key) < 16:
-        sys.exit("COLLECTOR_API_KEY is too short — use at least 16 random characters.")
+    if not keys and not local_only:
+        sys.exit("No access key set (COLLECTOR_API_KEYS or COLLECTOR_API_KEY). Anyone who can reach this server could "
+                 "use your signed-in accounts — set long random keys (openssl rand -hex 24), or use HOST=127.0.0.1.")
+    allowed = [a.strip() for a in os.environ.get("ALLOWED_IPS", "").split(",") if a.strip()]
+    for a in allowed:
+        try:
+            ipaddress.ip_network(a, strict=False)
+        except ValueError:
+            sys.exit(f"ALLOWED_IPS: {a!r} is not an IP address or network (e.g. 203.0.113.7 or 198.51.100.0/24).")
 
     import uvicorn
 
-    from crawler import paths
+    from crawler import paths, retention
     from crawler.api import create_app
     try:
         paths.migrate()
     except Exception as e:  # noqa: BLE001
         print(f"Note: could not prepare the data folders ({e}). Continuing.")
-    app = create_app(key, secure_cookie=os.environ.get("COOKIE_SECURE", "") in ("1", "true", "yes"))
+    days = float(os.environ.get("RETENTION_DAYS", "30") or 0)
+    debug_days = float(os.environ.get("DEBUG_RETENTION_DAYS", "7") or 0)
+    retention.start(paths.OUTPUT_DIR, days, debug_days)
+    app = create_app(keys or None, secure_cookie=os.environ.get("COOKIE_SECURE", "") in ("1", "true", "yes"),
+                     allowed_ips=allowed or None, audit_path=os.path.join(paths.APP_DATA, "audit.log"),
+                     session_days=float(os.environ.get("SESSION_DAYS", "7") or 7))
     print(f"Data folder: {os.path.dirname(paths.LISTS_DIR)}  ·  server mode: {'on' if paths.SERVER_MODE else 'off'}")
+    print(f"People with a key: {', '.join(sorted(keys)) or '-'}  ·  allowed addresses: {', '.join(allowed) or 'any'}")
+    print(f"Results kept {days:g} days (0 = forever), page copies {debug_days:g} days")
     print(f"API on http://{host}:{port}  ·  docs at /docs  ·  health at /api/health")
-    uvicorn.run(app, host=host, port=port, proxy_headers=True, forwarded_allow_ips=os.environ.get("FORWARDED_ALLOW_IPS", "127.0.0.1"))
+    uvicorn.run(app, host=host, port=port, proxy_headers=True, server_header=False,
+                forwarded_allow_ips=os.environ.get("FORWARDED_ALLOW_IPS", "127.0.0.1"))
 
 
 if __name__ == "__main__":

@@ -226,37 +226,50 @@ the site's current layout. Check it first — it can show the name of the accoun
 
 ## Run as an API server (FastAPI, Docker)
 
-The same app can run on a VPS/cloud machine as an API (FastAPI): the same dashboard, plus JSON endpoints for scripts,
-n8n, Power Query and the like, and interactive docs at `/docs`.
+The same app can run on a VPS/cloud machine as an API (FastAPI) — always on, without your laptop: the same dashboard,
+JSON endpoints for scripts, n8n, Power Query and the like, and interactive docs at `/docs`.
 
 **Read this first — a server is harder for this kind of tool than your laptop:**
 - Instagram, X, TikTok, Threads and Facebook trust data-centre IP addresses much less than a home/office connection.
   Expect more login checks, captchas and empty results; Google may ask for captchas sooner (the Google News feed
-  source is the least affected). A VPS in Indonesia, or a residential connection, helps.
+  source is the least affected). A VPS in Indonesia helps.
 - There is no screen: logins come from **cookies you import** (below), and a captcha cannot be solved — it is reported
   in the Activity Log and that search is skipped instead of waiting.
-- The cookies let the server act as those accounts. Use separate accounts for collecting where you can, keep the key
-  secret, and only open the server over HTTPS.
+- The cookies let the server act as those accounts. Use separate accounts for collecting.
+
+### How the data is protected
+
+| Protection | How |
+| --- | --- |
+| HTTPS only | Caddy in front gets and renews the certificate itself; plain HTTP is redirected; HSTS. The app port is not published. |
+| A key per person | `COLLECTOR_API_KEYS="ana=…,budi=…"`. Remove someone's entry and restart → their key and dashboard sign-in stop working at once. Keys are never stored in the sign-in cookie or the log. |
+| Sign-ins expire | Dashboard sign-in lasts `SESSION_DAYS` (default 7); HttpOnly, Secure, SameSite=Strict cookie; changes are only accepted from the app's own page. |
+| Guessing is blocked | 10 wrong keys from one address in 10 minutes → that address is refused for a while. The server refuses to start without keys (16+ characters each). |
+| Optional office-only access | `ALLOWED_IPS=203.0.113.7,198.51.100.0/24` — everyone else gets "forbidden", even with a key. |
+| Audit log | Who signed in, started/stopped what, imported cookies (which platforms, never the values), downloaded which file, changed which list — in the dashboard (*Exports → Access log*), `GET /api/audit` and `/data/audit.log`. |
+| Less data kept | Result files are deleted after `RETENTION_DAYS` (30), page copies after `DEBUG_RETENTION_DAYS` (7). |
+| Locked-down container | Runs as a normal user, read-only system files, no extra privileges (`cap_drop: ALL`, `no-new-privileges`), memory/process limits. Only `/data` is writable. |
+| Security headers | Content-Security-Policy, no framing, no referrer, no caching of API answers, no server banner. |
+| Secrets stay out of the image | Keys live only in `.env` on the server (excluded from the image and from git). |
+
+What still depends on you: keep the server updated (`apt upgrade`, `docker compose pull && docker compose up -d --build`),
+use SSH keys (no password logins) and a firewall that only opens ports 22, 80 and 443, turn on your provider's disk
+encryption/backups if offered, and treat the `collector-data` volume (logins, results) as confidential.
+For data that must stay in Indonesia (UU PDP), choose a provider with an Indonesian data centre.
 
 ### Start it
 
+1. Get a VPS (2 vCPU / 4 GB RAM is enough) with Docker, and point a domain at it (DNS A record).
+2. Copy the app there, then:
+
 ```bash
-openssl rand -hex 24          # make a key, then put it in a file named .env:  COLLECTOR_API_KEY=<the key>
+cp .env.example .env          # fill in DOMAIN and one key per person: openssl rand -hex 24
 docker compose up -d --build
 ```
 
-It listens on `127.0.0.1:8770` of the server. To open it to the internet, put an HTTPS proxy in front, e.g. Caddy:
-
-```
-collector.example.com {
-    reverse_proxy 127.0.0.1:8770
-}
-```
-
-and add `COOKIE_SECURE=1` to `.env`. Without Docker: `pip install -r requirements-server.txt`,
-`python -m playwright install --with-deps chromium`, then
-`COLLECTOR_API_KEY=... COLLECTOR_SERVER=1 python serve.py`. Data (browser profile, lists, results) is kept in the
-`collector-data` Docker volume (`/data`).
+Open `https://<your domain>` and sign in with your key. Without Docker: `pip install -r requirements-server.txt`,
+`python -m playwright install --with-deps chromium`, then `COLLECTOR_API_KEYS=... COLLECTOR_SERVER=1 python serve.py`
+behind your own HTTPS proxy. All settings are listed at the top of `serve.py` and in `.env.example`.
 
 ### Sign in to the platforms (cookies)
 
@@ -264,11 +277,12 @@ and add `COOKIE_SECURE=1` to `.env`. Without Docker: `pip install -r requirement
 2. Export that site's cookies with an extension such as **Cookie-Editor** (Export → JSON).
 3. On the server's dashboard click **Import cookies** and paste them (or choose the file) — or send them to the API.
    JSON from cookie extensions, Playwright storage state and `cookies.txt` are accepted; only cookies of the supported
-   platforms and Google/YouTube are kept. Repeat per platform; re-import when the sidebar shows ✗.
+   platforms and Google/YouTube are kept. Repeat per platform; re-import when the sidebar shows ✗. Delete the exported
+   file from your computer afterwards.
 
 ### Using the API
 
-Send the key in the `X-API-Key` header (or sign in once on the dashboard). One job runs at a time.
+Send your key in the `X-API-Key` header (or sign in on the dashboard). One job runs at a time.
 
 ```bash
 KEY=your-key; URL=https://collector.example.com
@@ -287,12 +301,12 @@ curl -H "X-API-Key: $KEY" "$URL/api/outputs"                # Excel files; downl
 | `POST /api/news/start` | News from Google (`keywords`, `options`: sources, cap, exclude, detail ...) |
 | `POST /api/stop` | Stop; links collected so far are kept |
 | `GET /api/status`, `/api/results?mode=profiles\|keywords\|news`, `/api/outputs`, `/download/<file>` | Progress, results, files |
-| `GET /api/logins`, `POST /api/logins/cookies` | Signed-in status; import cookies |
+| `GET /api/logins`, `POST /api/logins/cookies` | Signed-in status (and who you are); import cookies |
+| `GET /api/audit` | Who did what |
 | `GET/POST /api/lists...`, `/api/accounts...` | Account lists |
 | `GET /api/health` | Up? (no key needed — for uptime monitors) |
 
-All of them, with request examples, are in `/docs`. After 10 wrong keys from one address within 10 minutes that
-address is refused for a while.
+All of them, with request examples, are in `/docs`.
 
 ## Project layout
 
@@ -308,8 +322,9 @@ address is refused for a while.
 | `crawler/job.py` | Background login/collection jobs, saving results |
 | `crawler/output.py` | Excel/CSV writer |
 | `crawler/server.py`, `crawler/static/index.html` | Local dashboard (reachable only from this computer) |
-| `crawler/api.py`, `serve.py` | The FastAPI server (API key, `/docs`, cookie import) |
+| `crawler/api.py`, `serve.py` | The FastAPI server (keys per person, audit log, `/docs`, cookie import) |
+| `crawler/retention.py` | Deletes old result files and page copies on a server |
 | `crawler/cookies.py` | Reads exported cookies (Cookie-Editor JSON, storage state, cookies.txt) |
-| `Dockerfile`, `docker-compose.yml`, `requirements-server.txt` | Running it on a server |
+| `Dockerfile`, `docker-compose.yml`, `Caddyfile`, `.env.example`, `requirements-server.txt` | Running it on a server (HTTPS, locked-down container) |
 | `data/lists/` | Account lists; `Ditjen SDA.csv` is the bundled example |
 | `tests/` | Unit, end-to-end and stress tests with fake platform pages (`python -m pytest tests`, about 2 minutes) |

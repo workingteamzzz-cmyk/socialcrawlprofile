@@ -60,7 +60,8 @@ class SearchOptions:
             ig_hashtag=bool(d.get("ig_hashtag", True)),
             ig_keyword=bool(d.get("ig_keyword", True)),
             cap=max(0, int(d.get("cap") or 0)),
-            detail="full" if d.get("detail") == "full" else "links",
+            # the Medsos layout needs caption, engagement and the account's ID/photo: always read the post pages
+            detail="full" if d.get("detail") == "full" or d.get("template") == "medsos" else "links",
             must_mention=bool(d.get("must_mention", True)),
             template="medsos" if d.get("template") == "medsos" else "standard",
         )

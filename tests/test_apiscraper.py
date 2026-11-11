@@ -64,7 +64,8 @@ def test_keys_stay_on_the_server(tmp_path, monkeypatch):
     assert settings.public()["api_key_set"] is False
     pub = settings.save(api_key="secret-key-abcd", twitter_api_key="tw-key-9876", default_budget=50)
     assert pub == {"api_key_set": True, "api_key_tail": "…abcd", "twitter_set": True, "twitter_tail": "…9876",
-                   "default_budget": 50, "daily_cap": 0, "monthly_cap": 0, "auto_fill": True, "fill_cap": 100}
+                   "default_budget": 50, "daily_cap": 0, "monthly_cap": 0, "auto_fill": True, "fill_cap": 100,
+                   "comments": False, "cmt_posts": 10, "cmt_per_post": 20}
     assert oct(os.stat(tmp_path / "api_scraper.json").st_mode)[-3:] == "600"
     assert settings.save(clear_twitter=True)["twitter_set"] is False and settings.load()["api_key"] == "secret-key-abcd"
 
@@ -216,3 +217,58 @@ def test_autofill_fills_empty_medsos_data_with_few_credits(tmp_path, monkeypatch
     autofill.fill(again, logs.append, data_dir=str(tmp_path))
     assert again[0]["user_id"] == "55" and not [c for c in calls if "profile" in c]
     srv.shutdown()
+
+
+def test_username_filled_and_comments_added(tmp_path, monkeypatch):
+    from crawler import templates
+    from crawler.apiscraper import autofill
+    calls = []
+
+    class Fake(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            calls.append(self.path)
+            if "/v1/instagram/post" in self.path and "comments" not in self.path:
+                body = {"data": {"xdt_shortcode_media": {"shortcode": "AAA", "owner": {"username": "pln_id", "id": "55"},
+                                 "edge_media_to_caption": {"edges": [{"node": {"text": "Info gangguan"}}]},
+                                 "edge_media_preview_like": {"count": 9}}}}
+            elif "comments" in self.path:
+                body = {"comments": [{"id": "c1", "text": "Kapan nyala lagi?", "created_at": NOW,
+                                      "user": {"username": "warga2", "id": "77"}, "comment_like_count": 2}]}
+            else:
+                body = {}
+            raw = json.dumps(body).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(raw)
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), Fake)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    monkeypatch.setattr(settings, "_path", lambda: str(tmp_path / "api_scraper.json"))
+    monkeypatch.setattr(runner.engine(), "BASE", f"http://127.0.0.1:{srv.server_address[1]}")
+    settings.save(api_key="k", comments=True, cmt_posts=1, cmt_per_post=5)
+    rows = [{"platform": "instagram", "author": "", "url": "https://www.instagram.com/p/AAA/", "caption": "",
+             "ts": 1000, "keyword": "pln", "keywords": ["pln"]}]
+    autofill.fill(rows, print, data_dir=str(tmp_path))
+    assert rows[0]["author"] == "pln_id" and rows[0]["user_id"] == "55"
+    assert autofill.comments(rows, print) == []                     # no comments counted -> no credit spent
+    rows[0]["comments"] = 3
+    got = autofill.comments(rows, print)
+    assert len(got) == 1 and got[0]["sub_type"] == "comment" and got[0]["author"] == "warga2"
+    assert got[0]["user_id_parent"] == "55" and got[0]["parent_id"] == templates.post_id("instagram", rows[0]["url"])
+    cols, vals = templates.rows_for("medsos", rows + got, None)
+    c = dict(zip(cols, vals[1]))
+    assert c["Sub Type"] == "comment" and c["Parent ID"] == got[0]["parent_id"] and c["User ID Parent"] == "55"
+    assert c["Username"] == "warga2" and c["Post ID"] == "c1"
+    srv.shutdown()
+
+
+def test_username_from_the_link():
+    from crawler.templates import username_from_url as u
+    assert u("tiktok", "https://www.tiktok.com/@kaltim/video/1") == "kaltim"
+    assert u("x", "https://x.com/budi/status/1") == "budi"
+    assert u("instagram", "https://www.instagram.com/p/ABC/") == ""
+    assert u("facebook", "https://www.facebook.com/plnid/posts/123") == "plnid"
+    assert u("facebook", "https://www.facebook.com/permalink.php?story_fbid=1") == ""

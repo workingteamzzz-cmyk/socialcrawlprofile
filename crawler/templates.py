@@ -95,6 +95,29 @@ def post_id(platform: str, url: str, user_id: str = "") -> str:
     return ""
 
 
+_NOT_USER = {"p", "reel", "reels", "tv", "explore", "stories", "watch", "shorts", "permalink.php", "story.php",
+             "photo.php", "photo", "groups", "share", "i", "home", "search", "hashtag", "video", "videos", "posts",
+             "profile.php", "people", "events", "pages", "web", "m", "channel", "c", "user", "status"}
+
+
+def username_from_url(platform: str, url: str) -> str:
+    """The account name a post link carries: tiktok.com/@user/…, threads.com/@user/…, x.com/user/status/…,
+    instagram.com/user/p/…, facebook.com/user/posts|videos/…, youtube.com/@user/… — '' when the link has none."""
+    try:
+        parts = [x for x in urlparse(url or "").path.split("/") if x]
+    except ValueError:
+        return ""
+    if not parts:
+        return ""
+    first = parts[0]
+    if first.startswith("@"):
+        return first[1:]
+    if platform in ("x", "instagram", "facebook") and len(parts) >= 2 and first.lower() not in _NOT_USER \
+            and parts[1].lower() in ("status", "p", "reel", "tv", "posts", "videos", "reels", "photos"):
+        return first
+    return ""
+
+
 def sub_type(platform: str, url: str, known: str = "") -> str:
     if known:
         return known
@@ -192,10 +215,14 @@ def medsos_row(i: int, r: dict, tz) -> list:
     uid = str(r.get("user_id") or "")
     text = r.get("caption") or r.get("text") or ""
     sent, emo = (r.get("sentiment") or "", r.get("emotion") or "") if r.get("sentiment") else analyze(text)
-    return [i, sent, r.get("author") or r.get("handle") or "", uid, _num(r.get("followers")), text, date_s, time_s,
+    user = r.get("author") or r.get("handle") or username_from_url(plat, r.get("url") or "")
+    comment = (r.get("sub_type") == "comment")
+    pid = (r.get("post_id") or "") if comment else post_id(plat, r.get("url"), uid)
+    return [i, sent, str(user).lstrip("@"), uid, _num(r.get("followers")), text, date_s, time_s,
             _num(r.get("likes")), _num(r.get("comments")), _num(r.get("shares")), r.get("url") or "", emo,
             r.get("user_image") or "", PLATFORM_NAME.get(plat, plat), sub_type(plat, r.get("url"), r.get("sub_type") or ""),
-            _num(r.get("views")), "", "", "", "", "", "", "", post_id(plat, r.get("url"), uid), uid]
+            _num(r.get("views")), "", "", "", "", "", "", r.get("parent_id") or "" if comment else "", pid,
+            (r.get("user_id_parent") or "") if comment else uid]
 
 
 def rows_for(layout: str, rows: list, tz, drop_empty: bool = False, stats: dict | None = None) -> tuple[list, list]:

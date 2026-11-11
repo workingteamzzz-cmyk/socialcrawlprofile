@@ -31,14 +31,22 @@ def public() -> dict:
             "twitter_set": bool(d.get("twitter_api_key")), "twitter_tail": _tail(d.get("twitter_api_key", "")),
             "default_budget": int(d.get("default_budget", 200)),
             "daily_cap": int(d.get("daily_cap", 0)), "monthly_cap": int(d.get("monthly_cap", 0)),
-            "auto_fill": bool(d.get("auto_fill", True)), "fill_cap": int(d.get("fill_cap", 100))}
+            "auto_fill": bool(d.get("auto_fill", True)), "fill_cap": int(d.get("fill_cap", 100)),
+            "comments": bool(d.get("comments", False)), "cmt_posts": int(d.get("cmt_posts", 10)),
+            "cmt_per_post": int(d.get("cmt_per_post", 20))}
 
 
 def save(api_key: str | None = None, twitter_api_key: str | None = None, default_budget: int | None = None,
          clear_api_key: bool = False, clear_twitter: bool = False,
          daily_cap: int | None = None, monthly_cap: int | None = None,
-         auto_fill: bool | None = None, fill_cap: int | None = None) -> dict:
+         auto_fill: bool | None = None, fill_cap: int | None = None, comments: bool | None = None,
+         cmt_posts: int | None = None, cmt_per_post: int | None = None) -> dict:
     d = load()
+    if comments is not None:
+        d["comments"] = bool(comments)
+    for k, v in (("cmt_posts", cmt_posts), ("cmt_per_post", cmt_per_post)):
+        if v is not None:
+            d[k] = max(0, min(500, int(v)))
     if auto_fill is not None:
         d["auto_fill"] = bool(auto_fill)
     if fill_cap is not None:

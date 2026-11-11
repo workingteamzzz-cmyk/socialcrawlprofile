@@ -227,17 +227,20 @@ class Job:
                 self._save_warned = True
             return False
 
-    def _api_fill(self, rows: list) -> None:
+    def _api_fill(self, rows: list) -> list:
         """Medsos output: what the browser could not read is filled with the scraping API (autofill.py) —
         only when an API key is set and auto-fill is on; never stops the run's file from being written."""
         if not rows:
-            return
+            return []
         try:
             from .apiscraper import autofill
             self.current = "Filling empty data with the API"
             autofill.fill(rows, self.log, self.stop_flag)
+            self.current = "Comments (API)"
+            return autofill.comments(rows, self.log, self.stop_flag)
         except Exception as e:  # noqa: BLE001
             self.log(f"⚠ API auto-fill skipped: {str(e).splitlines()[0][:160]}")
+        return []
 
     def _finish_files(self, save, paths: list, anything: bool) -> list:
         """Last save of a run; returns the file names to offer for download.
@@ -374,7 +377,8 @@ class Job:
         accounts, bad = parse_accounts(text, platforms)
         if not accounts:
             return "No recognised accounts selected."
-        return self._start("profiles", self._crawl, accounts, bad, d_start, d_end, tz_name, detail == "full",
+        return self._start("profiles", self._crawl, accounts, bad, d_start, d_end, tz_name,
+                           detail == "full" or template == "medsos",     # Medsos needs caption, engagement and IDs
                            "medsos" if template == "medsos" else "standard")
 
     def _out_base(self, standard: str, layout: str, d_end, tz) -> str:
@@ -435,7 +439,7 @@ class Job:
             x, c = paths or (xlsx, csvp)
             if template == "medsos":
                 from . import templates
-                rows = sorted(links, key=lambda r: (r["order"], -(r.get("ts") or 0)))
+                rows = sorted(links, key=lambda r: (r["order"], -(r.get("sort_ts") or r.get("ts") or 0)))
                 return self._safe_save(lambda: templates.write("medsos", x, c, rows, tz), x)
             return self._safe_save(lambda: write_outputs(x, c, links, statuses, meta), x)
 
@@ -491,7 +495,9 @@ class Job:
                     self._pause_between()
         finally:
             if template == "medsos" and not stopped:
-                self._api_fill(links)
+                for c in self._api_fill(links):
+                    links.append({**c, "order": order.get(c["platform"], 9), "platform_label": PLATFORM_LABEL.get(c["platform"], ""),
+                                  "handle": c.get("author", ""), "label": ""})
             done_keys = {(s["platform_label"], s["handle"]) for s in statuses}
             for acc in accounts:
                 if (PLATFORM_LABEL[acc.platform], acc.handle) not in done_keys:
@@ -575,7 +581,7 @@ class Job:
             x, c = paths or (xlsx, csvp)
             if opt.template == "medsos":
                 from . import templates
-                rows = sorted(seen.values(), key=lambda r: -(r.get("ts") or 0))
+                rows = sorted(seen.values(), key=lambda r: -(r.get("sort_ts") or r.get("ts") or 0))   # comments follow their post
                 return self._safe_save(lambda: templates.write("medsos", x, c, rows, tz), x)
             return self._safe_save(lambda: write_keyword_outputs(x, c, list(seen.values()), statuses, meta), x)
 
@@ -634,7 +640,9 @@ class Job:
                     self._pause_between()
         finally:
             if opt.template == "medsos" and not stopped:
-                self._api_fill(list(seen.values()))
+                for c in self._api_fill(list(seen.values())):
+                    seen.setdefault(f"{c['url']}#{c.get('post_id', '')}", c)
+                    b["links"].append(c)
             files = self._finish_files(save, [xlsx, csvp], bool(statuses))
             self._close(ctx, pw)
         b["files"] = files

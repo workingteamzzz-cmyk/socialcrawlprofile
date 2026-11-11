@@ -237,6 +237,9 @@ class ApiKeys(BaseModel):
     auto_fill: bool | None = Field(None, description="fill empty Medsos data (IDs, image, followers, caption, "
                                                      "engagement) with the API after browser runs")
     fill_cap: int | None = Field(None, description="max credits auto-fill may use per run")
+    comments: bool | None = Field(None, description="Medsos: add the comments of the most engaged posts (API)")
+    cmt_posts: int | None = None
+    cmt_per_post: int | None = None
 
 
 class SignIn(BaseModel):
@@ -662,7 +665,7 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
         from .apiscraper import settings as api_settings
         pub = api_settings.save(body.api_key or None, body.twitter_api_key or None, body.default_budget,
                                 body.clear_api_key, body.clear_twitter, body.daily_cap, body.monthly_cap,
-                                body.auto_fill, body.fill_cap)
+                                body.auto_fill, body.fill_cap, body.comments, body.cmt_posts, body.cmt_per_post)
         log(request, "changed the API scraper keys", api_key=bool(body.api_key), twitter=bool(body.twitter_api_key),
             daily_cap=body.daily_cap, monthly_cap=body.monthly_cap,
             cleared=[k for k, v in (("api", body.clear_api_key), ("twitter", body.clear_twitter)) if v])

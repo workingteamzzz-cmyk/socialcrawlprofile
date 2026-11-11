@@ -791,6 +791,11 @@ body:not([data-role="admin"]) .need-admin{display:none!important}
         <div class="opt-row" style="margin-top:14px"><div class="t"><b>Auto-fill empty Medsos data</b><small>After a browser run with the Medsos layout, empty User ID, User Image, Follower, caption and engagement are fetched with the API — one call per post missing a caption/engagement, one per account missing its ID/photo; already-known accounts cost nothing.</small></div>
           <label class="switch"><input type="checkbox" id="akFill"><span></span></label></div>
         <div class="field" style="margin-top:8px"><label for="akFillCap">Auto-fill credit cap per run</label><input type="number" id="akFillCap" min="0" style="width:140px"></div>
+        <div class="opt-row" style="margin-top:14px"><div class="t"><b>Add comments to the Medsos file</b><small>The comments of the most engaged posts (TikTok, YouTube, Instagram, Facebook, Threads), as rows with Sub Type "comment", Parent ID and User ID Parent — about 1 credit per post.</small></div>
+          <label class="switch"><input type="checkbox" id="akCmt"><span></span></label></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px">
+          <div class="field"><label for="akCmtPosts">Posts (most engaged)</label><input type="number" id="akCmtPosts" min="0"></div>
+          <div class="field"><label for="akCmtPer">Comments per post</label><input type="number" id="akCmtPer" min="1"></div></div>
         <ul class="errs" id="akErrs"></ul>
         <div style="display:flex;gap:8px;margin-top:16px"><button class="btn primary" id="akSave">Save</button><button class="btn" id="akBal">Check credit balance</button></div>
         <div class="hint" id="akBalOut" style="margin-top:10px"></div>
@@ -1684,6 +1689,7 @@ async function loadApKeys(){
   $('akBudget').value = d.default_budget ?? 200;
   $('akDay').value = d.daily_cap ?? 0; $('akMonth').value = d.monthly_cap ?? 0;
   $('akFill').checked = d.auto_fill !== false; $('akFillCap').value = d.fill_cap ?? 100;
+  $('akCmt').checked = !!d.comments; $('akCmtPosts').value = d.cmt_posts ?? 10; $('akCmtPer').value = d.cmt_per_post ?? 20;
   const inf = await api('/api/apiscraper/info'); if (inf && inf.used) $('akUsage').textContent = usageText(inf);
   $('akKey').value = $('akTw').value = ''; $('akKeyClear').checked = $('akTwClear').checked = false;
 }
@@ -1691,7 +1697,9 @@ $('akSave').onclick = async () => {
   const r = await api('/api/apiscraper/settings', {api_key: $('akKey').value.trim(), twitter_api_key: $('akTw').value.trim(),
     default_budget: $('akBudget').value === '' ? null : +$('akBudget').value, clear_api_key: $('akKeyClear').checked, clear_twitter: $('akTwClear').checked,
     daily_cap: $('akDay').value === '' ? null : +$('akDay').value, monthly_cap: $('akMonth').value === '' ? null : +$('akMonth').value,
-    auto_fill: $('akFill').checked, fill_cap: $('akFillCap').value === '' ? null : +$('akFillCap').value});
+    auto_fill: $('akFill').checked, fill_cap: $('akFillCap').value === '' ? null : +$('akFillCap').value,
+    comments: $('akCmt').checked, cmt_posts: $('akCmtPosts').value === '' ? null : +$('akCmtPosts').value,
+    cmt_per_post: $('akCmtPer').value === '' ? null : +$('akCmtPer').value});
   if (!r.ok){ $('akErrs').innerHTML = `<li>${esc(r.error || 'Could not save')}</li>`; return; }
   $('akErrs').innerHTML = ''; toast('API settings saved'); loadApKeys(); loadApInfo();
 };

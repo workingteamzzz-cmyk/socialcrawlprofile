@@ -190,7 +190,9 @@ class Handler(BaseHTTPRequestHandler):
                 bool(data.get("clear_api_key")), bool(data.get("clear_twitter")),
                 *[int(data[k]) if str(data.get(k, "")).strip() else None for k in ("daily_cap", "monthly_cap")],
                 data.get("auto_fill") if isinstance(data.get("auto_fill"), bool) else None,
-                int(data["fill_cap"]) if str(data.get("fill_cap", "")).strip() else None)})
+                int(data["fill_cap"]) if str(data.get("fill_cap", "")).strip() else None,
+                data.get("comments") if isinstance(data.get("comments"), bool) else None,
+                *[int(data[k]) if str(data.get(k, "")).strip() else None for k in ("cmt_posts", "cmt_per_post")])})
         elif u.path == "/api/tools/decode":
             import base64
             try:

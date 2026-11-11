@@ -64,7 +64,7 @@ def test_keys_stay_on_the_server(tmp_path, monkeypatch):
     assert settings.public()["api_key_set"] is False
     pub = settings.save(api_key="secret-key-abcd", twitter_api_key="tw-key-9876", default_budget=50)
     assert pub == {"api_key_set": True, "api_key_tail": "…abcd", "twitter_set": True, "twitter_tail": "…9876",
-                   "default_budget": 50, "daily_cap": 0, "monthly_cap": 0}
+                   "default_budget": 50, "daily_cap": 0, "monthly_cap": 0, "auto_fill": True, "fill_cap": 100}
     assert oct(os.stat(tmp_path / "api_scraper.json").st_mode)[-3:] == "600"
     assert settings.save(clear_twitter=True)["twitter_set"] is False and settings.load()["api_key"] == "secret-key-abcd"
 
@@ -154,3 +154,65 @@ def test_credit_saving(tmp_path, fake_api):
     settings.save(daily_cap=settings.usage()["today"])
     with pytest.raises(RuntimeError, match="limit is used up"):
         runner.run(cfg, print, lambda *a: None, threading.Event(), out, data)
+
+
+def test_autofill_fills_empty_medsos_data_with_few_credits(tmp_path, monkeypatch):
+    """Browser rows with empty fields: posts fetched by link once, accounts by profile once, known ones free."""
+    from crawler.apiscraper import autofill
+    calls = []
+
+    class Fake(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            calls.append(self.path)
+            if "/v2/tiktok/video" in self.path:
+                body = {"aweme_detail": {"aweme_id": "111", "desc": "Listrik padam lagi, kecewa", "create_time": NOW,
+                                         "author": {"unique_id": "warga1", "uid": "9001",
+                                                    "avatar_thumb": {"url_list": ["https://p16/a.jpeg"]}},
+                                         "statistics": {"digg_count": 7, "comment_count": 1, "share_count": 0,
+                                                        "play_count": 300}}}
+            elif "/v1/instagram/profile" in self.path:
+                body = {"data": {"user": {"id": "55", "username": "pln_id", "profile_pic_url": "https://ig/p.jpg",
+                                          "follower_count": 12000}}}
+            else:
+                body = {}
+            raw = json.dumps(body).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(raw)
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), Fake)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    monkeypatch.setattr(settings, "_path", lambda: str(tmp_path / "api_scraper.json"))
+    monkeypatch.setattr(runner.engine(), "BASE", f"http://127.0.0.1:{srv.server_address[1]}")
+    rows = [
+        {"platform": "tiktok", "author": "warga1", "url": "https://www.tiktok.com/@warga1/video/111", "text": ""},
+        {"platform": "tiktok", "author": "warga1", "url": "https://www.tiktok.com/@warga1/video/112",
+         "text": "ok", "likes": 3},                                          # same account: copied for free
+        {"platform": "instagram", "author": "pln_id", "url": "https://www.instagram.com/p/AAA/", "caption": "x",
+         "likes": 10},
+        {"platform": "instagram", "author": "pln_id", "url": "https://www.instagram.com/p/BBB/", "caption": "y",
+         "likes": 4},
+        {"platform": "x", "author": "someone", "url": "https://x.com/someone/status/1", "text": "t", "likes": 1,
+         "user_id": "77", "user_image": "https://pbs/i.jpg", "followers": 5},   # complete: nothing fetched
+    ]
+    logs = []
+    assert autofill.fill(rows, logs.append)["credits"] == 0                  # no API key -> nothing
+    settings.save(api_key="k-123", fill_cap=50)
+    out = autofill.fill(rows, logs.append, data_dir=str(tmp_path))
+    assert rows[0]["text"].startswith("Listrik padam") and rows[0]["likes"] == 7 and rows[0]["user_id"] == "9001"
+    assert rows[1]["user_id"] == "9001" and rows[1]["user_image"] == "https://p16/a.jpeg"
+    assert rows[2]["user_id"] == "55" and rows[3]["followers"] == 12000
+    assert sum("/v2/tiktok/video" in c for c in calls) == 1                  # only the post with no caption
+    assert sum("/v1/instagram/profile" in c for c in calls) == 1             # one call for both IG rows
+    assert out["credits"] == len(calls) and settings.usage()["today"] == len(calls)
+    # the next run: the Instagram account is known -> free
+    calls.clear()
+    again = [{"platform": "instagram", "author": "pln_id", "url": "https://www.instagram.com/p/CCC/", "caption": "z",
+              "likes": 1}]
+    autofill.fill(again, logs.append, data_dir=str(tmp_path))
+    assert again[0]["user_id"] == "55" and not [c for c in calls if "profile" in c]
+    srv.shutdown()

@@ -30,13 +30,19 @@ def public() -> dict:
     return {"api_key_set": bool(d.get("api_key")), "api_key_tail": _tail(d.get("api_key", "")),
             "twitter_set": bool(d.get("twitter_api_key")), "twitter_tail": _tail(d.get("twitter_api_key", "")),
             "default_budget": int(d.get("default_budget", 200)),
-            "daily_cap": int(d.get("daily_cap", 0)), "monthly_cap": int(d.get("monthly_cap", 0))}
+            "daily_cap": int(d.get("daily_cap", 0)), "monthly_cap": int(d.get("monthly_cap", 0)),
+            "auto_fill": bool(d.get("auto_fill", True)), "fill_cap": int(d.get("fill_cap", 100))}
 
 
 def save(api_key: str | None = None, twitter_api_key: str | None = None, default_budget: int | None = None,
          clear_api_key: bool = False, clear_twitter: bool = False,
-         daily_cap: int | None = None, monthly_cap: int | None = None) -> dict:
+         daily_cap: int | None = None, monthly_cap: int | None = None,
+         auto_fill: bool | None = None, fill_cap: int | None = None) -> dict:
     d = load()
+    if auto_fill is not None:
+        d["auto_fill"] = bool(auto_fill)
+    if fill_cap is not None:
+        d["fill_cap"] = max(0, int(fill_cap))
     for k, v in (("daily_cap", daily_cap), ("monthly_cap", monthly_cap)):
         if v is not None:
             d[k] = max(0, int(v))

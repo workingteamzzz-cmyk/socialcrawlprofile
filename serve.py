@@ -108,6 +108,9 @@ def main():
     sched = schedule.get()
     sched.audit = lambda who, action, **kw: app.state.audit.add(who, action, "", **kw)
     sched.start()
+    from crawler import telegram_bot
+    if telegram_bot.start():
+        print("Telegram bot: answering /status, /schedules, /stop in the configured chats")
     print(f"Schedules: {len(sched.items)}")
     print(f"Data folder: {os.path.dirname(paths.LISTS_DIR)}  ·  server mode: {'on' if paths.SERVER_MODE else 'off'}")
     print(f"Access keys: {', '.join(sorted(keys)) or '-'}  ·  user accounts: {'yes' if has_users else 'none yet'}  ·  "

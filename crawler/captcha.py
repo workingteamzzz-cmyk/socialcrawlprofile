@@ -178,11 +178,13 @@ def _notify(label: str):
     link = os.environ.get("PUBLIC_URL", "").strip()
     mins = os.environ.get("CAPTCHA_WAIT_MINUTES", "10")
     notify(f"🧩 Post Link Collector: {label} is asking for a verification (\"I'm not a robot\"). "
-           f"Open {link or 'the dashboard'} within {mins} minutes and tap the picture to solve it.",
-           os.environ.get("CAPTCHA_WEBHOOK_URL", "") or None)
+           f"Open {link or 'the dashboard'} within {mins} minutes and tap the picture to solve it. "
+           f"It is solved in the server's browser — your own Google account is not used.",
+           os.environ.get("CAPTCHA_WEBHOOK_URL", "") or None,
+           buttons=[[("🧩 Solve it", link)] if link.startswith("http") else [], [("⏭ Skip this one", "skip")]])
 
 
-def notify(text: str, url: str | None = None):
+def notify(text: str, url: str | None = None, buttons=None):
     """Tell people, in the background: a verification is waiting, or a scheduled search finished.
     - Telegram (free, to your phone): TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID (one or more ids, comma separated);
     - a webhook that takes {"text": ...} (Slack/Teams incoming webhook, n8n/Make): NOTIFY_WEBHOOK_URL,
@@ -195,10 +197,14 @@ def notify(text: str, url: str | None = None):
     if url:
         posts.append((url, {"text": text}))
     if token and chats:
+        from .telegram_bot import dashboard_button, keyboard
+        kb = keyboard(buttons if buttons is not None else [dashboard_button()])
         base = os.environ.get("TELEGRAM_API_BASE", "https://api.telegram.org").rstrip("/")
         for chat in chats:
-            posts.append((f"{base}/bot{token}/sendMessage", {"chat_id": chat, "text": text,
-                                                               "disable_web_page_preview": True}))
+            body = {"chat_id": chat, "text": text, "disable_web_page_preview": True}
+            if kb:
+                body["reply_markup"] = kb
+            posts.append((f"{base}/bot{token}/sendMessage", body))
     if not posts:
         return
 

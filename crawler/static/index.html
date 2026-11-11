@@ -610,6 +610,7 @@ body:not([data-role="admin"]) .need-admin{display:none!important}
               <div class="opt-row"><div class="t"><b>Only articles not delivered before</b><small>For searches run several times a day: the next file skips what the previous one had</small></div><label class="switch"><input type="checkbox" id="nNewOnly"><span></span></label></div>
               <div class="opt-row"><div class="t"><b>Include "needs review"</b><small>Articles where the keyword was not confirmed in the text (otherwise only in the review file)</small></div><label class="switch"><input type="checkbox" id="nInclReview"><span></span></label></div>
               <div class="opt-row"><div class="t"><b>Retry links that failed before</b></div><label class="switch"><input type="checkbox" id="nRetry" checked><span></span></label></div>
+              <div class="opt-row"><div class="t"><b>Browser takes over if needed</b><small>A keyword this engine finds nothing for (or an engine failure) is searched again with the browser engine, full articles</small></div><label class="switch"><input type="checkbox" id="nFallback" checked><span></span></label></div>
               <div class="opt-row"><div class="t"><b>Outlets searched one by one</b><small>Per keyword; more = more complete and slower</small></div>
                 <select id="nHarvest"><option value="50">50</option><option value="200" selected>200</option><option value="500">500</option><option value="0">All</option></select></div>
               <p class="hint">Keywords may use <code>"exact phrase"</code>, <code>AND</code>, <code>OR</code>, <code>NOT</code> and ( ), e.g. <code>"PLN" AND (padam OR pemadaman) NOT promo</code>. Output is always full articles; the Online layout gets INFLUENCER, PERSON and SENTIMENT filled.</p>
@@ -787,6 +788,9 @@ body:not([data-role="admin"]) .need-admin{display:none!important}
           <div class="field"><label for="akMonth">Credit limit per month (all runs; 0 = none)</label><input type="number" id="akMonth" min="0"></div></div>
         <small class="hint">When a limit is reached, runs stop and new runs are refused until the next day / month. Account profiles already looked up are reused for 30 days (followers: 7 days), so the same accounts don't cost again.</small>
         <div class="hint" id="akUsage" style="margin-top:8px"></div>
+        <div class="opt-row" style="margin-top:14px"><div class="t"><b>Auto-fill empty Medsos data</b><small>After a browser run with the Medsos layout, empty User ID, User Image, Follower, caption and engagement are fetched with the API — one call per post missing a caption/engagement, one per account missing its ID/photo; already-known accounts cost nothing.</small></div>
+          <label class="switch"><input type="checkbox" id="akFill"><span></span></label></div>
+        <div class="field" style="margin-top:8px"><label for="akFillCap">Auto-fill credit cap per run</label><input type="number" id="akFillCap" min="0" style="width:140px"></div>
         <ul class="errs" id="akErrs"></ul>
         <div style="display:flex;gap:8px;margin-top:16px"><button class="btn primary" id="akSave">Save</button><button class="btn" id="akBal">Check credit balance</button></div>
         <div class="hint" id="akBalOut" style="margin-top:10px"></div>
@@ -1409,7 +1413,7 @@ function nwOptions(){
     sites: $('nSites').value.split(',').map(w => w.trim()).filter(Boolean), template: $('nTemplate').value, layout_v2: true,
     engine: radioValue('nEngine'), multi_sources: [...document.querySelectorAll('.nMs')].filter(c => c.checked).map(c => c.value),
     registered_only: $('nRegOnly').checked, new_only: $('nNewOnly').checked, include_review: $('nInclReview').checked,
-    retry_failed: $('nRetry').checked, max_harvest: +$('nHarvest').value };
+    retry_failed: $('nRetry').checked, max_harvest: +$('nHarvest').value, fallback: $('nFallback').checked };
 }
 function nwEngineView(){
   const multi = radioValue('nEngine') === 'multi';
@@ -1427,9 +1431,10 @@ function nwEngineView(){
   if (o.engine){ document.querySelectorAll('input[name="nEngine"]').forEach(r => r.checked = r.value === o.engine);
     if (o.multi_sources) document.querySelectorAll('.nMs').forEach(c => c.checked = o.multi_sources.includes(c.value));
     $('nRegOnly').checked = !!o.registered_only; $('nNewOnly').checked = !!o.new_only; $('nInclReview').checked = !!o.include_review;
-    $('nRetry').checked = o.retry_failed !== false; $('nHarvest').value = String(o.max_harvest ?? 200); } }
+    $('nRetry').checked = o.retry_failed !== false; $('nHarvest').value = String(o.max_harvest ?? 200);
+    $('nFallback').checked = o.fallback !== false; } }
   nwEngineView(); })();
-['nCap','nTemplate','nByDay','nSrcFeed','nSrcNews','nSrcAll','nMediaOnly','nExtraMedia','nResolve','nRegion','nExact','nExclude','nSites','nRegOnly','nNewOnly','nInclReview','nRetry','nHarvest'].forEach(id => $(id).addEventListener(['nExclude','nSites','nExtraMedia'].includes(id) ? 'input' : 'change',
+['nCap','nTemplate','nByDay','nSrcFeed','nSrcNews','nSrcAll','nMediaOnly','nExtraMedia','nResolve','nRegion','nExact','nExclude','nSites','nRegOnly','nNewOnly','nInclReview','nRetry','nHarvest','nFallback'].forEach(id => $(id).addEventListener(['nExclude','nSites','nExtraMedia'].includes(id) ? 'input' : 'change',
   () => { ls.set('nw_opts', nwOptions()); nwRender(); }));
 document.querySelectorAll('input[name="nEngine"], .nMs').forEach(el => el.addEventListener('change', () => { nwEngineView(); ls.set('nw_opts', nwOptions()); nwRender(); }));
 function nwRender(){
@@ -1678,13 +1683,15 @@ async function loadApKeys(){
   $('akTwState').textContent = d.twitter_set ? `(set ${d.twitter_tail})` : '(not set)';
   $('akBudget').value = d.default_budget ?? 200;
   $('akDay').value = d.daily_cap ?? 0; $('akMonth').value = d.monthly_cap ?? 0;
+  $('akFill').checked = d.auto_fill !== false; $('akFillCap').value = d.fill_cap ?? 100;
   const inf = await api('/api/apiscraper/info'); if (inf && inf.used) $('akUsage').textContent = usageText(inf);
   $('akKey').value = $('akTw').value = ''; $('akKeyClear').checked = $('akTwClear').checked = false;
 }
 $('akSave').onclick = async () => {
   const r = await api('/api/apiscraper/settings', {api_key: $('akKey').value.trim(), twitter_api_key: $('akTw').value.trim(),
     default_budget: $('akBudget').value === '' ? null : +$('akBudget').value, clear_api_key: $('akKeyClear').checked, clear_twitter: $('akTwClear').checked,
-    daily_cap: $('akDay').value === '' ? null : +$('akDay').value, monthly_cap: $('akMonth').value === '' ? null : +$('akMonth').value});
+    daily_cap: $('akDay').value === '' ? null : +$('akDay').value, monthly_cap: $('akMonth').value === '' ? null : +$('akMonth').value,
+    auto_fill: $('akFill').checked, fill_cap: $('akFillCap').value === '' ? null : +$('akFillCap').value});
   if (!r.ok){ $('akErrs').innerHTML = `<li>${esc(r.error || 'Could not save')}</li>`; return; }
   $('akErrs').innerHTML = ''; toast('API settings saved'); loadApKeys(); loadApInfo();
 };

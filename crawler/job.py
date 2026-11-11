@@ -227,6 +227,18 @@ class Job:
                 self._save_warned = True
             return False
 
+    def _api_fill(self, rows: list) -> None:
+        """Medsos output: what the browser could not read is filled with the scraping API (autofill.py) —
+        only when an API key is set and auto-fill is on; never stops the run's file from being written."""
+        if not rows:
+            return
+        try:
+            from .apiscraper import autofill
+            self.current = "Filling empty data with the API"
+            autofill.fill(rows, self.log, self.stop_flag)
+        except Exception as e:  # noqa: BLE001
+            self.log(f"⚠ API auto-fill skipped: {str(e).splitlines()[0][:160]}")
+
     def _finish_files(self, save, paths: list, anything: bool) -> list:
         """Last save of a run; returns the file names to offer for download.
         Nothing is written for a run that never got going (e.g. the browser could not open).
@@ -478,6 +490,8 @@ class Job:
                 if i + 1 < len(accounts):
                     self._pause_between()
         finally:
+            if template == "medsos" and not stopped:
+                self._api_fill(links)
             done_keys = {(s["platform_label"], s["handle"]) for s in statuses}
             for acc in accounts:
                 if (PLATFORM_LABEL[acc.platform], acc.handle) not in done_keys:
@@ -619,6 +633,8 @@ class Job:
                 if i + 1 < len(tasks):
                     self._pause_between()
         finally:
+            if opt.template == "medsos" and not stopped:
+                self._api_fill(list(seen.values()))
             files = self._finish_files(save, [xlsx, csvp], bool(statuses))
             self._close(ctx, pw)
         b["files"] = files
@@ -694,7 +710,13 @@ class Job:
             return added
 
         if opt.engine == "multi":
-            return self._news_multi(kws, opt, d_start, d_end, tz, seen, statuses, b, save, record, xlsx, csvp)
+            kws = self._news_multi(kws, opt, d_start, d_end, tz, seen, statuses, b, save, record, xlsx, csvp)
+            if not kws:
+                return
+            # fallback: the browser engine, the media's own link and the article text (the Online layout needs it)
+            opt.engine, opt.resolve = "google", True
+            opt.detail = "full" if opt.template == "online" else "basic"
+            self.total, self.done = len(kws), 0
         self.log(f"News search (Google): {', '.join(kws)} — period {d_start:%Y-%m-%d} to {d_end:%Y-%m-%d} "
                  f"({tz_name}) — detail: {opt.detail}")
         pw = ctx = None
@@ -761,7 +783,7 @@ class Job:
         finally:
             files = self._finish_files(save, [xlsx, csvp], bool(statuses))
             self._close(ctx, pw)
-        b["files"] = files
+        b["files"] = files + b.pop("extra_files", [])
         if opt.template == "online" and seen:                 # like the team's uploader notebook reports it
             from . import templates
             st: dict = {}
@@ -774,23 +796,27 @@ class Job:
         self.log(("⏹ Stopped. " if stopped else "✅ Done. ") + f"Total {len(seen)} unique news links" + (f" → {files[0]}" if files else ""))
 
     def _news_multi(self, kws, opt, d_start, d_end, tz, seen, statuses, b, save, record, xlsx, csvp):
-        """News Search with the multi-source engine (news_multi.py): no browser, every source, full articles."""
+        """News Search with the multi-source engine (news_multi.py): no browser, every source, full articles.
+        Returns the keywords the browser engine should take over (the engine failed, or found nothing for them)
+        — or None when the run is finished here."""
         from . import news_multi
         from .paths import APP_DATA
-        miss = news_multi.check()
-        if miss:
-            raise RuntimeError(miss)
         opt.detail = "full"                                   # this engine always reads the articles
         self.log(f"News search (multi-source): {', '.join(kws)} — period {d_start:%Y-%m-%d} to {d_end:%Y-%m-%d}")
         self.current = "Multi-source news search"
-        files, extra, stopped = [], [], False
+        extra, stopped, fallback = [], False, []
         try:
+            miss = news_multi.check()
+            if miss:
+                raise RuntimeError(miss)
             rows, extra, stat = news_multi.run(kws, f"{d_start:%Y-%m-%d}", f"{d_end:%Y-%m-%d}", opt, tz, self.log,
                                                self.stop_flag, APP_DATA, OUTPUT_DIR)
             stopped = self.stop_flag.is_set()
             for kw in kws:                                    # one status line per keyword, like the browser engine
                 mine = [r for r in rows if r.get("keyword") == kw]
                 record(kw, Result("ok", mine, f"{len(mine)} articles (multi-source)"))
+                if not mine:
+                    fallback.append(kw)
             other = [r for r in rows if r.get("keyword") not in kws]   # links retried from earlier runs
             if other:
                 record(kws[0], Result("ok", other, f"{len(other)} articles from earlier runs' retry queue"))
@@ -800,11 +826,19 @@ class Job:
             if stat.get("needs_review", 0) and not opt.include_review:
                 self.log(f"   {stat['needs_review']} article(s) in the archive need review (keyword not confirmed in "
                          f"the text) — they are in the review file, not in the Online file.")
-        finally:
-            files = self._finish_files(save, [xlsx, csvp], bool(statuses))
+        except Exception as e:  # noqa: BLE001
+            stopped = self.stop_flag.is_set()
+            self.log(f"⚠ Multi-source engine failed: {str(e).splitlines()[0][:200]}")
+            fallback = list(kws)
+        b.setdefault("extra_files", []).extend(extra)
+        if fallback and opt.fallback and not stopped:
+            self.log(f"🔁 Taking over with the browser engine for: {', '.join(fallback)}")
+            return fallback
+        files = self._finish_files(save, [xlsx, csvp], bool(statuses))
         b["files"] = files + extra
         self.log(("⏹ Stopped. " if stopped else "✅ Done. ") + f"Total {len(seen)} news articles"
                  + (f" → {files[0]}" if files else ""))
+        return None
 
     def start_decode(self, name: str, data: bytes) -> str | None:
         """Fix the Google News links in an uploaded .xlsx/.csv/.txt file (the team's decoder, inside the app)."""

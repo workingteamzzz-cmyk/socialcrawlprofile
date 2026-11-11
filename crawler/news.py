@@ -56,6 +56,7 @@ class NewsOptions:
     retry_failed: bool = True      # multi: links that failed in earlier runs are tried again
     include_review: bool = False   # multi: also articles whose keyword could not be verified in the text
     max_harvest: int = 200         # multi: outlets asked one by one (site:) per keyword
+    fallback: bool = True          # multi: keywords it finds nothing for (or an engine failure) go to the browser
 
     @classmethod
     def from_dict(cls, d: dict) -> "NewsOptions":
@@ -92,7 +93,8 @@ class NewsOptions:
                    multi_sources=[x for x in (d.get("multi_sources") or []) if isinstance(x, str)][:10],
                    registered_only=bool(d.get("registered_only")), new_only=bool(d.get("new_only")),
                    retry_failed=bool(d.get("retry_failed", True)), include_review=bool(d.get("include_review")),
-                   max_harvest=max(0, min(2000, int(d.get("max_harvest") or 200))))
+                   max_harvest=max(0, min(2000, int(d.get("max_harvest") or 200))),
+                   fallback=bool(d.get("fallback", True)))
 
 
 def google_query(kw: str, opt: NewsOptions) -> str:

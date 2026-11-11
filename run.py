@@ -48,6 +48,8 @@ def main():
     try:
         from crawler import schedule
         schedule.get().start()                # scheduled searches run while this window is open
+        from crawler import telegram_bot
+        telegram_bot.start()                  # TELEGRAM_BOT_TOKEN set: the team's chat can check and tap buttons
     except Exception as e:  # noqa: BLE001
         print(f"Note: schedules are not running ({e}).")
     print(f"Account lists and results: {os.path.dirname(paths.LISTS_DIR)}")

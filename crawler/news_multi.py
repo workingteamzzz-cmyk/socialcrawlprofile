@@ -134,9 +134,17 @@ def run(keywords: list[str], start: str, end: str, opt, tz, log, stop_event: thr
         hits = results(db, stat["batch"], start, end, bool(opt.include_review))
     finally:
         db.close()
-    rows = [_row(h, tz) for h in hits]
-    for r in rows:
-        r["keyword"] = to_dash.get(r["keyword"], r["keyword"])
+    from .medmas.filters import keyword_match, url_slug
+    rows = []
+    for h in hits:
+        r = _row(h, tz)
+        kw = to_dash.get(r["keyword"])
+        if kw is None:          # found before under another keyword: credit it to this run's keyword that matches
+            kw = next((k for q, k in to_dash.items()
+                       if keyword_match(q, h.get("title") or "", h.get("content") or "", url_slug(h["url"]))),
+                      keywords[0] if len(keywords) == 1 else r["keyword"])
+        r["keyword"] = kw
+        rows.append(r)
     extra = []
     for name in sorted(os.listdir(cfg.output_folder)) if os.path.isdir(cfg.output_folder) else []:
         if name.startswith("crawl_results_") and name.endswith(".xlsx"):   # Data + Needs Review + Recap: for checking

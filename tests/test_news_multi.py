@@ -106,3 +106,56 @@ def test_short_names_merge_into_the_full_name():
     from crawler.templates import merge_names
     assert merge_names("Ahmad Sutrisno, Ahmad, Dedie Rachim, Dedie") == "Ahmad Sutrisno, Dedie Rachim"
     assert merge_names("") == "" and merge_names("Budi") == "Budi"
+
+
+def test_browser_takes_over_keywords_the_multi_engine_found_nothing_for(tmp_path, monkeypatch):
+    from crawler import job, news, news_multi, paths
+    from crawler.browser import Result
+    monkeypatch.setattr(job, "OUTPUT_DIR", str(tmp_path / "out"))
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+
+    def fake_multi(kws, start, end, opt, tz, log, stop, data_dir, out_dir):
+        return ([{"url": "https://a.id/1", "title": "Banjir Bogor", "media": "A", "published": "2026-11-10",
+                  "ts": 1, "keyword": "banjir", "text": "Banjir melanda Bogor."}], [], {"batch": "b"})
+    monkeypatch.setattr(news_multi, "run", fake_multi)
+    searched = []
+
+    class FakeBrowser:
+        def __init__(self, *a, **k):
+            pass
+
+        def search(self, kw, opt, s, e):
+            searched.append((kw, opt.engine, opt.detail))
+            return Result("ok", [{"url": "https://b.id/2", "title": "Longsor", "media": "B", "published": "2026-11-10",
+                                  "ts": 2}], "")
+
+        def article(self, url):
+            return {"text": "Longsor di Garut.", "final_url": url}
+    monkeypatch.setattr(news, "NewsCrawler", FakeBrowser)
+    monkeypatch.setattr(job, "launch_context", lambda *a, **k: object())
+    j = job.Job()
+    assert j.start_news(["banjir", "longsor"], "2026-11-10", "2026-11-10", "WIB",
+                        {"engine": "multi", "template": "online", "resolve": False}) is None
+    t = time.time()
+    while j.running and time.time() - t < 60:
+        time.sleep(0.1)
+    s = j.state()
+    assert not s["error"], s["error"]
+    assert searched == [("longsor", "google", "full")]                  # only the keyword multi found nothing for
+    assert {r["url"] for r in j.data["news"]["links"]} == {"https://a.id/1", "https://b.id/2"}
+    assert any("_Online_" in f for f in s["modes"]["news"]["files"])
+
+    # an engine failure: every keyword goes to the browser; with fallback off nothing does
+    def broken(*a, **k):
+        raise RuntimeError("feedparser missing")
+    monkeypatch.setattr(news_multi, "run", broken)
+    searched.clear()
+    j.start_news(["banjir"], "2026-11-10", "2026-11-10", "WIB", {"engine": "multi", "template": "online"})
+    while j.running:
+        time.sleep(0.1)
+    assert searched == [("banjir", "google", "full")]
+    searched.clear()
+    j.start_news(["banjir"], "2026-11-10", "2026-11-10", "WIB", {"engine": "multi", "fallback": False})
+    while j.running:
+        time.sleep(0.1)
+    assert searched == []

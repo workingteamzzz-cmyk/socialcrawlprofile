@@ -301,6 +301,44 @@ with User ID, Username, Follower, User Image, **Sentiment and Emotion**, plus *R
 - API: `GET /api/apiscraper/info`, `POST /api/apiscraper/start`, `GET /api/apiscraper/balance` (operator);
   `GET/POST /api/apiscraper/settings` (admin).
 
+## Automation: the flow from search to the team's file
+
+```
+Schedule (or Start) ─┬─ Medsos (keyword search / profiles, browser, free)
+                     │     1. links + caption & engagement + IDs read from the post pages
+                     │     2. Post ID taken from each link (never needs the API)
+                     │     3. API auto-fill, only for fields still empty:
+                     │          free: known profiles / other rows of the same account
+                     │          1 credit per post missing caption/engagement (also brings the account's ID & photo)
+                     │          1 credit per ACCOUNT still missing ID/photo/followers
+                     │          stops at the per-run fill cap and the daily/monthly limit
+                     │     4. Sentiment & Emotion (team lexicon) → Medsos Excel
+                     └─ News (Multi-source engine, no browser)
+                           1. Google News by date + per outlet, sitemaps, RSS, Bing, GDELT → decode → read articles
+                           2. a keyword with 0 articles (or an engine failure) → the browser engine takes over
+                           3. INFLUENCER / PERSON / SENTIMENT, the team's cleaning rules → Online Excel
+   → Exports + delivery webhook + Telegram message ("✅ … finished — N links", button to the dashboard)
+   → a verification on the way → Telegram message with "Solve it" / "Skip"
+```
+
+API settings: **Auto-fill empty Medsos data** (on by default when a key is set) and **Auto-fill credit cap per run**.
+
+## Telegram bot
+
+Set in `.env` on the server, then `sudo docker compose up -d`:
+
+```
+TELEGRAM_BOT_TOKEN=…        # from @BotFather
+TELEGRAM_CHAT_ID=…          # send /start to the bot: it answers with your chat id (groups: starts with -)
+PUBLIC_URL=https://…        # the dashboard address (buttons open it)
+CAPTCHA_WAIT_MINUTES=60     # how long a run waits for someone to solve a verification
+```
+
+The bot messages the team when a verification is waiting (**Solve it** opens the dashboard, **Skip** skips it) and when
+a scheduled run finishes or fails. Commands: `/status`, `/schedules` (each with **Run now**), `/stop`. It answers only
+the chats in `TELEGRAM_CHAT_ID`; files and results are never sent to Telegram, only counts and the dashboard link,
+which needs a sign-in. A verification is solved on the server's own browser: nobody's Google account is used.
+
 ## Schedules (searches that run by themselves)
 
 Set a search up on the **News Search**, **Keyword Search** or **Collect** page as usual, then click

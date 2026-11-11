@@ -131,6 +131,39 @@ def add(kind: str, items: list[tuple[str, dict]]) -> int:
     return new
 
 
+def _row_keys(kind: str, rows: list[dict], tz) -> list[str]:
+    from . import templates
+    out = []
+    for r in rows:
+        try:
+            if kind == "online":
+                row = dict(zip(templates.ONLINE_COLUMNS, templates.online_row(r, tz)))
+            else:
+                row = dict(zip(templates.MEDSOS_COLUMNS, templates.medsos_row(0, r, tz)))
+            out.append(_keyify(kind, row))
+        except Exception:  # noqa: BLE001
+            out.append("")
+    return out
+
+
+def only_new(kind: str, rows: list[dict], tz) -> list[dict]:
+    """The rows not yet in the database (= not delivered by an earlier run): for hourly schedules."""
+    rows = list(rows)
+    keys = _row_keys(kind, rows, tz)
+    known: set = set()
+    with _LOCK:
+        c = _db()
+        try:
+            want = [k for k in set(keys) if k]
+            for i in range(0, len(want), 500):
+                part = want[i:i + 500]
+                known |= {r["key"] for r in c.execute(
+                    f"SELECT key FROM items WHERE kind=? AND key IN ({','.join('?' * len(part))})", (kind, *part))}
+        finally:
+            c.close()
+    return [r for r, k in zip(rows, keys) if not k or k not in known]
+
+
 def add_rows(kind: str, rows: list[dict], tz, keyword_of=None) -> int:
     """Raw job rows -> the layout's columns -> archive (never raises)."""
     from . import templates

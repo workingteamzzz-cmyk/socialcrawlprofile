@@ -56,7 +56,10 @@ def period(s: dict, at: float) -> tuple[str, str]:
 
 
 def describe(s: dict) -> str:
-    when = f"every day at {s['time']}" if s["repeat"] == "daily" else f"every {s['hours']} hours"
+    when = f"every day at {s['time']}" if s["repeat"] == "daily" else \
+        ("every hour" if int(s["hours"]) == 1 else f"every {s['hours']} hours")
+    if s.get("new_only"):
+        when += ", only new results"
     return f"{when} ({s.get('payload', {}).get('tz', 'WIB')}), collecting {WINDOW_LABEL[s['window']]}"
 
 
@@ -77,7 +80,8 @@ def clean(data: dict) -> dict:
     s = {"kind": kind, "payload": payload, "repeat": repeat, "window": data.get("window"),
          "name": str(data.get("name") or "").strip()[:80], "enabled": bool(data.get("enabled", True)),
          "webhook": str(data.get("webhook") or "").strip()[:500],
-         "webhook_token": str(data.get("webhook_token") or "").strip()[:500]}
+         "webhook_token": str(data.get("webhook_token") or "").strip()[:500],
+         "new_only": bool(data.get("new_only", False))}
     if s["webhook"] and not re.fullmatch(r"https?://[^\s]+", s["webhook"]):
         raise ScheduleError("The results webhook must be a web address starting with https:// (e.g. an n8n Webhook URL).")
     if repeat == "daily":
@@ -185,8 +189,13 @@ class Scheduler:
         start, end = period(s, now)
         p = s["payload"]
         self.job._next_origin = "Manual" if manual else "Auto"         # file names: 20261108_Online_Auto_24.00
+        if s.get("new_only"):
+            self.job._next_new_only = True                              # each file: only what is new since last run
         if s["kind"] == "news":
-            err = self.job.start_news(p.get("keywords") or [], start, end, p["tz"], p.get("options") or {})
+            opts = dict(p.get("options") or {})
+            if s.get("new_only"):
+                opts["new_only"] = True                                 # the multi-source engine's own memory too
+            err = self.job.start_news(p.get("keywords") or [], start, end, p["tz"], opts)
         elif s["kind"] == "keywords":
             err = self.job.start_keywords(p.get("keywords") or [], start, end, p["tz"], p.get("platforms") or [],
                                           p.get("options") or {})
@@ -197,6 +206,7 @@ class Scheduler:
                                        p.get("template", "standard"))
         if err:
             self.job.__dict__.pop("_next_origin", None)
+            self.job.__dict__.pop("_next_new_only", None)
             return err                                       # a scheduled one stays due and is tried again
         with self.lock:
             self.running_id = (s["id"], self.job.job_id, s["kind"], start, end)

@@ -118,6 +118,7 @@ class Job:
             self.job_id += 1
             self.kind = kind
             self._origin = self.__dict__.pop("_next_origin", None) or "Manual"   # "Auto" for scheduled runs
+            self._new_only = bool(self.__dict__.pop("_next_new_only", False))  # hourly schedules: only new rows
             self.logs, self.log_total, self.done, self.total, self.current, self.error = [], 0, 0, 0, "", ""
             self.__dict__.pop("_save_warned", None)
             self._last_save = 0
@@ -226,6 +227,17 @@ class Job:
                          "Close it; saving is retried after the next account.")
                 self._save_warned = True
             return False
+
+    def _fresh(self, kind: str, rows, tz) -> list:
+        """With 'only new results' (hourly schedules): leave out what an earlier run already delivered."""
+        rows = list(rows)
+        if not getattr(self, "_new_only", False):
+            return rows
+        try:
+            from . import archive
+            return archive.only_new(kind, rows, tz)
+        except Exception:  # noqa: BLE001
+            return rows
 
     def _archive(self, kind: str, rows, tz=None) -> None:
         """Every result also goes to the reporting database (archive.py)."""
@@ -450,7 +462,7 @@ class Job:
             x, c = paths or (xlsx, csvp)
             if template == "medsos":
                 from . import templates
-                rows = sorted(links, key=lambda r: (r["order"], -(r.get("sort_ts") or r.get("ts") or 0)))
+                rows = sorted(self._fresh("medsos", links, tz), key=lambda r: (r["order"], -(r.get("sort_ts") or r.get("ts") or 0)))
                 return self._safe_save(lambda: templates.write("medsos", x, c, rows, tz), x)
             return self._safe_save(lambda: write_outputs(x, c, links, statuses, meta), x)
 
@@ -593,7 +605,8 @@ class Job:
             x, c = paths or (xlsx, csvp)
             if opt.template == "medsos":
                 from . import templates
-                rows = sorted(seen.values(), key=lambda r: -(r.get("sort_ts") or r.get("ts") or 0))   # comments follow their post
+                rows = sorted(self._fresh("medsos", seen.values(), tz),
+                              key=lambda r: -(r.get("sort_ts") or r.get("ts") or 0))   # comments follow their post
                 return self._safe_save(lambda: templates.write("medsos", x, c, rows, tz), x)
             return self._safe_save(lambda: write_keyword_outputs(x, c, list(seen.values()), statuses, meta), x)
 
@@ -706,7 +719,7 @@ class Job:
             x, c = paths or (xlsx, csvp)
             if opt.template == "online":
                 from . import templates
-                rows = sorted(seen.values(), key=lambda r: -(r.get("ts") or 0))
+                rows = sorted(self._fresh("online", seen.values(), tz), key=lambda r: -(r.get("ts") or 0))
                 return self._safe_save(lambda: templates.write("online", x, c, rows, tz, opt.detail == "full"), x)
             return self._safe_save(lambda: write_news_outputs(x, c, list(seen.values()), statuses, meta), x)
 

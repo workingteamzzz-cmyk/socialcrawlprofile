@@ -972,13 +972,15 @@ body:not([data-role="admin"]) .need-admin{display:none!important}
       <p class="hint" style="margin-top:0" id="schWhat"></p>
       <div class="field"><label for="schName">Name</label><input id="schName" maxlength="80"></div>
       <div class="field"><label for="schRepeat">How often</label>
-        <select id="schRepeat"><option value="daily">Every day at a set time</option><option value="hours">Every few hours</option></select></div>
+        <select id="schRepeat"><option value="daily">Every day at a set time</option><option value="hours">Every hour / every few hours</option></select></div>
       <div class="field" id="schTimeF"><label for="schTime">Time (<span id="schTz">WIB</span>)</label><input id="schTime" type="time" value="07:00"></div>
       <div class="field" id="schHoursF" style="display:none"><label for="schHours">Every</label>
-        <select id="schHours"><option value="1">1 hours</option><option value="2">2 hours</option><option value="3">3 hours</option><option value="4">4 hours</option><option value="6">6 hours</option><option value="8">8 hours</option><option value="12">12 hours</option></select></div>
+        <select id="schHours"><option value="1">1 hour</option><option value="2">2 hours</option><option value="3">3 hours</option><option value="4">4 hours</option><option value="6">6 hours</option><option value="8">8 hours</option><option value="12">12 hours</option></select></div>
       <div class="field"><label for="schWindow">Period collected at each run</label>
         <select id="schWindow"><option value="yesterday">Yesterday (best for a daily run)</option><option value="today">Today so far</option>
           <option value="yesterday_today">Yesterday + today</option><option value="last_7_days">The 7 days before</option></select></div>
+      <label class="opt-row" style="margin-top:6px"><span class="t"><b>Each file: only what is new</b><small>Leaves out what an earlier run of any search already delivered — for hourly runs, each file holds only the last hour's new posts / articles</small></span>
+        <span class="switch"><input type="checkbox" id="schNew"><span></span></span></label>
       <div class="field"><label for="schHook">When finished, send the results to (optional)</label>
         <input id="schHook" placeholder="https://… e.g. an n8n / Make / Zapier webhook URL">
         <small class="hint">The links arrive as JSON — a client's server, or an automation (n8n/Make) that puts them in Google Sheets, email or Telegram/WhatsApp.</small></div>
@@ -1830,7 +1832,8 @@ const closeSch = () => schModal.classList.remove('show');
 $('schClose').onclick = closeSch; $('schCancel').onclick = closeSch;
 schModal.addEventListener('click', e => { if (e.target === schModal) closeSch(); });
 $('schRepeat').onchange = () => { const d = $('schRepeat').value === 'daily';
-  $('schTimeF').style.display = d ? '' : 'none'; $('schHoursF').style.display = d ? 'none' : ''; };
+  $('schTimeF').style.display = d ? '' : 'none'; $('schHoursF').style.display = d ? 'none' : '';
+  $('schWindow').value = d ? 'yesterday' : 'today'; $('schNew').checked = !d; };
 function openSch(kind, payload, what, name){
   schDraft = {kind, payload};
   $('schWhat').textContent = what; $('schName').value = name; $('schTz').textContent = payload.tz || 'WIB';
@@ -1840,6 +1843,7 @@ function openSch(kind, payload, what, name){
 $('schSave').onclick = async () => {
   const r = await api('/api/schedules/save', {...schDraft, name: $('schName').value.trim(), repeat: $('schRepeat').value,
     time: $('schTime').value || '07:00', hours: +$('schHours').value, window: $('schWindow').value, enabled: true,
+    new_only: $('schNew').checked,
     webhook: $('schHook').value.trim(), webhook_token: $('schToken').value.trim()});
   if (!r.ok){ $('schErrs').innerHTML = `<li>${esc(r.error || 'Could not save')}</li>`; return; }
   closeSch(); toast('Schedule saved — it runs by itself'); go('schedules');

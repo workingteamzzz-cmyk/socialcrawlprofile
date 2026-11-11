@@ -84,3 +84,14 @@ def test_report_endpoints_and_roles(tmp_path, monkeypatch):
                                            "topic_id": r["topic"]["id"]}, headers=SITE).json()
     assert rep["ok"] and rep["total"] == 0
     assert op.post("/api/report/topics/delete", json={"id": r["topic"]["id"]}, headers=SITE).json()["ok"]
+
+
+def test_hourly_only_new(arch):
+    from crawler.schedule import clean, describe
+    rows = [{"platform": "x", "author": "a", "url": "https://x.com/a/status/1", "text": "pln", "ts": 1762780000},
+            {"platform": "x", "author": "b", "url": "https://x.com/b/status/2", "text": "pln", "ts": 1762780000}]
+    arch.add_rows("medsos", rows[:1], WIB)                                 # delivered by the previous run
+    assert [r["url"] for r in arch.only_new("medsos", rows, WIB)] == ["https://x.com/b/status/2"]
+    s = clean({"kind": "keywords", "payload": {"keywords": ["pln"]}, "repeat": "hours", "hours": 1,
+               "window": "today", "new_only": True})
+    assert s["new_only"] and describe(s).startswith("every hour, only new results")

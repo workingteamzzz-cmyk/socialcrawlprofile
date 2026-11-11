@@ -33,6 +33,7 @@ class CaptchaGate:
         self.version = 0
         self.size = (0, 0)
         self.last_view = 0.0
+        self.busy = False            # a tap is being done on the page: further taps wait for the new picture
 
     # ---------- web side ----------
     def info(self) -> dict:
@@ -58,6 +59,10 @@ class CaptchaGate:
         if kind not in ("click", "type", "key", "skip", "refresh", "scroll"):
             return "Unknown action."
         self.last_view = time.time()
+        with self.lock:
+            if self.busy and kind != "skip":
+                return "Wait a moment — the last tap is still being done (the picture updates in a second)."
+            self.busy = kind != "skip"
         self.actions.put(action)
         return None
 
@@ -93,8 +98,12 @@ class CaptchaGate:
                         crawler.log("   Verification skipped from the dashboard")
                         return False
                     _perform(page, act)
-                    dirty = True
-                    page.wait_for_timeout(700)               # let the page react before the next picture
+                    page.wait_for_timeout(900)               # let the page react, then show it at once
+                    self._picture(page)
+                    last_shot, dirty = time.time(), False
+                    with self.lock:
+                        self.busy = False                    # the next tap may come — on the new picture
+                    continue
                 watched = time.time() - self.last_view < 15
                 if dirty or (watched and time.time() - last_shot > 1.5) or not self.shot:
                     self._picture(page)
@@ -103,7 +112,7 @@ class CaptchaGate:
             return False
         finally:
             with self.lock:
-                self.pending, self.label = False, ""
+                self.pending, self.label, self.busy = False, "", False
 
     def _picture(self, page):
         try:

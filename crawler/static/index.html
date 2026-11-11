@@ -1100,7 +1100,9 @@ body::before{content:"";position:fixed;inset:-20%;z-index:-1;pointer-events:none
     <div class="card-bd">
       <p class="hint" style="margin-top:0"><b id="capSite"></b> wants to check that a person is there. This is the server's
         browser, live: <b>click on the picture</b> exactly as you would on the page (tick the box, pick the images, press
-        Verify). The search continues by itself once it is through. <span id="capLeft"></span></p>
+        Verify). <b>Tap once, then wait</b> until the picture updates (the circle disappears) before the next tap.
+        Images that fade and change after a tap are normal — the check gives new ones; pick again until none match,
+        then press Verify. The search continues by itself once it is through. <span id="capLeft"></span></p>
       <div style="position:relative;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--soft);min-height:120px">
         <img id="capImg" alt="The page asking for a verification" style="display:block;width:100%;height:auto;cursor:crosshair">
         <div id="capWait" class="hint" style="position:absolute;inset:0;display:grid;place-items:center">Taking a picture of the page…</div>
@@ -1751,6 +1753,7 @@ async function loadAudit(){
 /* ---------- verification solved from the dashboard (server) ---------- */
 const capModal = $('capModal');
 let cap = {pending: false}, capDismissed = 0, capTimer = null, capBusy = false;
+let capVer = 0, capAwait = 0, capAwaitUntil = 0;   // one tap at a time: the next one waits for the new picture
 let capClip = [0, 0, 1280, 900], capUrl = '';
 // Phones get a close-up of the check itself (the whole page would be tiny); the button switches views.
 let capFocus = window.innerWidth < 760;
@@ -1769,17 +1772,20 @@ async function capRefresh(){
       if (clip.length === 4 && clip[2] > 0) capClip = clip;             // which part of the page this picture shows
       $('capImg').src = url; if (capUrl) URL.revokeObjectURL(capUrl); capUrl = url;
       $('capWait').style.display = 'none';
+      capVer = +(r.headers.get('X-Version') || 0);
+      if (capAwait && (capVer > capAwait || Date.now() > capAwaitUntil) && r.headers.get('X-Busy') !== '1') capReady();
     }
   } catch (e) { /* next round */ }
   capViewLabel();
   const left = Math.max(0, Math.round((cap.until - Date.now() / 1000) / 60));
   $('capLeft').textContent = cap.until ? `(about ${left} min left before it is skipped)` : '';
-  capTimer = setTimeout(capRefresh, 1300);
+  capTimer = setTimeout(capRefresh, capAwait ? 350 : 1300);         // quick while a tap is being done
 }
+function capReady(){ capAwait = 0; const m = $('capMark'); if (m) m.style.display = 'none'; $('capImg').style.opacity = 1; }
 async function capSend(a){
   if (capBusy) return;
   capBusy = true;
-  try { const r = await api('/api/captcha', a); if (!r.ok && r.error) toast(r.error); } finally { capBusy = false; }
+  try { const r = await api('/api/captcha', a); if (!r.ok){ if (r.error) toast(r.error); capReady(); } } finally { capBusy = false; }
   setTimeout(capRefresh, 500);
 }
 function capUpdate(c){
@@ -1794,7 +1800,16 @@ function capUpdate(c){
   if (!cap.pending && capModal.classList.contains('show')){ capModal.classList.remove('show'); clearTimeout(capTimer); toast('Verification finished'); }
 }
 $('capImg').addEventListener('click', e => {
+  if (capAwait || capBusy){ toast('One moment — wait for the picture to update, then tap'); return; }
   const r = e.target.getBoundingClientRect();
+  let m = $('capMark');
+  if (!m){ m = document.createElement('div'); m.id = 'capMark';
+    m.style.cssText = 'position:absolute;width:26px;height:26px;margin:-13px 0 0 -13px;border-radius:50%;border:3px solid #6366f1;background:rgba(99,102,241,.25);pointer-events:none;z-index:2';
+    e.target.parentElement.appendChild(m); }
+  const pr = e.target.parentElement.getBoundingClientRect();
+  m.style.left = (e.clientX - pr.left) + 'px'; m.style.top = (e.clientY - pr.top) + 'px'; m.style.display = '';
+  $('capImg').style.opacity = .6;
+  capAwait = capVer || 1; capAwaitUntil = Date.now() + 6000;
   capSend({type: 'click', x: capClip[0] + (e.clientX - r.left) / r.width * capClip[2],
            y: capClip[1] + (e.clientY - r.top) / r.height * capClip[3]});
 });

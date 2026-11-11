@@ -143,3 +143,18 @@ def test_settings_endpoint_admin_only(tmp_path, monkeypatch):
     r = admin.post("/api/telegram", json={"token": "123456789:AAHabcdefghijklmnopqrstuvwxyz012345", "chats": "-100"},
                    headers=SITE).json()
     assert r["ok"] and r["token_set"] and "AAH" not in admin.get("/api/telegram").text
+
+
+def test_one_tap_at_a_time():
+    from crawler.captcha import CAPTCHA
+    with CAPTCHA.lock:
+        CAPTCHA.pending, CAPTCHA.busy = True, False
+    try:
+        assert CAPTCHA.act({"type": "click", "x": 1, "y": 1}) is None
+        assert "Wait a moment" in CAPTCHA.act({"type": "click", "x": 2, "y": 2})     # not queued behind
+        assert CAPTCHA.act({"type": "skip"}) is None                                  # skip always works
+        got = [CAPTCHA.actions.get_nowait()["type"], CAPTCHA.actions.get_nowait()["type"]]
+        assert got == ["click", "skip"] and CAPTCHA.actions.empty()
+    finally:
+        with CAPTCHA.lock:
+            CAPTCHA.pending, CAPTCHA.busy = False, False

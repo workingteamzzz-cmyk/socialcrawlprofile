@@ -577,7 +577,9 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
         if not png:
             raise HTTPException(404, "No picture yet")
         return Response(png, media_type="image/png", headers={"Cache-Control": "no-store",
-                                                              "X-Clip": ",".join(str(int(v)) for v in clip)})
+                                                              "X-Clip": ",".join(str(int(v)) for v in clip),
+                                                              "X-Version": str(CAPTCHA.version),
+                                                              "X-Busy": "1" if CAPTCHA.busy else "0"})
 
     @app.post("/api/captcha", tags=["verification"], dependencies=op,
               summary="Click / type / press a key on that page, or skip it")

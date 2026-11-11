@@ -241,6 +241,30 @@ Files are named like the team's: `20261108_Online_Manual_24.00.xlsx` (period end
 schedules, `24.00` for a whole past day). Columns that need text analysis (sentiment, emotion, people, demographics)
 stay empty — the app does not use an AI model. Deliveries to another server carry the same rows in that layout.
 
+## News Search — Multi-source engine (the team's medmascrawler)
+
+News Search has two engines (card **Search engine**):
+
+- **Multi-source (recommended)** — the team's *medmascrawler* (`crawler/medmas`, its code unchanged), no browser and
+  no captcha:
+  - Google News RSS split by date until nothing is cut off at ~100, plus a `site:` search per outlet
+  - news sitemaps and RSS feeds read straight from the media (rotating over a ~12,000-outlet dictionary;
+    working feeds are remembered), Bing News, GDELT, optionally DuckDuckGo
+  - Google News links decoded to the media's own link (links that fail are retried in the next runs, then
+    rescued by searching their title on Bing)
+  - every article read (4-layer extraction); listing/tag pages left out; dates enforced
+  - keywords support `"exact phrase"`, `AND`, `OR`, `NOT`, `( )`; an article whose keyword is not found in its text
+    is **needs review** (kept in the review file `news_links_review_<run>.xlsx`, not silently dropped)
+  - INFLUENCER (people quoted speaking), PERSON (people named) and SENTIMENT filled
+  - a database in the data folder (`news_multi/medmascrawler.db`) remembers every link across runs:
+    *Only articles not delivered before* makes each file hold only new articles
+  - own media dictionary: put `media_dictionary.xlsx/.csv/.txt` in the data folder to replace the bundled one
+- **Browser (Google pages)** — the previous engine. Its Online file now also gets INFLUENCER/PERSON from the article text.
+
+The output is the same: News Links, the Online / Standard Excel, schedules and deliveries. Schedules made before
+keep the browser engine; make a new one to use Multi-source. A Multi-source run with every source on takes longer
+(minutes per keyword; Google's decoding limit is the slow part).
+
 ## Google News links (news.google.com / rss) → the media's own link
 
 Every news search turns Google News links into the media's own links. Whatever the browser could not decode gets a

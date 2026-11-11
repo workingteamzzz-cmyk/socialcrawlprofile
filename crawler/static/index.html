@@ -540,7 +540,7 @@ body:not([data-role="admin"]) .need-admin{display:none!important}
 
     <!-- NEWS SEARCH -->
     <section class="page" id="p-nwsearch">
-      <div class="pagehead"><div><h1>News Search</h1><p>Collect news links from Google News and Google Search (News tab and All results) for your keywords and period — media articles only, the way a person searches. No API.</p></div></div>
+      <div class="pagehead"><div><h1>News Search</h1><p>Collect news articles for your keywords and period — media articles only. Two engines: <b>Multi-source</b> (Google News, every outlet, media sitemaps &amp; RSS, Bing, GDELT — no browser) or <b>Browser</b> (Google pages, the way a person searches). No API.</p></div></div>
       <div class="collect">
         <div style="display:flex;flex-direction:column;gap:16px">
           <div class="card"><div class="card-hd"><h3>Keywords</h3><div class="tools"><button class="btn sm" id="nwClear">Clear</button></div></div>
@@ -570,7 +570,7 @@ body:not([data-role="admin"]) .need-admin{display:none!important}
             </div>
             <div class="field" style="margin-top:12px"><label for="nTemplate">Excel layout</label>
               <select id="nTemplate"><option value="online">Online (client format)</option><option value="standard">Standard (this app)</option></select>
-              <small class="hint">Online: DATE, TIME, TITLE, URL, IMAGE, MEDIA, AUTHOR, SUMMARY, CONTENT… IMAGE, AUTHOR, SUMMARY and CONTENT need “Full article”. SENTIMENT / INFLUENCER / PERSON stay empty (no AI).</small></div></div></div>
+              <small class="hint">Online: DATE, TIME, TITLE, URL, IMAGE, MEDIA, AUTHOR, SUMMARY, CONTENT… IMAGE, AUTHOR, SUMMARY and CONTENT need “Full article” (always on with Multi-source). SENTIMENT, INFLUENCER and PERSON are filled from the article text (the team's rules, no AI).</small></div></div></div>
         </div>
         <div style="display:flex;flex-direction:column;gap:16px">
           <div class="card"><div class="card-hd"><h3>Run</h3></div>
@@ -591,7 +591,30 @@ body:not([data-role="admin"]) .need-admin{display:none!important}
               </div>
               <p class="hint">If Google shows a captcha ("unusual traffic"), solve it in the browser window — the run waits for you.</p>
             </div></div>
-          <div class="card"><div class="card-hd"><h3>Advanced options</h3></div>
+          <div class="card"><div class="card-hd"><h3>Search engine</h3></div>
+            <div class="card-bd"><div class="choices">
+              <label class="choice"><input type="radio" name="nEngine" value="multi" checked><span><b>Multi-source (recommended)</b><small>No browser, no captcha. Google News split by date + every outlet one by one, media sitemaps, media RSS feeds, Bing News and GDELT; reads every article and fills INFLUENCER, PERSON and SENTIMENT. Remembers links across runs.</small></span></label>
+              <label class="choice"><input type="radio" name="nEngine" value="google"><span><b>Browser (Google pages)</b><small>Searches Google like a person in the browser — Google News feed, News tab and All results.</small></span></label>
+            </div>
+            <div id="nMultiOpts" style="margin-top:12px">
+              <div class="opt-group">Sources</div>
+              <div class="opt-row"><div class="t"><b>Google News</b><small>Split by date until nothing is cut off at ~100 results</small></div><label class="switch"><input type="checkbox" class="nMs" value="gnews" checked><span></span></label></div>
+              <div class="opt-row"><div class="t"><b>Outlet by outlet</b><small><code>site:</code> search per outlet found (beats Google's cap)</small></div><label class="switch"><input type="checkbox" class="nMs" value="permedia" checked><span></span></label></div>
+              <div class="opt-row"><div class="t"><b>Media sitemaps</b><small>Read straight from the media sites (rotating over the media dictionary)</small></div><label class="switch"><input type="checkbox" class="nMs" value="sitemap" checked><span></span></label></div>
+              <div class="opt-row"><div class="t"><b>Media RSS feeds</b><small>The freshest news; working feeds are remembered</small></div><label class="switch"><input type="checkbox" class="nMs" value="rss" checked><span></span></label></div>
+              <div class="opt-row"><div class="t"><b>Bing News</b></div><label class="switch"><input type="checkbox" class="nMs" value="bing" checked><span></span></label></div>
+              <div class="opt-row"><div class="t"><b>GDELT</b><small>Global news index — good for older periods</small></div><label class="switch"><input type="checkbox" class="nMs" value="gdelt" checked><span></span></label></div>
+              <div class="opt-row"><div class="t"><b>DuckDuckGo</b><small>Optional, often rate-limited</small></div><label class="switch"><input type="checkbox" class="nMs" value="ddg"><span></span></label></div>
+              <div class="opt-group">Results</div>
+              <div class="opt-row"><div class="t"><b>Only registered media</b><small>Outlets in the media dictionary (~12,000) + "Also count as media"</small></div><label class="switch"><input type="checkbox" id="nRegOnly"><span></span></label></div>
+              <div class="opt-row"><div class="t"><b>Only articles not delivered before</b><small>For searches run several times a day: the next file skips what the previous one had</small></div><label class="switch"><input type="checkbox" id="nNewOnly"><span></span></label></div>
+              <div class="opt-row"><div class="t"><b>Include "needs review"</b><small>Articles where the keyword was not confirmed in the text (otherwise only in the review file)</small></div><label class="switch"><input type="checkbox" id="nInclReview"><span></span></label></div>
+              <div class="opt-row"><div class="t"><b>Retry links that failed before</b></div><label class="switch"><input type="checkbox" id="nRetry" checked><span></span></label></div>
+              <div class="opt-row"><div class="t"><b>Outlets searched one by one</b><small>Per keyword; more = more complete and slower</small></div>
+                <select id="nHarvest"><option value="50">50</option><option value="200" selected>200</option><option value="500">500</option><option value="0">All</option></select></div>
+              <p class="hint">Keywords may use <code>"exact phrase"</code>, <code>AND</code>, <code>OR</code>, <code>NOT</code> and ( ), e.g. <code>"PLN" AND (padam OR pemadaman) NOT promo</code>. Output is always full articles; the Online layout gets INFLUENCER, PERSON and SENTIMENT filled.</p>
+            </div></div></div>
+          <div class="card" id="nGoogleOpts"><div class="card-hd"><h3>Advanced options</h3></div>
             <div class="card-bd">
               <div class="opt-group">Sources</div>
               <div class="opt-row"><div class="t"><b>Google News feed</b><small>Most reliable — exact publish times, up to 100 per search</small></div>
@@ -1383,15 +1406,32 @@ function nwOptions(){
     sources: [['feed', 'nSrcFeed'], ['news_tab', 'nSrcNews'], ['all_tab', 'nSrcAll']].filter(([, id]) => $(id).checked).map(([k]) => k),
     media_only: $('nMediaOnly').checked, extra_media: $('nExtraMedia').value.split(',').map(w => w.trim()).filter(Boolean), region: $('nRegion').value, exact: $('nExact').checked,
     exclude: $('nExclude').value.split(',').map(w => w.trim().replace(/^-/, '')).filter(Boolean),
-    sites: $('nSites').value.split(',').map(w => w.trim()).filter(Boolean), template: $('nTemplate').value, layout_v2: true };
+    sites: $('nSites').value.split(',').map(w => w.trim()).filter(Boolean), template: $('nTemplate').value, layout_v2: true,
+    engine: radioValue('nEngine'), multi_sources: [...document.querySelectorAll('.nMs')].filter(c => c.checked).map(c => c.value),
+    registered_only: $('nRegOnly').checked, new_only: $('nNewOnly').checked, include_review: $('nInclReview').checked,
+    retry_failed: $('nRetry').checked, max_harvest: +$('nHarvest').value };
+}
+function nwEngineView(){
+  const multi = radioValue('nEngine') === 'multi';
+  $('nMultiOpts').style.display = multi ? '' : 'none';
+  // the browser engine's own options; "Also count as media" and the exclude words are used by both
+  ['nSrcFeed', 'nSrcNews', 'nSrcAll', 'nResolve', 'nByDay', 'nCap', 'nRegion', 'nSites'].forEach(id => { const row = $(id).closest('.opt-row'); if (row) row.style.display = multi ? 'none' : ''; });
+  document.querySelectorAll('#nGoogleOpts .opt-group').forEach(g => { g.style.display = multi && g.textContent === 'Sources' ? 'none' : ''; });
+  document.querySelectorAll('input[name="nDetail"]').forEach(r => { r.closest('.choice').style.opacity = multi ? .45 : 1; r.disabled = multi; });
 }
 (function(){ const o = ls.get('nw_opts', null); if (o){ $('nCap').value = String(o.cap ?? 100); $('nTemplate').value = o.layout_v2 ? (o.template || 'online') : 'online'; $('nByDay').checked = o.by_day !== false; 
   const srcs = o.sources || ({news: ['feed'], search: ['news_tab'], both: ['feed', 'news_tab']}[o.source] || ['feed', 'news_tab', 'all_tab']);
   $('nSrcFeed').checked = srcs.includes('feed'); $('nSrcNews').checked = srcs.includes('news_tab'); $('nSrcAll').checked = srcs.includes('all_tab');
   $('nMediaOnly').checked = o.media_only !== false; $('nExtraMedia').value = (o.extra_media || []).join(', '); $('nResolve').checked = o.resolve !== false; $('nRegion').value = o.region || 'id';
-  $('nExact').checked = !!o.exact; $('nExclude').value = (o.exclude || []).join(', '); $('nSites').value = (o.sites || []).join(', '); } })();
-['nCap','nTemplate','nByDay','nSrcFeed','nSrcNews','nSrcAll','nMediaOnly','nExtraMedia','nResolve','nRegion','nExact','nExclude','nSites'].forEach(id => $(id).addEventListener(['nExclude','nSites','nExtraMedia'].includes(id) ? 'input' : 'change',
+  $('nExact').checked = !!o.exact; $('nExclude').value = (o.exclude || []).join(', '); $('nSites').value = (o.sites || []).join(', ');
+  if (o.engine){ document.querySelectorAll('input[name="nEngine"]').forEach(r => r.checked = r.value === o.engine);
+    if (o.multi_sources) document.querySelectorAll('.nMs').forEach(c => c.checked = o.multi_sources.includes(c.value));
+    $('nRegOnly').checked = !!o.registered_only; $('nNewOnly').checked = !!o.new_only; $('nInclReview').checked = !!o.include_review;
+    $('nRetry').checked = o.retry_failed !== false; $('nHarvest').value = String(o.max_harvest ?? 200); } }
+  nwEngineView(); })();
+['nCap','nTemplate','nByDay','nSrcFeed','nSrcNews','nSrcAll','nMediaOnly','nExtraMedia','nResolve','nRegion','nExact','nExclude','nSites','nRegOnly','nNewOnly','nInclReview','nRetry','nHarvest'].forEach(id => $(id).addEventListener(['nExclude','nSites','nExtraMedia'].includes(id) ? 'input' : 'change',
   () => { ls.set('nw_opts', nwOptions()); nwRender(); }));
+document.querySelectorAll('input[name="nEngine"], .nMs').forEach(el => el.addEventListener('change', () => { nwEngineView(); ls.set('nw_opts', nwOptions()); nwRender(); }));
 function nwRender(){
   if (!P3) return;
   const o = nwOptions(), kw = NW.items[0] || 'keyword';

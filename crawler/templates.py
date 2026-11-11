@@ -142,10 +142,23 @@ def online_row(r: dict, tz) -> list:
     title = (r.get("title") or "").strip()
     text = r.get("text") or ""
     summary = oc.clean_summary(r.get("description") or (re.sub(r"\s+", " ", text)[:400] if text else ""), title)
+    infl, pers = r.get("influencer"), r.get("person")
+    if not (infl or pers) and text:                    # people in the article (the team's rule-based detector)
+        infl, pers = people(text)
     return [date_s, time_s, title, url, (r.get("image") or "").strip(), oc.media_from_url(url),
-            oc.format_names(r.get("influencer")), oc.format_names(r.get("person")), (r.get("author") or "").strip(),
+            oc.format_names(infl), oc.format_names(pers), (r.get("author") or "").strip(),
             summary, oc.content_html(text, title, r.get("author") or ""),
             (r.get("sentiment") or analyze(f"{title}. {summary}")[0]).lower().strip()]
+
+
+def people(text: str) -> tuple[str, str]:
+    """(INFLUENCER, PERSON) from an article's text: people quoted speaking / everyone named (medmascrawler's rules)."""
+    try:
+        from .medmas.persons import extract_people
+    except Exception:                                    # noqa: BLE001
+        return "", ""
+    speakers, persons = extract_people(text)
+    return ", ".join(speakers), ", ".join(persons)
 
 
 def analyze(text: str) -> tuple[str, str]:

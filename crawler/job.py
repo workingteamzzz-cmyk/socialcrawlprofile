@@ -693,6 +693,8 @@ class Job:
                 b["version"] += 1
             return added
 
+        if opt.engine == "multi":
+            return self._news_multi(kws, opt, d_start, d_end, tz, seen, statuses, b, save, record, xlsx, csvp)
         self.log(f"News search (Google): {', '.join(kws)} — period {d_start:%Y-%m-%d} to {d_end:%Y-%m-%d} "
                  f"({tz_name}) — detail: {opt.detail}")
         pw = ctx = None
@@ -770,6 +772,39 @@ class Job:
             if st.get("duplicates"):
                 self.log(f"   {len(st['duplicates'])} duplicate URL(s) merged (the fullest article kept)")
         self.log(("⏹ Stopped. " if stopped else "✅ Done. ") + f"Total {len(seen)} unique news links" + (f" → {files[0]}" if files else ""))
+
+    def _news_multi(self, kws, opt, d_start, d_end, tz, seen, statuses, b, save, record, xlsx, csvp):
+        """News Search with the multi-source engine (news_multi.py): no browser, every source, full articles."""
+        from . import news_multi
+        from .paths import APP_DATA
+        miss = news_multi.check()
+        if miss:
+            raise RuntimeError(miss)
+        opt.detail = "full"                                   # this engine always reads the articles
+        self.log(f"News search (multi-source): {', '.join(kws)} — period {d_start:%Y-%m-%d} to {d_end:%Y-%m-%d}")
+        self.current = "Multi-source news search"
+        files, extra, stopped = [], [], False
+        try:
+            rows, extra, stat = news_multi.run(kws, f"{d_start:%Y-%m-%d}", f"{d_end:%Y-%m-%d}", opt, tz, self.log,
+                                               self.stop_flag, APP_DATA, OUTPUT_DIR)
+            stopped = self.stop_flag.is_set()
+            for kw in kws:                                    # one status line per keyword, like the browser engine
+                mine = [r for r in rows if r.get("keyword") == kw]
+                record(kw, Result("ok", mine, f"{len(mine)} articles (multi-source)"))
+            other = [r for r in rows if r.get("keyword") not in kws]   # links retried from earlier runs
+            if other:
+                record(kws[0], Result("ok", other, f"{len(other)} articles from earlier runs' retry queue"))
+            self.done = self.total
+            if extra:
+                self.log("   For checking (Data, Needs Review, Recap): " + ", ".join(extra))
+            if stat.get("needs_review", 0) and not opt.include_review:
+                self.log(f"   {stat['needs_review']} article(s) in the archive need review (keyword not confirmed in "
+                         f"the text) — they are in the review file, not in the Online file.")
+        finally:
+            files = self._finish_files(save, [xlsx, csvp], bool(statuses))
+        b["files"] = files + extra
+        self.log(("⏹ Stopped. " if stopped else "✅ Done. ") + f"Total {len(seen)} news articles"
+                 + (f" → {files[0]}" if files else ""))
 
     def start_decode(self, name: str, data: bytes) -> str | None:
         """Fix the Google News links in an uploaded .xlsx/.csv/.txt file (the team's decoder, inside the app)."""

@@ -48,6 +48,14 @@ class NewsOptions:
     media_only: bool = True        # skip non-media links (social media, forums, shops, wikis, files)
     extra_media: list[str] = field(default_factory=list)   # more domains to treat as media
     template: str = "standard"     # Excel layout: "standard" or the client's "online" layout (templates.py)
+    # engine: "google" = this browser search; "multi" = the team's multi-source crawler (news_multi.py, no browser)
+    engine: str = "google"
+    multi_sources: list[str] = field(default_factory=list)   # gnews, permedia, sitemap, rss, bing, gdelt, ddg
+    registered_only: bool = False  # multi: only outlets in the media dictionary (+ "also count as media")
+    new_only: bool = False         # multi: the file holds only articles never delivered before
+    retry_failed: bool = True      # multi: links that failed in earlier runs are tried again
+    include_review: bool = False   # multi: also articles whose keyword could not be verified in the text
+    max_harvest: int = 200         # multi: outlets asked one by one (site:) per keyword
 
     @classmethod
     def from_dict(cls, d: dict) -> "NewsOptions":
@@ -79,7 +87,12 @@ class NewsOptions:
                    sites=sites[:20], detail=detail,
                    sources=srcs or ["feed"], resolve=bool(d.get("resolve", True)),
                    media_only=bool(d.get("media_only", True)), extra_media=hosts(d.get("extra_media"))[:200],
-                   template="online" if d.get("template") == "online" else "standard")
+                   template="online" if d.get("template") == "online" else "standard",
+                   engine="multi" if d.get("engine") == "multi" else "google",
+                   multi_sources=[x for x in (d.get("multi_sources") or []) if isinstance(x, str)][:10],
+                   registered_only=bool(d.get("registered_only")), new_only=bool(d.get("new_only")),
+                   retry_failed=bool(d.get("retry_failed", True)), include_review=bool(d.get("include_review")),
+                   max_harvest=max(0, min(2000, int(d.get("max_harvest") or 200))))
 
 
 def google_query(kw: str, opt: NewsOptions) -> str:

@@ -2,3 +2,10 @@ playwright>=1.45
 openpyxl>=3.1
 pandas>=2.0
 requests>=2.31
+# multi-source news engine (crawler/medmas — the team's medmascrawler)
+feedparser>=6.0
+beautifulsoup4>=4.12
+lxml>=4.9
+trafilatura>=1.8
+googlenewsdecoder>=0.1.6
+cloudscraper>=1.2

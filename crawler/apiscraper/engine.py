@@ -73,6 +73,8 @@ _TWITTER_PROVIDER_HOST = "getxapi"
 from requests import api as _rq_api
 def _counting_get(*a, _orig=_rq_api.get, **k):
     url = a[0] if a else k.get("url", "")
+    if not (str(url).startswith(BASE) or _TWITTER_PROVIDER_HOST in str(url)):
+        return _orig(*a, **k)       # the rest of the app (news engine, decoders) is neither counted nor stopped
     if STOP["on"]:
         raise BudgetExceeded("stopped from the dashboard")
     is_twitter = _TWITTER_PROVIDER_HOST in str(url)

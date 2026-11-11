@@ -272,3 +272,21 @@ def test_username_from_the_link():
     assert u("instagram", "https://www.instagram.com/p/ABC/") == ""
     assert u("facebook", "https://www.facebook.com/plnid/posts/123") == "plnid"
     assert u("facebook", "https://www.facebook.com/permalink.php?story_fbid=1") == ""
+
+
+def test_api_stop_does_not_break_the_rest_of_the_app(tmp_path, fake_api):
+    """The engine wraps requests.get: only the scraping API is counted / stopped, never the news engine."""
+    import requests
+    eng = runner.engine()
+    settings.save(api_key="test-key-123")
+    stop = threading.Event()
+    stop.set()
+    runner.run({"mode": "keyword", "platform": "TikTok (keyword)", "queries": "pln"}, lambda _: None,
+               lambda *a: None, stop, str(tmp_path / "out"), str(tmp_path / "data"))
+    assert eng.STOP["on"] is False
+    eng.STOP["on"] = True                                    # even while an API run is stopping …
+    try:
+        r = requests.get(eng.BASE.replace("127.0.0.1", "localhost") + "/v1/account/credit-balance", timeout=5)
+        assert r.status_code == 200                            # … other hosts pass straight through
+    finally:
+        eng.STOP["on"] = False

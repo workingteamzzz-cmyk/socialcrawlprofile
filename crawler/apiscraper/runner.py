@@ -190,6 +190,7 @@ def run(cfg: dict, log, progress, stop_event: threading.Event, out_dir: str, dat
         done.set()
         colab_shim.HOOK["fn"] = None
         settings.record_usage(eng._REQN["other"], eng._REQN["twitter"])
+        eng.STOP["on"] = False                  # a Stop ends this run only
         try:
             _save_profiles(eng, prof_path)
         except OSError:

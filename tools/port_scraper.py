@@ -8,6 +8,7 @@ The team's code stays as it is — scraping, cleaning, sentiment/emotion, the Ex
   3. no Google Drive: files go to the app's Exports folder (OUT_DIR); checkpoints to the app's data folder;
   4. no password box (the dashboard's sign-in and roles protect it);
   5. a Stop flag (the dashboard's Stop button) that ends the run like the credit cap does — data so far is kept;
+     the request counter / Stop / credit cap only apply to the scraping API itself, not to the rest of the app;
   6. the AI language models are off by default (a 4 GB server cannot load them); the team's lexicon analysis is used;
   7. the form display at the end of the script is left out (the dashboard shows the form);
   8. the post's own ID column is named "Post ID" (as in the team's Medsos upload template) instead of "ID".
@@ -54,6 +55,8 @@ _out_path = os.path.join        # (on_click has its own local "import os", so it
     sub('''    url = a[0] if a else k.get("url", "")
     is_twitter = _TWITTER_PROVIDER_HOST in str(url)
 ''', '''    url = a[0] if a else k.get("url", "")
+    if not (str(url).startswith(BASE) or _TWITTER_PROVIDER_HOST in str(url)):
+        return _orig(*a, **k)       # the rest of the app (news engine, decoders) is neither counted nor stopped
     if STOP["on"]:
         raise BudgetExceeded("stopped from the dashboard")
     is_twitter = _TWITTER_PROVIDER_HOST in str(url)

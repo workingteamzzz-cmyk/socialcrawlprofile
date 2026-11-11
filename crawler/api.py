@@ -181,6 +181,7 @@ class ScheduleIn(BaseModel):
     hours: int = Field(6, description="hours: run every N hours (1-24)")
     window: Literal["yesterday", "today", "yesterday_today", "last_7_days"] = "yesterday"
     enabled: bool = True
+    new_only: bool = Field(False, description="each run's file holds only what no earlier run delivered (hourly runs)")
     webhook: str = Field("", description="When a run finishes, POST the results as JSON here (a client's API, n8n...)")
     webhook_token: str = Field("", description="Sent as 'Authorization: Bearer <token>' and used to sign the body "
                                                "(X-Collector-Signature: sha256=HMAC)")

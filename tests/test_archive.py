@@ -95,3 +95,16 @@ def test_hourly_only_new(arch):
     s = clean({"kind": "keywords", "payload": {"keywords": ["pln"]}, "repeat": "hours", "hours": 1,
                "window": "today", "new_only": True})
     assert s["new_only"] and describe(s).startswith("every hour, only new results")
+
+
+def test_hourly_only_new_survives_the_api(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from crawler import schedule
+    from tests.test_users import SITE, _app, _client
+    monkeypatch.setattr(schedule, "SCHEDULER", schedule.Scheduler(str(tmp_path / "s.json"), None))
+    app, _ = _app(tmp_path, monkeypatch)
+    op = _client(app, "budi")
+    r = op.post("/api/schedules/save", json={"kind": "news", "payload": {"keywords": ["pln"]}, "repeat": "hours",
+                                             "hours": 1, "window": "today", "new_only": True}, headers=SITE).json()
+    assert r["ok"] and r["schedule"]["new_only"] is True
+    assert "only new results" in op.get("/api/schedules").json()["schedules"][0]["describe"]

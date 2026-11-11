@@ -1221,7 +1221,7 @@ function go(p){
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.p === p));
   document.querySelectorAll('.page').forEach(s => s.classList.toggle('on', s.id === 'p-' + p));
   ls.set('page', p); window.scrollTo(0, 0);
-  if (p === 'exports'){ loadExports(); if (SERVER) loadAudit(); }
+  if (p === 'exports'){ loadExports(); if (SERVER && ROLE === 'admin') loadAudit(); }
   if (p === 'schedules') loadSchedules();
   if (p === 'users') loadUsers();
   if (p === 'apiscrape') loadApInfo();

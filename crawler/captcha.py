@@ -167,12 +167,34 @@ def _find_check(page, vw: int, vh: int):
     return (round(x2), round(y2), round(min(w2, vw)), round(min(h2, vh)))
 
 
+_FOCUS_JS = r"""() => {
+  const a = document.activeElement;
+  if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA') && !['hidden', 'submit', 'button'].includes(a.type)) return true;
+  const ok = e => { const r = e.getBoundingClientRect(), st = getComputedStyle(e);
+    return r.width > 20 && r.height > 10 && st.visibility !== 'hidden' && st.display !== 'none'; };
+  const box = [...document.querySelectorAll('#captcha, input[name="captcha"], input[type="text"], input:not([type]), textarea')].find(ok);
+  if (box){ box.focus(); box.value = ''; return true; }
+  return false;
+}"""
+
+
+def _focus_text_box(page):
+    try:
+        page.evaluate(_FOCUS_JS)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _perform(page, act: dict):
     try:
         if act["type"] == "click":
             page.mouse.click(float(act["x"]), float(act["y"]))
         elif act["type"] == "type":
+            _focus_text_box(page)                         # Google's "type the characters" box, if nothing has focus
             page.keyboard.type(str(act.get("text", ""))[:200], delay=40)
+            if act.get("enter"):
+                page.wait_for_timeout(300)
+                page.keyboard.press("Enter")
         elif act["type"] == "key":
             key = str(act.get("key", ""))
             if key in ("Enter", "Tab", "Backspace", "Escape", "Space", "ArrowDown", "ArrowUp"):

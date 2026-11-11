@@ -1109,7 +1109,7 @@ body::before{content:"";position:fixed;inset:-20%;z-index:-1;pointer-events:none
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center">
         <input id="capText" placeholder="Text to type (if the page asks for it)" style="flex:1;min-width:200px;border:1px solid var(--line);border-radius:10px;padding:9px 12px;background:var(--panel)">
-        <button class="btn" id="capType">Type</button>
+        <button class="btn" id="capType">Type &amp; send</button>
         <button class="btn" id="capEnter">Press Enter</button>
         <button class="btn" id="capDown">Scroll down</button>
         <button class="btn" id="capUp">Scroll up</button>
@@ -1813,7 +1813,8 @@ $('capImg').addEventListener('click', e => {
   capSend({type: 'click', x: capClip[0] + (e.clientX - r.left) / r.width * capClip[2],
            y: capClip[1] + (e.clientY - r.top) / r.height * capClip[3]});
 });
-$('capType').onclick = () => { const t = $('capText').value; if (t){ capSend({type: 'type', text: t}); $('capText').value = ''; } };
+$('capType').onclick = () => { const t = $('capText').value.trim(); if (t){ capSend({type: 'type', text: t, enter: true}); $('capText').value = ''; } };
+$('capText').addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); $('capType').click(); } });
 $('capEnter').onclick = () => capSend({type: 'key', key: 'Enter'});
 $('capDown').onclick = () => capSend({type: 'scroll', dy: 400});
 $('capUp').onclick = () => capSend({type: 'scroll', dy: -400});

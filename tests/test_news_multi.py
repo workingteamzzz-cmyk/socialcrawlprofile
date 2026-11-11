@@ -100,3 +100,9 @@ def test_people_fill_online_rows_of_the_browser_engine():
                                 "published_full": "2026-11-09 20:15"}, timezone.utc)
     cols = templates.ONLINE_COLUMNS
     assert "ahmad" in row[cols.index("INFLUENCER")] and "dedie rachim" in row[cols.index("PERSON")]
+
+
+def test_short_names_merge_into_the_full_name():
+    from crawler.templates import merge_names
+    assert merge_names("Ahmad Sutrisno, Ahmad, Dedie Rachim, Dedie") == "Ahmad Sutrisno, Dedie Rachim"
+    assert merge_names("") == "" and merge_names("Budi") == "Budi"

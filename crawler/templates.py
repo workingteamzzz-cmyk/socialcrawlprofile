@@ -146,9 +146,18 @@ def online_row(r: dict, tz) -> list:
     if not (infl or pers) and text:                    # people in the article (the team's rule-based detector)
         infl, pers = people(text)
     return [date_s, time_s, title, url, (r.get("image") or "").strip(), oc.media_from_url(url),
-            oc.format_names(infl), oc.format_names(pers), (r.get("author") or "").strip(),
+            oc.format_names(merge_names(infl)), oc.format_names(merge_names(pers)), (r.get("author") or "").strip(),
             summary, oc.content_html(text, title, r.get("author") or ""),
             (r.get("sentiment") or analyze(f"{title}. {summary}")[0]).lower().strip()]
+
+
+def merge_names(names) -> str:
+    """'Ahmad Sutrisno, Ahmad, Dedie' -> 'Ahmad Sutrisno, Dedie': a name that is part of a fuller one is the same person."""
+    items = [n.strip() for n in str(names or "").split(",") if n.strip()]
+    toks = [set(n.lower().split()) for n in items]
+    keep = [n for i, n in enumerate(items)
+            if not any(j != i and toks[i] < toks[j] for j in range(len(items)))]
+    return ", ".join(keep)
 
 
 def people(text: str) -> tuple[str, str]:

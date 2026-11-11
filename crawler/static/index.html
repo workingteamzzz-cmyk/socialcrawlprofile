@@ -1891,7 +1891,7 @@ async function poll(){
     progFor('p', isProf, 'accounts', (mp.profiles || {}).count || 0);
     progFor('kP', isKw, 'searches', (mp.keywords || {}).count || 0);
     progFor('nP', isNews, 'keywords', (mp.news || {}).count || 0);
-    const dl = files => (files || []).map(f => `<a class="btn" href="/download/${encodeURIComponent(f)}">${icon('i-dl')}${f.endsWith('.csv') ? 'CSV' : 'Excel'}</a>`).join('');
+    const dl = files => (files || []).map(f => `<a class="btn" href="/download/${encodeURIComponent(f)}">${icon('i-dl')}${f.startsWith('news_links_review_') ? 'Review file' : f.endsWith('.csv') ? 'CSV' : 'Excel'}</a>`).join('');
     $('downloads').innerHTML = dl((mp.profiles || {}).files); $('kwDownloads').innerHTML = dl((mp.keywords || {}).files);
     $('nwDownloads').innerHTML = dl((mp.news || {}).files);
     // refresh result tables when they changed — at most every 3 s during a run, so big runs stay smooth

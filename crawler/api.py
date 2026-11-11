@@ -840,27 +840,53 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
 
 
 _SIGN_IN_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Link Collector · Sign in</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Working Teamz · Sign in</title>
+<link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CiAgPGRlZnM+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9Ind0ZyIgeDE9IjYiIHkxPSI0IiB4Mj0iNTgiIHkyPSI2MCIgZ3JhZGllbnRVbml0cz0idXNlclNwYWNlT25Vc2UiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiM2MzY2ZjEiLz48c3RvcCBvZmZzZXQ9Ii41NSIgc3RvcC1jb2xvcj0iIzNiODJmNiIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzA2YjZkNCIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0id3RzIiB4MT0iMCIgeTE9IjAiIHgyPSIwIiB5Mj0iMSI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjZmZmIiBzdG9wLW9wYWNpdHk9Ii41NSIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iI2ZmZiIgc3RvcC1vcGFjaXR5PSIwIi8+PC9saW5lYXJHcmFkaWVudD4KICA8L2RlZnM+CiAgPHJlY3QgeD0iMiIgeT0iMiIgd2lkdGg9IjYwIiBoZWlnaHQ9IjYwIiByeD0iMTgiIGZpbGw9InVybCgjd3RnKSIvPgogIDxyZWN0IHg9IjIiIHk9IjIiIHdpZHRoPSI2MCIgaGVpZ2h0PSIzMCIgcng9IjE4IiBmaWxsPSJ1cmwoI3d0cykiIG9wYWNpdHk9Ii41Ii8+CiAgPHBhdGggZD0iTTEzIDIybDYuNSAyMUwyNiAyOGw2LjUgMTVMMzkgMjIiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSI1IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KICA8cGF0aCBkPSJNMzkgMjJoMTNNNDUuNSAyMnYyMSIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmIiBzdHJva2Utd2lkdGg9IjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgogIDxjaXJjbGUgY3g9IjUxIiBjeT0iMTMiIHI9IjMuMiIgZmlsbD0iI2E1ZjNmYyIvPgogIDxwYXRoIGQ9Ik00NS42IDExLjJhNy41IDcuNSAwIDAgMSA3LjItNC4xIiBmaWxsPSJub25lIiBzdHJva2U9IiNhNWYzZmMiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBvcGFjaXR5PSIuOSIvPgo8L3N2Zz4="><meta name="theme-color" content="#4f46e5">
 <style>
-:root{--bg:#f4f6fb;--card:#fff;--ink:#0f172a;--mute:#64748b;--line:#e2e8f0;--accent:#2563eb}
-@media (prefers-color-scheme:dark){:root{--bg:#0b1220;--card:#111a2e;--ink:#e2e8f0;--mute:#94a3b8;--line:#1e293b}}
-body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--ink);
-  font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;padding:16px;box-sizing:border-box}
-form{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:28px;width:min(380px,100%);
-  box-sizing:border-box}
-h1{font-size:20px;margin:0 0 4px}p{color:var(--mute);margin:0 0 18px}
-input{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid var(--line);border-radius:10px;
-  background:transparent;color:inherit;font:inherit}
-button{margin-top:12px;width:100%;padding:11px;border:0;border-radius:10px;background:var(--accent);color:#fff;
-  font:600 15px system-ui,sans-serif;cursor:pointer}
+:root{--ink:#0f172a;--mute:#5b6478;--line:rgba(255,255,255,.75);--grad:linear-gradient(135deg,#6366f1,#3b82f6 55%,#06b6d4)}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:grid;place-items:center;color:var(--ink);padding:16px;
+  font:15px/1.5 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;background:#eef2fb;overflow:hidden}
+body::before{content:"";position:fixed;inset:-20%;z-index:-1;background:
+  radial-gradient(40% 45% at 15% 20%,rgba(129,140,248,.6),transparent 70%),
+  radial-gradient(35% 40% at 85% 15%,rgba(34,211,238,.5),transparent 70%),
+  radial-gradient(45% 50% at 75% 90%,rgba(167,139,250,.5),transparent 72%),
+  linear-gradient(160deg,#f5f7ff,#eef6ff 50%,#f3f0ff)}
+form{background:rgba(255,255,255,.58);border:1px solid var(--line);border-radius:24px;padding:32px 28px;
+  width:min(390px,100%);backdrop-filter:blur(24px) saturate(170%);-webkit-backdrop-filter:blur(24px) saturate(170%);
+  box-shadow:0 30px 60px -25px rgba(30,41,90,.4)}
+.brand{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+.brand img{width:48px;height:48px;filter:drop-shadow(0 6px 14px rgba(79,70,229,.4))}
+.brand b{display:block;font-size:20px;font-weight:780;letter-spacing:-.4px;background:var(--grad);-webkit-background-clip:text;
+  background-clip:text;color:transparent}
+.brand small{color:var(--mute);font-size:13px}
+p{color:var(--mute);margin:0 0 16px;font-size:14px}
+input{width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.75);
+  color:inherit;font:inherit;outline:none}
+input:focus{border-color:rgba(99,102,241,.7);box-shadow:0 0 0 4px rgba(99,102,241,.15)}
+button{margin-top:14px;width:100%;padding:12px;border:0;border-radius:12px;background:var(--grad);color:#fff;
+  font:650 15px Inter,system-ui,sans-serif;cursor:pointer;box-shadow:0 12px 24px -10px rgba(79,70,229,.7)}
+button:hover{filter:brightness(1.07)}
 #e{color:#dc2626;min-height:1.5em;margin:10px 0 0;font-size:14px}
+#sw{display:block;margin-top:12px;font-size:13px;color:var(--mute);text-decoration:none}
+@media (prefers-color-scheme:dark){
+  :root{--ink:#e6e9f5;--mute:#a3abc4;--line:rgba(148,163,184,.2);color-scheme:dark}
+  body{background:#0b1020}
+  body::before{background:radial-gradient(40% 45% at 15% 20%,rgba(99,102,241,.4),transparent 70%),
+    radial-gradient(35% 40% at 85% 15%,rgba(6,182,212,.28),transparent 70%),
+    radial-gradient(45% 50% at 75% 90%,rgba(139,92,246,.32),transparent 72%),linear-gradient(160deg,#0b1020,#0d1328 50%,#120f26)}
+  form{background:rgba(22,27,48,.6)}
+  input{background:rgba(30,36,62,.65)}
+  .brand b{background:linear-gradient(135deg,#a5b4fc,#67e8f9);-webkit-background-clip:text;background-clip:text}
+}
 </style></head><body>
-<form id="f"><h1>Link Collector</h1><p id="sub">Sign in to continue.</p>
+<form id="f"><div class="brand"><img alt="" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CiAgPGRlZnM+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9Ind0ZyIgeDE9IjYiIHkxPSI0IiB4Mj0iNTgiIHkyPSI2MCIgZ3JhZGllbnRVbml0cz0idXNlclNwYWNlT25Vc2UiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiM2MzY2ZjEiLz48c3RvcCBvZmZzZXQ9Ii41NSIgc3RvcC1jb2xvcj0iIzNiODJmNiIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzA2YjZkNCIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0id3RzIiB4MT0iMCIgeTE9IjAiIHgyPSIwIiB5Mj0iMSI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjZmZmIiBzdG9wLW9wYWNpdHk9Ii41NSIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iI2ZmZiIgc3RvcC1vcGFjaXR5PSIwIi8+PC9saW5lYXJHcmFkaWVudD4KICA8L2RlZnM+CiAgPHJlY3QgeD0iMiIgeT0iMiIgd2lkdGg9IjYwIiBoZWlnaHQ9IjYwIiByeD0iMTgiIGZpbGw9InVybCgjd3RnKSIvPgogIDxyZWN0IHg9IjIiIHk9IjIiIHdpZHRoPSI2MCIgaGVpZ2h0PSIzMCIgcng9IjE4IiBmaWxsPSJ1cmwoI3d0cykiIG9wYWNpdHk9Ii41Ii8+CiAgPHBhdGggZD0iTTEzIDIybDYuNSAyMUwyNiAyOGw2LjUgMTVMMzkgMjIiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSI1IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KICA8cGF0aCBkPSJNMzkgMjJoMTNNNDUuNSAyMnYyMSIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmIiBzdHJva2Utd2lkdGg9IjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgogIDxjaXJjbGUgY3g9IjUxIiBjeT0iMTMiIHI9IjMuMiIgZmlsbD0iI2E1ZjNmYyIvPgogIDxwYXRoIGQ9Ik00NS42IDExLjJhNy41IDcuNSAwIDAgMSA3LjItNC4xIiBmaWxsPSJub25lIiBzdHJva2U9IiNhNWYzZmMiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBvcGFjaXR5PSIuOSIvPgo8L3N2Zz4="><div><b>Working Teamz</b><small>Media Monitoring</small></div></div>
+<p id="sub">Sign in to continue.</p>
 <div id="up"><input id="u" autocomplete="username" placeholder="Username" autofocus>
 <input id="p" type="password" autocomplete="current-password" placeholder="Password" style="margin-top:10px"></div>
 <div id="kb" style="display:none"><input id="k" type="password" autocomplete="off" placeholder="Access key"></div>
 <button>Sign in</button><div id="e"></div>
-<a href="#" id="sw" style="display:block;margin-top:14px;font-size:13.5px;color:var(--mute)">Use an access key instead</a></form>
+<a href="#" id="sw">Use an access key instead</a></form>
 <script>
 let useKey = false;
 document.getElementById('sw').onclick = ev => { ev.preventDefault(); useKey = !useKey;

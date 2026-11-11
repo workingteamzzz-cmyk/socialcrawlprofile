@@ -96,6 +96,9 @@ class Handler(BaseHTTPRequestHandler):
 
             from .schedule import get
             return self._json({"schedules": get().list(), "now": int(_time.time())})
+        if u.path == "/api/telegram":
+            from . import telegram_bot
+            return self._json(telegram_bot.public())
         if u.path == "/api/report/topics":
             from . import archive
             return self._json({"topics": archive.topics(), "stats": archive.stats()})
@@ -183,6 +186,17 @@ class Handler(BaseHTTPRequestHandler):
                 err = get().run_now(data.get("id", ""))
             except ScheduleError as e:
                 return self._json({"ok": False, "error": str(e)})
+        elif u.path in ("/api/telegram", "/api/telegram/test"):
+            from . import telegram_bot
+            if u.path.endswith("/test"):
+                return self._json(telegram_bot.check())
+            try:
+                pub = telegram_bot.save(data.get("token") or None, data.get("chats"), data.get("public_url"),
+                                        bool(data.get("clear_token")))
+            except ValueError as e:
+                return self._json({"ok": False, "error": str(e)})
+            telegram_bot.start()
+            return self._json({"ok": True, **pub})
         elif u.path in ("/api/report", "/api/report/import", "/api/report/topics", "/api/report/topics/delete"):
             from . import archive
             if u.path == "/api/report":

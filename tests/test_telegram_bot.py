@@ -111,3 +111,35 @@ def test_verification_message_has_solve_and_skip_buttons(tg):
     kb = msgs[0]["reply_markup"]["inline_keyboard"]
     assert kb[0][0]["url"] == "https://collector.example" and kb[1][0]["callback_data"] == "skip"
     assert "your own Google account is not used" in msgs[0]["text"]
+
+
+def test_set_from_the_dashboard(tg, tmp_path, monkeypatch):
+    from crawler import paths
+    from crawler import telegram_bot as bot
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path))
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN")
+    monkeypatch.delenv("TELEGRAM_CHAT_ID")
+    assert bot.token() == "" and bot.public()["token_set"] is False
+    with pytest.raises(ValueError, match="not a bot token"):
+        bot.save("cd ~/post-link-collector && read -rsp")            # a pasted command is refused
+    pub = bot.save("  bot123456789:AAHabcdefghijklmnopqrstuvwxyz012345\\n", "-1001234, 55555", "https://app.example.id/")
+    assert pub["token_tail"] == "…2345" and bot.token() == "123456789:AAHabcdefghijklmnopqrstuvwxyz012345"
+    assert bot.chats() == ["-1001234", "55555"] and bot.public_url() == "https://app.example.id"
+    assert oct(os.stat(tmp_path / "telegram.json").st_mode)[-3:] == "600"
+    r = bot.check()
+    assert r["ok"] and r["sent"] == ["-1001234", "55555"]
+    with pytest.raises(ValueError, match="chat id"):
+        bot.save(chat_ids="grup tim")
+
+
+def test_settings_endpoint_admin_only(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from crawler import paths
+    from tests.test_users import SITE, _app, _client
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    app, _ = _app(tmp_path, monkeypatch)
+    admin, op = _client(app, "ana"), _client(app, "budi")
+    assert op.get("/api/telegram").status_code == 403
+    r = admin.post("/api/telegram", json={"token": "123456789:AAHabcdefghijklmnopqrstuvwxyz012345", "chats": "-100"},
+                   headers=SITE).json()
+    assert r["ok"] and r["token_set"] and "AAH" not in admin.get("/api/telegram").text

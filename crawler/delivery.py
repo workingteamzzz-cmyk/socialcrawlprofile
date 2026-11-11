@@ -43,7 +43,7 @@ def payload(job, kind: str, schedule: dict | None = None) -> dict:
             "source": "post-link-collector", "kind": kind, "schedule": schedule, "period": period or None,
             "ok": not st.get("error"), "error": st.get("error") or None, "count": mode.get("count", len(links)),
             "file": files[0] if files else None, "download_path": f"/download/{files[0]}" if files else None,
-            "dashboard": os.environ.get("PUBLIC_URL", "").strip() or None, "links": links}
+            "dashboard": _public_url() or None, "links": links}
     # The client's Excel layout (Online / Medsos), when the search used one: the same rows with the same column names.
     layout = ((getattr(job, "data", {}).get(kind) or {}).get("meta") or {}).get("template") or "standard"
     if layout != "standard" and links:
@@ -102,3 +102,8 @@ def deliver_finished_job(job, kind: str):
     url = os.environ.get("RESULTS_WEBHOOK_URL", "").strip()
     if url:
         send(url, payload(job, kind), os.environ.get("RESULTS_WEBHOOK_TOKEN", "").strip(), job.log)
+
+
+def _public_url() -> str:
+    from .telegram_bot import public_url
+    return public_url()

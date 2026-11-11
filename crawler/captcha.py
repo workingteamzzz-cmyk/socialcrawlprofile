@@ -175,7 +175,8 @@ def _perform(page, act: dict):
 
 
 def _notify(label: str):
-    link = os.environ.get("PUBLIC_URL", "").strip()
+    from .telegram_bot import public_url
+    link = public_url()
     mins = os.environ.get("CAPTCHA_WAIT_MINUTES", "10")
     notify(f"🧩 Post Link Collector: {label} is asking for a verification (\"I'm not a robot\"). "
            f"Open {link or 'the dashboard'} within {mins} minutes and tap the picture to solve it. "
@@ -191,8 +192,8 @@ def notify(text: str, url: str | None = None, buttons=None):
       else CAPTCHA_WEBHOOK_URL (or the url given).
     Nothing is sent when none is set."""
     url = (url or os.environ.get("NOTIFY_WEBHOOK_URL") or os.environ.get("CAPTCHA_WEBHOOK_URL") or "").strip()
-    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-    chats = [c.strip() for c in os.environ.get("TELEGRAM_CHAT_ID", "").split(",") if c.strip()]
+    from . import telegram_bot
+    token, chats = telegram_bot.token(), telegram_bot.chats()
     posts = []
     if url:
         posts.append((url, {"text": text}))

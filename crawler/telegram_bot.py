@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 import urllib.error
@@ -25,12 +26,97 @@ import urllib.request
 _STATE = {"thread": None, "offset": 0, "last_error": ""}
 
 
+# ---------- settings: set on the dashboard (API settings → Telegram bot), else from .env ----------
+def _path() -> str:
+    from .paths import APP_DATA
+    return os.path.join(APP_DATA, "telegram.json")
+
+
+def _saved() -> dict:
+    try:
+        with open(_path(), encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
 def token() -> str:
-    return os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    return (_saved().get("token") or os.environ.get("TELEGRAM_BOT_TOKEN", "")).strip()
 
 
 def chats() -> list[str]:
-    return [c.strip() for c in os.environ.get("TELEGRAM_CHAT_ID", "").split(",") if c.strip()]
+    raw = _saved().get("chats")
+    if raw is None:
+        raw = os.environ.get("TELEGRAM_CHAT_ID", "")
+    return [c.strip() for c in str(raw).split(",") if c.strip()]
+
+
+def public_url() -> str:
+    return (_saved().get("public_url") or os.environ.get("PUBLIC_URL", "")).strip().rstrip("/")
+
+
+def clean_token(v: str) -> str:
+    """What people paste: spaces, line breaks, 'bot' prefix, quotes — keep only the token."""
+    v = re.sub(r"\s+", "", str(v or "")).strip("'\"")
+    m = re.search(r"\d{5,}:[A-Za-z0-9_-]{20,}", v)
+    return m.group(0) if m else ""
+
+
+def save(token_value: str | None = None, chat_ids: str | None = None, url: str | None = None,
+         clear_token: bool = False) -> dict:
+    d = _saved()
+    if token_value:
+        t = clean_token(token_value)
+        if not t:
+            raise ValueError("That is not a bot token — it looks like 1234567890:AAH… (from @BotFather).")
+        d["token"] = t
+    if clear_token:
+        d.pop("token", None)
+    if chat_ids is not None:
+        ids = [c for c in re.split(r"[\s,;]+", str(chat_ids)) if c]
+        bad = [c for c in ids if not re.fullmatch(r"-?\d{3,20}", c)]
+        if bad:
+            raise ValueError("A chat id is a number, e.g. -1001234567890 (groups start with -).")
+        d["chats"] = ",".join(ids)
+    if url is not None:
+        u = str(url).strip().rstrip("/")
+        if u and not re.fullmatch(r"https?://[^\s/]+", u):
+            raise ValueError("The dashboard address looks like https://app.example.id")
+        d["public_url"] = u
+    from .apiscraper.settings import _write
+    _write(_path(), d)
+    return public()
+
+
+def public() -> dict:
+    t = token()
+    return {"token_set": bool(t), "token_tail": ("…" + t[-4:]) if t else "", "chats": ",".join(chats()),
+            "public_url": public_url(), "running": bool(_STATE["thread"]), "last_error": _STATE["last_error"],
+            "bot": _STATE.get("bot", "")}
+
+
+def check() -> dict:
+    """Ask Telegram who the bot is and send a test message to every chat."""
+    if not token():
+        return {"ok": False, "error": "No bot token yet."}
+    try:
+        me = call("getMe", {})
+    except urllib.error.HTTPError as e:
+        return {"ok": False, "error": "Telegram does not accept this token (HTTP %s) — copy it again from @BotFather." % e.code}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"Cannot reach Telegram: {str(e)[:120]}"}
+    name = (me.get("result") or {}).get("username", "")
+    _STATE["bot"] = "@" + name if name else ""
+    sent, failed = [], []
+    for c in chats():
+        try:
+            call("sendMessage", {"chat_id": c, "text": "✅ Working Teamz bot is connected. Try /status",
+                                 "reply_markup": keyboard([dashboard_button()]) or {"inline_keyboard": []}})
+            sent.append(c)
+        except Exception:  # noqa: BLE001
+            failed.append(c)
+    return {"ok": True, "bot": _STATE["bot"], "sent": sent, "failed": failed}
 
 
 def _base() -> str:
@@ -60,7 +146,7 @@ def keyboard(buttons) -> dict | None:
 
 
 def dashboard_button(label: str = "🔗 Open dashboard"):
-    link = os.environ.get("PUBLIC_URL", "").strip()
+    link = public_url()
     return [(label, link)] if link.startswith(("http://", "https://")) else []
 
 
@@ -207,12 +293,19 @@ def poll_once(timeout: int = 50) -> int:
 
 
 def start() -> bool:
-    """Start answering commands in the background (when TELEGRAM_BOT_TOKEN is set). Safe to call twice."""
-    if not token() or _STATE["thread"]:
+    """Answer commands in the background. Runs from the start; idles until a token is set (dashboard or .env),
+    and follows a changed token without a restart. Safe to call twice."""
+    if _STATE["thread"]:
         return False
 
     def loop():
         while True:
+            t = token()
+            if not t:
+                time.sleep(10)
+                continue
+            if _STATE.get("tok") != t:                        # a new token: start reading from its newest update
+                _STATE["tok"], _STATE["offset"] = t, 0
             try:
                 poll_once()
                 _STATE["last_error"] = ""

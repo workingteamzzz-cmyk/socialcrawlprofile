@@ -448,7 +448,7 @@ body::before{content:"";position:fixed;inset:-20%;z-index:-1;pointer-events:none
       <button data-p="nwlinks"><svg class="i"><use href="#i-link"/></svg>News Links<span class="count" id="navNews">0</span></button>
       <div class="sep need-op">API scraper</div>
       <button data-p="apiscrape" class="need-op"><svg class="i"><use href="#i-pulse"/></svg>API Scraper</button>
-      <button data-p="apikeys" class="need-admin"><svg class="i"><use href="#i-login"/></svg>API settings</button>
+      <button data-p="apikeys" class="need-admin"><svg class="i"><use href="#i-login"/></svg>Settings (API &amp; Telegram)</button>
       <div class="sep">Reporting</div>
       <button data-p="report"><svg class="i"><use href="#i-chart"/></svg>Reports</button>
       <div class="sep">System</div>
@@ -917,7 +917,7 @@ body::before{content:"";position:fixed;inset:-20%;z-index:-1;pointer-events:none
 
     <!-- API SETTINGS (admin only) -->
     <section class="page" id="p-apikeys">
-      <div class="pagehead"><div><h1>API settings</h1><p>Keys for the API scraper. They stay on the server and are never shown again in full — only the last 4 characters. Admins only.</p></div></div>
+      <div class="pagehead"><div><h1>Settings</h1><p>The scraping API keys and the Telegram bot. Secrets stay on the server and are never shown again in full — only the last 4 characters. Admins only.</p></div></div>
       <div class="card" style="max-width:720px"><div class="card-bd">
         <div class="field"><label for="akKey">Scraping API key (ScrapeCreators) <span class="hint" id="akKeyState"></span></label>
           <input type="password" id="akKey" autocomplete="off" placeholder="paste a new key to set or replace it"></div>
@@ -943,7 +943,19 @@ body::before{content:"";position:fixed;inset:-20%;z-index:-1;pointer-events:none
         <div style="display:flex;gap:8px;margin-top:16px"><button class="btn primary" id="akSave">Save</button><button class="btn" id="akBal">Check credit balance</button></div>
         <div class="hint" id="akBalOut" style="margin-top:10px"></div>
       </div></div>
-    </section>
+          <div class="card" style="max-width:720px;margin-top:16px"><div class="card-hd"><h3>Telegram bot</h3><div class="tools"><span class="tag" id="tgState"></span></div></div><div class="card-bd">
+        <p class="hint" style="margin-top:0">1) In Telegram, <b>@BotFather</b> → <code>/newbot</code> → copy the token and paste it here → Save. 2) Add the bot to the team's group and send <code>/start</code> there: the bot answers with the group's chat id → paste it below → Save. 3) <b>Send test message</b>.</p>
+        <div class="field"><label for="tgToken">Bot token <span class="hint" id="tgTokState"></span></label>
+          <input type="password" id="tgToken" autocomplete="off" placeholder="1234567890:AAH… (paste a new token to set or replace it)"></div>
+        <div class="field" style="margin-top:10px"><label for="tgChats">Chat id(s) — comma separated</label>
+          <input id="tgChats" placeholder="-1001234567890"></div>
+        <div class="field" style="margin-top:10px"><label for="tgUrl">Dashboard address (the bot's buttons open it)</label>
+          <input id="tgUrl" placeholder="https://app.workingteamzzz.id"></div>
+        <ul class="errs" id="tgErrs"></ul>
+        <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap"><button class="btn primary" id="tgSave">Save</button><button class="btn" id="tgTest">Send test message</button><button class="btn danger" id="tgClear">Remove token</button></div>
+        <div class="hint" id="tgOut" style="margin-top:10px"></div>
+      </div></div>
+</section>
 
 
     <!-- REPORTS -->
@@ -1212,7 +1224,7 @@ function go(p){
   if (p === 'users') loadUsers();
   if (p === 'apiscrape') loadApInfo();
   if (p === 'report') loadReport();
-  if (p === 'apikeys') loadApKeys();
+  if (p === 'apikeys'){ loadApKeys(); loadTg(); }
 }
 document.querySelectorAll('#nav button').forEach(b => b.onclick = () => go(b.dataset.p));
 document.addEventListener('click', e => { const g = e.target.closest('[data-go]'); if (g){ e.preventDefault(); go(g.dataset.go); } });
@@ -1821,9 +1833,9 @@ async function loadApInfo(){
   if (cur) $('apPlat').value = cur;
   if (!$('apBudget').dataset.touched) $('apBudget').value = apInfo.default_budget;
   const na = $('apNotReady');
-  na.textContent = apInfo.ready ? '' : (ROLE === 'admin' ? 'No API key yet — set it under API settings.' : 'No API key yet — ask an admin to set it under API settings.');
+  na.textContent = apInfo.ready ? '' : (ROLE === 'admin' ? 'No API key yet — set it under Settings.' : 'No API key yet — ask an admin to set it under Settings.');
   na.className = 'alert' + (apInfo.ready ? '' : ' show err');
-  $('apTwHint').textContent = apInfo.twitter ? '' : 'Twitter needs the optional Twitter API key (API settings).';
+  $('apTwHint').textContent = apInfo.twitter ? '' : 'Twitter needs the optional Twitter API key (Settings).';
   $('apUsage').textContent = usageText(apInfo);
   if (!loadApInfo.done){ loadApInfo.done = 1; apPreset(false, true); }   // the page starts on Hemat
 }
@@ -1909,6 +1921,28 @@ $('akBal').onclick = () => showBalance($('akBalOut'));
   };
   show();
 })();
+
+/* ---------- telegram (admin) ---------- */
+async function loadTg(){
+  const d = await api('/api/telegram');
+  if (!d || d.error) return;
+  $('tgTokState').textContent = d.token_set ? `(set ${d.token_tail})` : '(not set)';
+  $('tgChats').value = d.chats || ''; $('tgUrl').value = d.public_url || location.origin; $('tgToken').value = '';
+  $('tgState').textContent = d.token_set ? (d.last_error ? 'error: ' + d.last_error : (d.bot || 'token set')) : 'off';
+}
+async function tgSave(extra){
+  const r = await api('/api/telegram', {token: $('tgToken').value, chats: $('tgChats').value, public_url: $('tgUrl').value, ...(extra || {})});
+  if (!r.ok){ $('tgErrs').innerHTML = `<li>${esc(r.error || 'Could not save')}</li>`; return false; }
+  $('tgErrs').innerHTML = ''; toast('Telegram saved'); loadTg(); return true;
+}
+$('tgSave').onclick = () => tgSave();
+$('tgClear').onclick = () => { if (confirm('Remove the bot token? The bot stops answering.')) tgSave({clear_token: true}); };
+$('tgTest').onclick = async () => {
+  $('tgOut').textContent = 'Checking…';
+  const r = await api('/api/telegram/test', {});
+  $('tgOut').textContent = !r.ok ? r.error : `Connected as ${r.bot}. ` + (r.sent.length ? `Test message sent to ${r.sent.join(', ')}.` : 'No chat id yet: add the bot to the group, send /start there, paste the id above and Save.') + (r.failed.length ? ` Could not send to ${r.failed.join(', ')} — is the bot in that group?` : '');
+  loadTg();
+};
 
 /* ---------- reports ---------- */
 let TOPICS = [];

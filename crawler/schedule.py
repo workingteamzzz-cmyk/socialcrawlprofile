@@ -242,7 +242,8 @@ class Scheduler:
                 s["last_result"] = result
                 self._save()
         name = s["name"] if s else "schedule"
-        link = os.environ.get("PUBLIC_URL", "").strip()
+        from .telegram_bot import public_url
+        link = public_url()
         self.notify(f"Post Link Collector: “{name}” finished — {result}." + (f" Open {link}" if link else ""))
         if s and s.get("webhook") and same_job:
             from . import delivery

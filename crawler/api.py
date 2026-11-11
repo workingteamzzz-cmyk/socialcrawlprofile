@@ -226,6 +226,13 @@ class ApiScrape(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class TelegramSettings(BaseModel):
+    token: str = Field("", description="the bot token from @BotFather (kept on the server, shown back as …last 4)")
+    chats: str | None = Field(None, description="chat ids, comma separated (groups start with -)")
+    public_url: str | None = Field(None, description="the dashboard address the bot's buttons open")
+    clear_token: bool = False
+
+
 class Topic(BaseModel):
     id: str | None = None
     name: str = Field("", description="e.g. PLN")
@@ -686,6 +693,29 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
             daily_cap=body.daily_cap, monthly_cap=body.monthly_cap,
             cleared=[k for k, v in (("api", body.clear_api_key), ("twitter", body.clear_twitter)) if v])
         return {"ok": True, **pub}
+
+    # ---------- Telegram bot (admin) ----------
+    @app.get("/api/telegram", tags=["telegram"], dependencies=admin_only, summary="Telegram bot settings (token masked)")
+    def telegram_get():
+        from . import telegram_bot
+        return telegram_bot.public()
+
+    @app.post("/api/telegram", tags=["telegram"], dependencies=admin_only, summary="Set the Telegram bot")
+    def telegram_save(body: TelegramSettings, request: Request):
+        from . import telegram_bot
+        try:
+            pub = telegram_bot.save(body.token or None, body.chats, body.public_url, body.clear_token)
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        telegram_bot.start()
+        log(request, "changed the Telegram bot", token=bool(body.token), chats=body.chats is not None)
+        return {"ok": True, **pub}
+
+    @app.post("/api/telegram/test", tags=["telegram"], dependencies=admin_only, summary="Check the bot, send a test message")
+    def telegram_test(request: Request):
+        from . import telegram_bot
+        log(request, "tested the Telegram bot")
+        return telegram_bot.check()
 
     # ---------- reporting (database + topics) ----------
     @app.get("/api/report/topics", tags=["reporting"], dependencies=auth, summary="Topics and what the database holds")

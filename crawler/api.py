@@ -226,6 +226,22 @@ class ApiScrape(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class Topic(BaseModel):
+    id: str | None = None
+    name: str = Field("", description="e.g. PLN")
+    keywords: list[str] | str = Field(default_factory=list, description="the keywords that belong to this topic")
+
+
+class ReportRequest(BaseModel):
+    kind: str = Field("online", description="online (news) or medsos (social media)")
+    start: str = Field(..., description="YYYY-MM-DD")
+    end: str = Field(..., description="YYYY-MM-DD")
+    topic_id: str | None = Field(None, description="a saved topic; or give name + keywords")
+    name: str = ""
+    keywords: list[str] | str = Field(default_factory=list)
+    in_text: bool = Field(True, description="also rows whose text contains a keyword (not only the run's keyword)")
+
+
 class ApiKeys(BaseModel):
     api_key: str = ""
     twitter_api_key: str = ""
@@ -670,6 +686,52 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
             daily_cap=body.daily_cap, monthly_cap=body.monthly_cap,
             cleared=[k for k, v in (("api", body.clear_api_key), ("twitter", body.clear_twitter)) if v])
         return {"ok": True, **pub}
+
+    # ---------- reporting (database + topics) ----------
+    @app.get("/api/report/topics", tags=["reporting"], dependencies=auth, summary="Topics and what the database holds")
+    def report_topics():
+        from . import archive
+        return {"topics": archive.topics(), "stats": archive.stats()}
+
+    @app.post("/api/report/topics", tags=["reporting"], dependencies=op, summary="Add or change a topic")
+    def report_topic_save(body: Topic, request: Request):
+        from . import archive
+        try:
+            t = archive.save_topic(body.name, body.keywords, body.id)
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        log(request, "saved a topic", name=t["name"], keywords=len(t["keywords"]))
+        return {"ok": True, "topic": t}
+
+    @app.delete("/api/report/topics/{tid}", tags=["reporting"], dependencies=op, summary="Delete a topic")
+    def report_topic_delete(tid: str, request: Request):
+        from . import archive
+        ok = archive.delete_topic(tid)
+        log(request, "deleted a topic", id=tid)
+        return {"ok": ok}
+
+    @app.post("/api/report/topics/delete", tags=["reporting"], dependencies=op, summary="Delete a topic")
+    def report_topic_delete_post(body: Topic, request: Request):
+        from . import archive
+        ok = archive.delete_topic(body.id or "")
+        log(request, "deleted a topic", id=body.id)
+        return {"ok": ok}
+
+    @app.post("/api/report", tags=["reporting"], dependencies=auth,
+              summary="A report: the team's Excel (+ Summary sheet) for a topic and period, from the database")
+    def report_make(body: ReportRequest, request: Request):
+        from . import archive
+        r = archive.report_from(body.model_dump(), OUTPUT_DIR)
+        log(request, "made a report", kind=body.kind, period=f"{body.start}..{body.end}", rows=r.get("total"))
+        return r
+
+    @app.post("/api/report/import", tags=["reporting"], dependencies=op,
+              summary="Put the Online / Medsos Excel files already in Exports into the database")
+    def report_import(request: Request):
+        from . import archive
+        r = archive.import_folder(OUTPUT_DIR)
+        log(request, "imported Exports into the reporting database", files=r["files"])
+        return r
 
     # ---------- users (sign-in accounts and their rights) ----------
     def user_call(fn):

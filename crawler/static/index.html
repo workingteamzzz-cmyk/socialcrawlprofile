@@ -288,6 +288,7 @@ body:not([data-role="admin"]) .need-admin{display:none!important}
   <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
   <symbol id="i-news" viewBox="0 0 24 24"><path d="M4 5h13v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M17 9h3v10a2 2 0 0 1-2 2M8 9h5M8 13h5M8 17h3"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
   <symbol id="i-tick" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
 </svg>
 
@@ -309,6 +310,8 @@ body:not([data-role="admin"]) .need-admin{display:none!important}
       <div class="sep need-op">API scraper</div>
       <button data-p="apiscrape" class="need-op"><svg class="i"><use href="#i-pulse"/></svg>API Scraper</button>
       <button data-p="apikeys" class="need-admin"><svg class="i"><use href="#i-login"/></svg>API settings</button>
+      <div class="sep">Reporting</div>
+      <button data-p="report"><svg class="i"><use href="#i-chart"/></svg>Reports</button>
       <div class="sep">System</div>
       <button data-p="schedules"><svg class="i"><use href="#i-cal"/></svg>Schedules<span class="count" id="navSch">0</span></button>
       <button data-p="exports"><svg class="i"><use href="#i-file"/></svg>Exports</button>
@@ -802,6 +805,51 @@ body:not([data-role="admin"]) .need-admin{display:none!important}
       </div></div>
     </section>
 
+
+    <!-- REPORTS -->
+    <section class="page" id="p-report">
+      <div class="pagehead"><div><h1>Reports</h1><p>Every search is kept in one database. Group keywords into a <b>topic</b> (e.g. PLN = pln, listrik padam, pemadaman) and pull a report for any period — in the team's Online or Medsos template, with a Summary sheet.</p></div></div>
+      <div class="collect">
+        <div style="display:flex;flex-direction:column;gap:16px">
+          <div class="card"><div class="card-hd"><h3>Make a report</h3></div><div class="card-bd">
+            <div class="field"><label for="rpTopic">Topic</label><select id="rpTopic"></select></div>
+            <div class="field" id="rpKwF" style="margin-top:10px;display:none"><label for="rpKw">Keywords (comma separated)</label><input id="rpKw" placeholder="pln, listrik padam, pemadaman"></div>
+            <div class="field" style="margin-top:10px"><label>Data</label>
+              <div class="choices">
+                <label class="choice"><input type="radio" name="rpKind" value="online" checked><span><b>Online news</b><small>Online template</small></span></label>
+                <label class="choice"><input type="radio" name="rpKind" value="medsos"><span><b>Social media</b><small>Medsos template</small></span></label></div></div>
+            <div class="presets" style="margin-top:12px">
+              <button class="chip" data-rp="1">Yesterday</button><button class="chip" data-rp="7">Last 7 days</button>
+              <button class="chip" data-rp="30">Last 30 days</button><button class="chip" data-rp="m">This month</button></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">
+              <div class="field"><label for="rpFrom">From</label><input type="date" id="rpFrom"></div>
+              <div class="field"><label for="rpTo">To</label><input type="date" id="rpTo"></div></div>
+            <div class="opt-row" style="margin-top:8px"><div class="t"><b>Also rows that only mention a keyword</b><small>Not just rows found by the topic's keywords — any saved row whose text contains one</small></div>
+              <label class="switch"><input type="checkbox" id="rpText" checked><span></span></label></div>
+            <button class="btn primary lg" id="rpGo" style="margin-top:12px"><svg class="i"><use href="#i-chart"/></svg>Make report</button>
+            <div class="alert" id="rpMsg"></div>
+          </div></div>
+          <div class="card" id="rpOut" style="display:none"><div class="card-hd"><h3 id="rpOutTitle">Result</h3><div class="tools" id="rpDl"></div></div><div class="card-bd" id="rpOutBody"></div></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:16px">
+          <div class="card"><div class="card-hd"><h3>Topics</h3></div><div class="card-bd">
+            <div id="tpList"></div>
+            <div class="need-op" style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px">
+              <input type="hidden" id="tpId">
+              <div class="field"><label for="tpName">Topic name</label><input id="tpName" placeholder="PLN"></div>
+              <div class="field" style="margin-top:8px"><label for="tpKws">Keywords</label><textarea id="tpKws" rows="3" placeholder="pln, listrik padam, pemadaman listrik, tarif listrik"></textarea></div>
+              <div style="display:flex;gap:8px;margin-top:10px"><button class="btn primary" id="tpSave">Save topic</button><button class="btn" id="tpNew">New</button></div>
+              <div class="alert" id="tpMsg"></div>
+            </div></div></div>
+          <div class="card"><div class="card-hd"><h3>Database</h3></div><div class="card-bd">
+            <div id="dbStats" class="hint"></div>
+            <button class="btn need-op" id="dbImport" style="margin-top:10px">Add the Excel files already in Exports</button>
+            <p class="hint" style="margin-top:8px">New searches are added automatically. Use this once for files made before this version (Online / Medsos layouts and the API scraper's files).</p>
+          </div></div>
+        </div>
+      </div>
+    </section>
+
     <!-- SCHEDULES -->
     <section class="page" id="p-schedules">
       <div class="pagehead"><div><h1>Schedules</h1><p>Searches that run by themselves — e.g. news for yesterday, every morning. Set a search up on its page, then click <b>Schedule it</b>. Each run saves its own Excel file (Exports).</p></div></div>
@@ -1021,6 +1069,7 @@ function go(p){
   if (p === 'schedules') loadSchedules();
   if (p === 'users') loadUsers();
   if (p === 'apiscrape') loadApInfo();
+  if (p === 'report') loadReport();
   if (p === 'apikeys') loadApKeys();
 }
 document.querySelectorAll('#nav button').forEach(b => b.onclick = () => go(b.dataset.p));
@@ -1704,6 +1753,75 @@ $('akSave').onclick = async () => {
   $('akErrs').innerHTML = ''; toast('API settings saved'); loadApKeys(); loadApInfo();
 };
 $('akBal').onclick = () => showBalance($('akBalOut'));
+
+/* ---------- reports ---------- */
+let TOPICS = [];
+async function loadReport(){
+  const d = await api('/api/report/topics');
+  TOPICS = d.topics || [];
+  const cur = $('rpTopic').value;
+  $('rpTopic').innerHTML = TOPICS.map(t => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('') + '<option value="">Custom keywords…</option>';
+  if (cur !== '' && TOPICS.some(t => t.id === cur)) $('rpTopic').value = cur;
+  $('rpKwF').style.display = $('rpTopic').value ? 'none' : '';
+  $('tpList').innerHTML = TOPICS.length ? TOPICS.map(t => `<div class="opt-row"><div class="t"><b>${esc(t.name)}</b><small>${t.keywords.map(esc).join(' · ')}</small></div>
+    <div class="need-op" style="display:flex;gap:6px"><button class="btn sm" data-tpe="${esc(t.id)}">Edit</button><button class="btn sm" data-tpd="${esc(t.id)}">Delete</button></div></div>`).join('')
+    : '<p class="hint">No topics yet — add one below (e.g. PLN with all its keywords).</p>';
+  document.querySelectorAll('[data-tpe]').forEach(b => b.onclick = () => { const t = TOPICS.find(x => x.id === b.dataset.tpe);
+    $('tpId').value = t.id; $('tpName').value = t.name; $('tpKws').value = t.keywords.join(', '); $('tpName').focus(); });
+  document.querySelectorAll('[data-tpd]').forEach(b => b.onclick = async () => { if (!confirm('Delete this topic? The data stays in the database.')) return;
+    await api('/api/report/topics/delete', {id: b.dataset.tpd}); loadReport(); });
+  const st = d.stats || {}, line = (k, label) => st[k] ? `${label}: <b>${fmt(st[k].items)}</b> (${esc(st[k].from)} – ${esc(st[k].to)})` : `${label}: none yet`;
+  $('dbStats').innerHTML = line('online', 'Online news') + '<br>' + line('medsos', 'Social media');
+  if (!$('rpFrom').value) rpRange('7');
+}
+$('rpTopic').onchange = () => { $('rpKwF').style.display = $('rpTopic').value ? 'none' : ''; };
+function rpRange(v){
+  const now = new Date(), d = n => new Date(now.getTime() - n * 86400000), iso = x => toLocalInput(x).slice(0, 10);
+  if (v === 'm'){ $('rpFrom').value = iso(new Date(now.getFullYear(), now.getMonth(), 1)); $('rpTo').value = iso(now); }
+  else if (v === '1'){ $('rpFrom').value = $('rpTo').value = iso(d(1)); }
+  else { $('rpFrom').value = iso(d(+v - 1)); $('rpTo').value = iso(now); }
+}
+document.querySelectorAll('[data-rp]').forEach(b => b.onclick = () => rpRange(b.dataset.rp));
+$('tpNew').onclick = () => { $('tpId').value = ''; $('tpName').value = ''; $('tpKws').value = ''; $('tpName').focus(); };
+$('tpSave').onclick = async () => {
+  const r = await api('/api/report/topics', {id: $('tpId').value || null, name: $('tpName').value, keywords: $('tpKws').value});
+  const m = $('tpMsg');
+  if (!r.ok){ m.textContent = r.error || 'Could not save'; m.className = 'alert show err'; return; }
+  m.className = 'alert'; toast('Topic saved'); $('tpId').value = r.topic.id; loadReport();
+};
+$('dbImport').onclick = async () => {
+  $('dbImport').disabled = true;
+  const r = await api('/api/report/import', {});
+  $('dbImport').disabled = false;
+  toast(r.ok ? `Added from ${r.files} file(s): ${r.online} news, ${r.medsos} social rows` : (r.error || 'Failed'));
+  loadReport();
+};
+function bars(pairs, total){
+  return pairs.map(([k, v]) => `<div style="display:grid;grid-template-columns:150px 1fr 60px;gap:8px;align-items:center;margin:3px 0">
+    <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(k)}</span>
+    <span style="background:var(--line);border-radius:4px;height:10px"><span style="display:block;height:10px;border-radius:4px;background:var(--accent,#2463eb);width:${total ? Math.max(2, v / total * 100) : 0}%"></span></span>
+    <b style="text-align:right">${fmt(v)}</b></div>`).join('') || '<p class="hint">—</p>';
+}
+$('rpGo').onclick = async () => {
+  const m = $('rpMsg'); m.className = 'alert';
+  const body = {kind: radioValue('rpKind'), start: $('rpFrom').value, end: $('rpTo').value, in_text: $('rpText').checked,
+    topic_id: $('rpTopic').value || null, keywords: $('rpKw').value, name: $('rpTopic').value ? '' : $('rpKw').value.split(',')[0]};
+  $('rpGo').disabled = true;
+  const r = await api('/api/report', body);
+  $('rpGo').disabled = false;
+  if (!r.ok){ m.textContent = r.error || 'Could not make the report'; m.className = 'alert show err'; return; }
+  const sent = Object.entries(r.sentiment || {}).sort((a, b) => b[1] - a[1]);
+  $('rpOut').style.display = '';
+  $('rpOutTitle').textContent = `${fmt(r.total)} ${body.kind === 'online' ? 'articles' : 'posts'}`;
+  $('rpDl').innerHTML = r.total ? `<a class="btn sm" href="/download/${encodeURIComponent(r.file)}">${icon('i-dl')}Excel</a>` : '';
+  $('rpOutBody').innerHTML = !r.total ? '<p class="hint">Nothing in the database for this topic and period. Run a search (or a schedule) first, or add old files under Database.</p>' :
+    `<div class="opt-group">Sentiment</div>${bars(sent, r.total)}
+     <div class="opt-group">Per day</div>${bars(r.per_day || [], Math.max(...(r.per_day || [['', 1]]).map(x => x[1])))}
+     <div class="opt-group">${body.kind === 'online' ? 'Top media' : 'Platforms'}</div>${bars(r.top_sources || [], r.total)}
+     <div class="opt-group">Per keyword</div>${bars(r.per_keyword || [], r.total)}
+     <div class="opt-group">${body.kind === 'online' ? 'People mentioned' : 'Top accounts'}</div>${bars(r.top_people || r.top_accounts || [], r.total)}
+     ${body.kind === 'medsos' ? `<p class="hint" style="margin-top:8px">Comments: ${fmt(r.comments || 0)} · engagement (likes + replies + shares): ${fmt(r.engagement || 0)}</p>` : ''}`;
+};
 
 /* ---------- schedules ---------- */
 const schModal = $('schModal');

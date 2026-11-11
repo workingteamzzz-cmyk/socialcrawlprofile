@@ -240,6 +240,11 @@ def rows_for(layout: str, rows: list, tz, drop_empty: bool = False, stats: dict 
 # ---------- files ----------
 def write(layout: str, path_xlsx: str, path_csv: str, rows: list, tz, drop_empty: bool = False) -> None:
     cols, values = rows_for(layout, rows, tz, drop_empty)
+    write_values(layout, path_xlsx, path_csv, cols, values)
+
+
+def write_values(layout: str, path_xlsx: str, path_csv: str | None, cols: list, values: list, extra=None) -> None:
+    """The team's Excel (+ CSV) from rows already in the layout's columns. extra(wb) may add sheets (reports)."""
     wb = Workbook(write_only=False)
     ws = wb.active
     ws.title = "Sheet1"
@@ -270,9 +275,13 @@ def write(layout: str, path_xlsx: str, path_csv: str, rows: list, tz, drop_empty
     if layout == "medsos":
         ws.freeze_panes = "A2"
         ws.auto_filter.ref = f"A1:{ws.cell(row=1, column=len(cols)).column_letter}{max(1, ws.max_row)}"
+    if extra:
+        extra(wb)
     tmp = path_xlsx + ".tmp"
     wb.save(tmp)
     os.replace(tmp, path_xlsx)
+    if not path_csv:
+        return
     tmp = path_csv + ".tmp"
     with open(tmp, "w", encoding="utf-8-sig", newline="") as f:
         w = csv.writer(f)

@@ -20,7 +20,7 @@ def list_outputs() -> list[dict]:
         for name in os.listdir(OUTPUT_DIR):
             if name.endswith(".xlsx") and (name.startswith(("post_links_", "keyword_links_", "news_links_"))
                                            or re.match(r"\d{8}_(Online|Medsos)_", name)) \
-                    or re.search(r"_decoded\.(xlsx|csv|txt)$", name) or re.match(r"Data .+\.xlsx$", name):
+                    or re.search(r"_decoded\.(xlsx|csv|txt)$", name) or re.match(r"(Data|Report_).+\.xlsx$", name):
                 st = os.stat(os.path.join(OUTPUT_DIR, name))
                 files.append({"name": name, "size": st.st_size, "mtime": int(st.st_mtime)})
     files.sort(key=lambda f: f["mtime"], reverse=True)
@@ -96,6 +96,9 @@ class Handler(BaseHTTPRequestHandler):
 
             from .schedule import get
             return self._json({"schedules": get().list(), "now": int(_time.time())})
+        if u.path == "/api/report/topics":
+            from . import archive
+            return self._json({"topics": archive.topics(), "stats": archive.stats()})
         if u.path == "/api/apiscraper/info":
             from .apiscraper import runner
             return self._json(runner.info())
@@ -179,6 +182,19 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"ok": ok, "error": None if ok else "That schedule no longer exists."})
                 err = get().run_now(data.get("id", ""))
             except ScheduleError as e:
+                return self._json({"ok": False, "error": str(e)})
+        elif u.path in ("/api/report", "/api/report/import", "/api/report/topics", "/api/report/topics/delete"):
+            from . import archive
+            if u.path == "/api/report":
+                return self._json(archive.report_from(data, OUTPUT_DIR))
+            if u.path == "/api/report/import":
+                return self._json(archive.import_folder(OUTPUT_DIR))
+            if u.path.endswith("/delete"):
+                return self._json({"ok": archive.delete_topic(str(data.get("id", "")))})
+            try:
+                return self._json({"ok": True, "topic": archive.save_topic(data.get("name"), data.get("keywords"),
+                                                                         data.get("id"))})
+            except ValueError as e:
                 return self._json({"ok": False, "error": str(e)})
         elif u.path == "/api/apiscraper/start":
             err = JOB.start_apiscrape(data)

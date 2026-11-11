@@ -312,12 +312,13 @@ Schedule (or Start) ─┬─ Medsos (keyword search / profiles, browser, free)
                      │          1 credit per post missing caption/engagement (also brings the account's ID & photo)
                      │          1 credit per ACCOUNT still missing ID/photo/followers
                      │          stops at the per-run fill cap and the daily/monthly limit
-                     │     4. Sentiment & Emotion (team lexicon) → Medsos Excel
+                     │     4. comments of the most engaged posts (API, optional, ~1 credit per post)
+                     │     5. Sentiment & Emotion (team lexicon) → Medsos Excel
                      └─ News (Multi-source engine, no browser)
                            1. Google News by date + per outlet, sitemaps, RSS, Bing, GDELT → decode → read articles
                            2. a keyword with 0 articles (or an engine failure) → the browser engine takes over
                            3. INFLUENCER / PERSON / SENTIMENT, the team's cleaning rules → Online Excel
-   → Exports + delivery webhook + Telegram message ("✅ … finished — N links", button to the dashboard)
+   → Exports + reporting database (topics → reports) + delivery webhook + Telegram message ("✅ … finished — N links", button to the dashboard)
    → a verification on the way → Telegram message with "Solve it" / "Skip"
 ```
 
@@ -338,6 +339,21 @@ The bot messages the team when a verification is waiting (**Solve it** opens the
 a scheduled run finishes or fails. Commands: `/status`, `/schedules` (each with **Run now**), `/stop`. It answers only
 the chats in `TELEGRAM_CHAT_ID`; files and results are never sent to Telegram, only counts and the dashboard link,
 which needs a sign-in. A verification is solved on the server's own browser: nobody's Google account is used.
+
+## Reports (topics + database)
+
+Every News / Keyword / Profile / API-scraper run is also saved in `archive.db` (data folder), already in the team's
+Online / Medsos columns, with the keyword that found each row; a link found again is merged, not doubled.
+
+On **Reporting → Reports**:
+- **Topics** group keywords: e.g. *PLN* = pln, pemadaman listrik, listrik padam, tarif listrik (operators/admins).
+- **Make a report**: topic (or typed keywords) + Online news / Social media + period → the numbers on the page
+  (sentiment, per day, top media/platforms, per keyword, people / accounts) and an Excel
+  `Report_<topic>_<Online|Medsos>_<from>_<to>.xlsx`: Sheet1 in the team's template + a Summary sheet.
+  *Also rows that only mention a keyword* adds saved rows whose text contains a topic keyword.
+- **Database → Add the Excel files already in Exports**: puts files made before this version into the database.
+
+API: `GET/POST /api/report/topics`, `POST /api/report/topics/delete`, `POST /api/report`, `POST /api/report/import`.
 
 ## Schedules (searches that run by themselves)
 

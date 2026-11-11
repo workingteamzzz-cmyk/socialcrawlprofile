@@ -227,6 +227,17 @@ class Job:
                 self._save_warned = True
             return False
 
+    def _archive(self, kind: str, rows, tz=None) -> None:
+        """Every result also goes to the reporting database (archive.py)."""
+        try:
+            from . import archive
+            rows = list(rows)
+            if rows:
+                n = archive.add_rows(kind, rows, tz or timezone(timedelta(hours=7)))
+                self.log(f"🗄 Reporting database: {n} new, {len(rows) - n} updated")
+        except Exception as e:  # noqa: BLE001
+            self.log(f"⚠ Reporting database not updated: {str(e)[:120]}")
+
     def _api_fill(self, rows: list) -> list:
         """Medsos output: what the browser could not read is filled with the scraping API (autofill.py) —
         only when an API key is set and auto-fill is on; never stops the run's file from being written."""
@@ -506,6 +517,7 @@ class Job:
             files = self._finish_files(save, [xlsx, csvp], any(st["status"] != "skipped" for st in statuses))
             self._close(ctx, pw)
         b["files"] = files
+        self._archive("medsos", links, tz)
         self.log(("⏹ Stopped. " if stopped else "✅ Done. ") + f"Total {len(links)} links" + (f" → {files[0]}" if files else ""))
 
     # ---------- keywords ----------
@@ -646,6 +658,7 @@ class Job:
             files = self._finish_files(save, [xlsx, csvp], bool(statuses))
             self._close(ctx, pw)
         b["files"] = files
+        self._archive("medsos", seen.values(), tz)
         self.log(("⏹ Stopped. " if stopped else "✅ Done. ") + f"Total {len(seen)} unique links" + (f" → {files[0]}" if files else ""))
 
 
@@ -792,6 +805,7 @@ class Job:
             files = self._finish_files(save, [xlsx, csvp], bool(statuses))
             self._close(ctx, pw)
         b["files"] = files + b.pop("extra_files", [])
+        self._archive("online", seen.values(), tz)
         if opt.template == "online" and seen:                 # like the team's uploader notebook reports it
             from . import templates
             st: dict = {}
@@ -844,6 +858,7 @@ class Job:
             return fallback
         files = self._finish_files(save, [xlsx, csvp], bool(statuses))
         b["files"] = files + extra
+        self._archive("online", seen.values(), tz)
         self.log(("⏹ Stopped. " if stopped else "✅ Done. ") + f"Total {len(seen)} news articles"
                  + (f" → {files[0]}" if files else ""))
         return None
@@ -911,6 +926,14 @@ class Job:
         self.api_files = files
         if files:
             self.log("✅ Files in Exports: " + ", ".join(files))
+            try:
+                from . import archive
+                for f in files:
+                    if f.endswith(".xlsx"):
+                        _k, n = archive.import_file(os.path.join(OUTPUT_DIR, f))
+                        self.log(f"🗄 Reporting database: {n} new row(s) from {f}")
+            except Exception as e:  # noqa: BLE001
+                self.log(f"⚠ Reporting database not updated: {str(e)[:120]}")
         elif self.stop_flag.is_set():
             self.log("⏹ Stopped before any file was written.")
 

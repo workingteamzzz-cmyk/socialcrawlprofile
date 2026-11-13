@@ -265,6 +265,15 @@ The output is the same: News Links, the Online / Standard Excel, schedules and d
 keep the browser engine; make a new one to use Multi-source. A Multi-source run with every source on takes longer
 (minutes per keyword; Google's decoding limit is the slow part).
 
+### Social media through Google (News Search → Search target → Social media)
+
+Searches Google (All results, day by day) limited to the chosen platforms, e.g.
+`pln (site:instagram.com OR site:threads.com OR site:threads.net)`: the public posts Google has indexed — useful next to
+each platform's own search. Only post links are kept (no profile / hashtag pages). The result goes into the **Medsos**
+layout (Username from the link, Post ID, Sentiment & Emotion); *Full article* opens each post for caption, engagement
+and the account; empty IDs / followers are filled with the API when it is set up. Runs on the browser engine (Google
+may ask for a verification).
+
 ## Google News links (news.google.com / rss) → the media's own link
 
 Every news search turns Google News links into the media's own links. Whatever the browser could not decode gets a

@@ -717,10 +717,14 @@ class Job:
             if not force and not self._autosave_due():
                 return True
             x, c = paths or (xlsx, csvp)
+            from . import templates
             if opt.template == "online":
-                from . import templates
                 rows = sorted(self._fresh("online", seen.values(), tz), key=lambda r: -(r.get("ts") or 0))
                 return self._safe_save(lambda: templates.write("online", x, c, rows, tz, opt.detail == "full"), x)
+            if opt.template == "medsos":                       # social media target: posts in the Medsos layout
+                rows = sorted(self._fresh("medsos", seen.values(), tz),
+                              key=lambda r: -(r.get("sort_ts") or r.get("ts") or 0))
+                return self._safe_save(lambda: templates.write("medsos", x, c, rows, tz), x)
             return self._safe_save(lambda: write_news_outputs(x, c, list(seen.values()), statuses, meta), x)
 
         def record(kw, res):
@@ -751,8 +755,8 @@ class Job:
             opt.engine, opt.resolve = "google", True
             opt.detail = "full" if opt.template == "online" else "basic"
             self.total, self.done = len(kws), 0
-        self.log(f"News search (Google): {', '.join(kws)} — period {d_start:%Y-%m-%d} to {d_end:%Y-%m-%d} "
-                 f"({tz_name}) — detail: {opt.detail}")
+        self.log(f"News search (Google{' · social media: ' + ', '.join(opt.social) if opt.target == 'social' else ''}): "
+                 f"{', '.join(kws)} — period {d_start:%Y-%m-%d} to {d_end:%Y-%m-%d} ({tz_name}) — detail: {opt.detail}")
         pw = ctx = None
         stopped = False
         try:
@@ -779,6 +783,13 @@ class Job:
                             if j and j % 10 == 0:
                                 self.log(f"   reading articles: {j}/{len(new)}")
                             try:
+                                if opt.target == "social":           # a post: caption, engagement, the account
+                                    from .details import read_details
+                                    got = read_details(crawler, r["platform"], r["url"])
+                                    r.update({k: v for k, v in got.items() if v not in (None, "")})
+                                    if got.get("author"):
+                                        r["author"] = got["author"]
+                                    continue
                                 art = crawler.article(r["url"])
                                 r.update({k: v for k, v in art.items() if v})   # keep Google's title if the page gives none
                                 final = art.get("final_url") or ""
@@ -814,11 +825,15 @@ class Job:
                     self._pause_between()
             if not stopped and opt.resolve:
                 self._second_pass(seen, b)
+            if opt.target == "social" and opt.template == "medsos" and not stopped:
+                for c in self._api_fill(list(seen.values())):   # empty IDs / engagement: the API, if set up
+                    seen.setdefault(f"{c['url']}#{c.get('post_id', '')}", c)
+                    b["links"].append(c)
         finally:
             files = self._finish_files(save, [xlsx, csvp], bool(statuses))
             self._close(ctx, pw)
         b["files"] = files + b.pop("extra_files", [])
-        self._archive("online", seen.values(), tz)
+        self._archive("medsos" if opt.target == "social" else "online", seen.values(), tz)
         if opt.template == "online" and seen:                 # like the team's uploader notebook reports it
             from . import templates
             st: dict = {}

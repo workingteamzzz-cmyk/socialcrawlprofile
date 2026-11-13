@@ -712,7 +712,7 @@ body::before{content:"";position:fixed;inset:-20%;z-index:-1;pointer-events:none
               <label class="choice"><input type="radio" name="nDetail" value="full"><span><b>Full article</b><small>Also opens every article to copy its title, author, published time and text. Slower (about 3–6 s per article); paywalled pages may be partial.</small></span></label>
             </div>
             <div class="field" style="margin-top:12px"><label for="nTemplate">Excel layout</label>
-              <select id="nTemplate"><option value="online">Online (client format)</option><option value="standard">Standard (this app)</option></select>
+              <select id="nTemplate"><option value="online">Online (client format)</option><option value="medsos">Medsos (social media target)</option><option value="standard">Standard (this app)</option></select>
               <small class="hint">Online: DATE, TIME, TITLE, URL, IMAGE, MEDIA, AUTHOR, SUMMARY, CONTENT… IMAGE, AUTHOR, SUMMARY and CONTENT need “Full article” (always on with Multi-source). SENTIMENT, INFLUENCER and PERSON are filled from the article text (the team's rules, no AI).</small></div></div></div>
         </div>
         <div style="display:flex;flex-direction:column;gap:16px">
@@ -734,7 +734,24 @@ body::before{content:"";position:fixed;inset:-20%;z-index:-1;pointer-events:none
               </div>
               <p class="hint">If Google shows a captcha ("unusual traffic"), solve it in the browser window — the run waits for you.</p>
             </div></div>
-          <div class="card"><div class="card-hd"><h3>Search engine</h3></div>
+          <div class="card"><div class="card-hd"><h3>Search target</h3></div><div class="card-bd">
+            <div class="choices">
+              <label class="choice"><input type="radio" name="nTarget" value="news" checked><span><b>News media</b><small>Articles from online news outlets.</small></span></label>
+              <label class="choice"><input type="radio" name="nTarget" value="social"><span><b>Social media (via Google)</b><small>Google Search limited to the platforms below, e.g. <code>pln (site:instagram.com OR site:threads.com)</code> — public posts Google has indexed. Output: the Medsos layout. Uses the browser engine.</small></span></label>
+            </div>
+            <div id="nSocialOpts" style="display:none;margin-top:10px">
+              <div class="presets" id="nSocialPlats">
+                <label class="chip"><input type="checkbox" class="nSoc" value="instagram" checked> Instagram</label>
+                <label class="chip"><input type="checkbox" class="nSoc" value="threads" checked> Threads</label>
+                <label class="chip"><input type="checkbox" class="nSoc" value="tiktok" checked> TikTok</label>
+                <label class="chip"><input type="checkbox" class="nSoc" value="x" checked> X / Twitter</label>
+                <label class="chip"><input type="checkbox" class="nSoc" value="facebook" checked> Facebook</label>
+                <label class="chip"><input type="checkbox" class="nSoc" value="youtube" checked> YouTube</label>
+              </div>
+              <div class="opt-row"><div class="t"><b>Post links only</b><small>Leave out profile, hashtag and search pages</small></div><label class="switch"><input type="checkbox" id="nPostsOnly" checked><span></span></label></div>
+              <p class="hint">Tip: "Full article" in Output opens each post for caption, likes, comments and the account (slower). Empty IDs / followers are filled with the API when it is set up (Settings).</p>
+            </div></div></div>
+          <div class="card" id="nEngineCard"><div class="card-hd"><h3>Search engine</h3></div>
             <div class="card-bd"><div class="choices">
               <label class="choice"><input type="radio" name="nEngine" value="multi" checked><span><b>Multi-source (recommended)</b><small>No browser, no captcha. Google News split by date + every outlet one by one, media sitemaps, media RSS feeds, Bing News and GDELT; reads every article and fills INFLUENCER, PERSON and SENTIMENT. Remembers links across runs.</small></span></label>
               <label class="choice"><input type="radio" name="nEngine" value="google"><span><b>Browser (Google pages)</b><small>Searches Google like a person in the browser — Google News feed, News tab and All results.</small></span></label>
@@ -1623,9 +1640,19 @@ function nwOptions(){
     sites: $('nSites').value.split(',').map(w => w.trim()).filter(Boolean), template: $('nTemplate').value, layout_v2: true,
     engine: radioValue('nEngine'), multi_sources: [...document.querySelectorAll('.nMs')].filter(c => c.checked).map(c => c.value),
     registered_only: $('nRegOnly').checked, new_only: $('nNewOnly').checked, include_review: $('nInclReview').checked,
-    retry_failed: $('nRetry').checked, max_harvest: +$('nHarvest').value, fallback: $('nFallback').checked };
+    retry_failed: $('nRetry').checked, max_harvest: +$('nHarvest').value, fallback: $('nFallback').checked,
+    target: radioValue('nTarget') || 'news', social: [...document.querySelectorAll('.nSoc')].filter(c => c.checked).map(c => c.value),
+    posts_only: $('nPostsOnly').checked };
 }
 function nwEngineView(){
+  const social = radioValue('nTarget') === 'social';
+  $('nSocialOpts').style.display = social ? '' : 'none';
+  $('nEngineCard').style.display = social ? 'none' : '';
+  if (social){ document.querySelectorAll('input[name="nEngine"]').forEach(r => r.checked = r.value === 'google');
+    if ($('nTemplate').value === 'online') $('nTemplate').value = 'medsos'; }
+  else if ($('nTemplate').value === 'medsos') $('nTemplate').value = 'online';
+  ['nSrcFeed', 'nSrcNews', 'nSrcAll', 'nResolve', 'nSites', 'nMediaOnly', 'nExtraMedia'].forEach(id => { const row = $(id).closest('.opt-row'); if (row && social) row.style.display = 'none'; });
+  if (social) return;
   const multi = radioValue('nEngine') === 'multi';
   $('nMultiOpts').style.display = multi ? '' : 'none';
   // the browser engine's own options; "Also count as media" and the exclude words are used by both
@@ -1642,17 +1669,22 @@ function nwEngineView(){
     if (o.multi_sources) document.querySelectorAll('.nMs').forEach(c => c.checked = o.multi_sources.includes(c.value));
     $('nRegOnly').checked = !!o.registered_only; $('nNewOnly').checked = !!o.new_only; $('nInclReview').checked = !!o.include_review;
     $('nRetry').checked = o.retry_failed !== false; $('nHarvest').value = String(o.max_harvest ?? 200);
-    $('nFallback').checked = o.fallback !== false; } }
+    $('nFallback').checked = o.fallback !== false; }
+  if (o.target){ document.querySelectorAll('input[name="nTarget"]').forEach(r => r.checked = r.value === o.target);
+    if (o.social) document.querySelectorAll('.nSoc').forEach(c => c.checked = o.social.includes(c.value));
+    $('nPostsOnly').checked = o.posts_only !== false; } }
   nwEngineView(); })();
 ['nCap','nTemplate','nByDay','nSrcFeed','nSrcNews','nSrcAll','nMediaOnly','nExtraMedia','nResolve','nRegion','nExact','nExclude','nSites','nRegOnly','nNewOnly','nInclReview','nRetry','nHarvest','nFallback'].forEach(id => $(id).addEventListener(['nExclude','nSites','nExtraMedia'].includes(id) ? 'input' : 'change',
   () => { ls.set('nw_opts', nwOptions()); nwRender(); }));
-document.querySelectorAll('input[name="nEngine"], .nMs').forEach(el => el.addEventListener('change', () => { nwEngineView(); ls.set('nw_opts', nwOptions()); nwRender(); }));
+document.querySelectorAll('input[name="nEngine"], .nMs, input[name="nTarget"], .nSoc, #nPostsOnly').forEach(el => el.addEventListener('change', () => { nwEngineView(); ls.set('nw_opts', nwOptions()); nwRender(); }));
 function nwRender(){
   if (!P3) return;
   const o = nwOptions(), kw = NW.items[0] || 'keyword';
   const parts = [o.exact && kw.includes(' ') ? `"${kw}"` : kw, ...o.exclude.map(w => '-' + w)];
-  if (o.sites.length) parts.push('(' + o.sites.map(x => 'site:' + x.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '')).join(' OR ') + ')');
-  $('nPrev').innerHTML = `<small>Google query preview${NW.items.length > 1 ? ' (first keyword)' : ''} · ${o.sources.length} source${o.sources.length === 1 ? '' : 's'} · ${esc(P3.start)} to ${esc(P3.end)}${o.by_day && P3.days() > 1 ? ` · ${P3.days()} daily searches per source and keyword` : ''}</small>${esc(parts.join(' '))}`;
+  const SOC = {instagram: ['instagram.com'], threads: ['threads.com', 'threads.net'], tiktok: ['tiktok.com'], x: ['x.com', 'twitter.com'], facebook: ['facebook.com'], youtube: ['youtube.com']};
+  const sites = o.target === 'social' ? o.social.flatMap(p => SOC[p] || []) : o.sites;
+  if (sites.length) parts.push('(' + sites.map(x => 'site:' + x.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '')).join(' OR ') + ')');
+  $('nPrev').innerHTML = `<small>Google query preview${NW.items.length > 1 ? ' (first keyword)' : ''} · ${o.target === 'social' ? 'Google Search, social media only' : o.sources.length + ' source' + (o.sources.length === 1 ? '' : 's')} · ${esc(P3.start)} to ${esc(P3.end)}${o.by_day && P3.days() > 1 ? ` · ${P3.days()} daily searches per source and keyword` : ''}</small>${esc(parts.join(' '))}`;
   $('nS1').textContent = NW.items.length; $('nS2').textContent = o.cap ? fmt(o.cap) : '∞'; $('nS3').textContent = P3.days() || '–';
 }
 function nwAlert(text, kind){ const m = $('nMsg'); m.textContent = text || ''; m.className = 'alert' + (text ? ' show ' + (kind || 'err') : ''); }
@@ -1660,7 +1692,8 @@ $('nBtnStart').onclick = async () => {
   NW.flush();
   if (!NW.items.length){ nwAlert('Add at least one keyword.'); $('nwInput').focus(); return; }
   if (!P3.start || !P3.end){ nwAlert('Choose a start and end date.'); return; }
-  if (!nwOptions().sources.length){ nwAlert('Turn on at least one source.'); return; }
+  if (!nwOptions().sources.length && nwOptions().target !== 'social'){ nwAlert('Turn on at least one source.'); return; }
+  if (nwOptions().target === 'social' && !nwOptions().social.length){ nwAlert('Choose at least one platform.'); return; }
   const r = await api('/api/news/start', {keywords: NW.items, start: P3.start, end: P3.end, tz: P3.tz, options: nwOptions()});
   if (r.error){ nwAlert(r.error); return; }
   nwAlert(''); $('log').textContent = ''; logCount = 0; toast('News search started'); started();
@@ -2069,7 +2102,8 @@ $('kBtnSched').onclick = () => {
 $('nBtnSched').onclick = () => {
   NW.flush();
   if (!NW.items.length){ nwAlert('Add at least one keyword.'); return; }
-  if (!nwOptions().sources.length){ nwAlert('Turn on at least one source.'); return; }
+  if (!nwOptions().sources.length && nwOptions().target !== 'social'){ nwAlert('Turn on at least one source.'); return; }
+  if (nwOptions().target === 'social' && !nwOptions().social.length){ nwAlert('Choose at least one platform.'); return; }
   openSch('news', {keywords: [...NW.items], tz: P3.tz, options: nwOptions()},
     `News search: ${NW.items.join(', ')} — with the sources and options set on the page.`, 'News: ' + NW.items.join(', ').slice(0, 50));
 };

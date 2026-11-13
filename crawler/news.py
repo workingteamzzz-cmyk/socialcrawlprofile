@@ -18,6 +18,26 @@ from .media import is_media
 from .textmatch import verdict
 
 DETAIL_LEVELS = ("links", "basic", "full")
+# "Social media" target: Google Search with site: for these platforms; only post links are kept.
+SOCIAL_SITES = {"instagram": ["instagram.com"], "threads": ["threads.com", "threads.net"], "tiktok": ["tiktok.com"],
+                "x": ["x.com", "twitter.com"], "facebook": ["facebook.com"], "youtube": ["youtube.com"]}
+_SOCIAL_POST = {"instagram": r"/(p|reel|reels|tv)/[\w-]+", "threads": r"/@[\w.]+/post/[\w-]+",
+                "tiktok": r"/@[\w.-]+/(video|photo)/\d+", "x": r"/[\w]+/status/\d+",
+                "facebook": r"(/posts/|/videos/|/reel/|/watch|story_fbid=|/permalink|/photo|fbid=)",
+                "youtube": r"(/watch\?v=|/shorts/)[\w-]+"}
+
+
+def social_platform(url: str) -> tuple[str, bool]:
+    """('instagram', True) for an Instagram post link; ('instagram', False) for a profile/tag page; ('', False) else."""
+    try:
+        p = urlparse(url)
+    except ValueError:
+        return "", False
+    host = (p.hostname or "").lower().removeprefix("www.").removeprefix("m.").removeprefix("mobile.")
+    for plat, domains in SOCIAL_SITES.items():
+        if any(host == d or host.endswith("." + d) for d in domains):
+            return plat, bool(re.search(_SOCIAL_POST[plat], p.path + ("?" + p.query if p.query else "")))
+    return "", False
 SOURCES = ("feed", "news_tab", "all_tab")
 SOURCE_LABEL = {"feed": "Google News feed", "news_tab": "Google Search · News tab", "all_tab": "Google Search · All results (media only)"}
 _LEGACY_SOURCE = {"news": ["feed"], "search": ["news_tab"], "both": ["feed", "news_tab"]}
@@ -57,6 +77,9 @@ class NewsOptions:
     include_review: bool = False   # multi: also articles whose keyword could not be verified in the text
     max_harvest: int = 200         # multi: outlets asked one by one (site:) per keyword
     fallback: bool = True          # multi: keywords it finds nothing for (or an engine failure) go to the browser
+    target: str = "news"           # "news" = news media; "social" = Google Search limited to social media (site:)
+    social: list[str] = field(default_factory=list)   # social target: instagram, threads, tiktok, x, facebook, youtube
+    posts_only: bool = True        # social target: keep post links only (no profile / hashtag pages)
 
     @classmethod
     def from_dict(cls, d: dict) -> "NewsOptions":
@@ -94,7 +117,21 @@ class NewsOptions:
                    registered_only=bool(d.get("registered_only")), new_only=bool(d.get("new_only")),
                    retry_failed=bool(d.get("retry_failed", True)), include_review=bool(d.get("include_review")),
                    max_harvest=max(0, min(2000, int(d.get("max_harvest") or 200))),
-                   fallback=bool(d.get("fallback", True)))
+                   fallback=bool(d.get("fallback", True)))._social(d)
+
+    def _social(self, d: dict) -> "NewsOptions":
+        """Social media target: the browser engine, Google Search (All results) with site: per platform,
+        no media filter, the Medsos layout."""
+        if d.get("target") != "social":
+            return self
+        plats = [p for p in (d.get("social") or list(SOCIAL_SITES)) if p in SOCIAL_SITES] or list(SOCIAL_SITES)
+        self.target, self.social, self.posts_only = "social", plats, bool(d.get("posts_only", True))
+        self.sites = [dom for p in plats for dom in SOCIAL_SITES[p]][:20]
+        self.engine, self.sources, self.media_only, self.resolve = "google", ["all_tab"], False, False
+        self.template = "medsos" if d.get("template") in ("online", "medsos", None, "") else "standard"
+        if self.detail == "links":
+            self.detail = "basic"
+        return self
 
 
 def google_query(kw: str, opt: NewsOptions) -> str:
@@ -729,10 +766,16 @@ class NewsCrawler(BrowserCrawler):
                 url = item["url"]
                 if _key(url) in found:
                     continue
-                medium = is_media(url, opt.extra_media)
-                if (tab == "all_tab" and medium is not True) or (opt.media_only and medium is False):
-                    junk += 1                                 # not an article from a news medium
-                    continue
+                if opt.target == "social":
+                    plat, is_post = social_platform(url)
+                    if not plat or plat not in opt.social or (opt.posts_only and not is_post):
+                        junk += 1                             # not a post of the chosen platforms
+                        continue
+                else:
+                    medium = is_media(url, opt.extra_media)
+                    if (tab == "all_tab" and medium is not True) or (opt.media_only and medium is False):
+                        junk += 1                             # not an article from a news medium
+                        continue
                 lines = [ln for ln in item.get("lines", []) if ln != item["title"]]
                 if opt.exclude and verdict(item["title"] + " " + " ".join(lines), "", opt.exclude, False) == "excluded":
                     excluded += 1                             # Google ignored the -word for this one
@@ -746,6 +789,12 @@ class NewsCrawler(BrowserCrawler):
                               and "›" not in ln), "") or urlparse(url).netloc.removeprefix("www.")
                 found[_key(url)] = {"url": url, "title": item["title"], "media": media,
                               "published": dt.astimezone(self.tz).strftime("%Y-%m-%d") if dt else "", "ts": dt.timestamp() if dt else 0}
+                if opt.target == "social":                    # a social post: what the Medsos layout reads
+                    from .templates import username_from_url
+                    plat, _ = social_platform(url)
+                    snippet = " ".join(ln for ln in lines if ln != date_txt and ln != media)
+                    found[_key(url)].update(platform=plat, author=username_from_url(plat, url),
+                                            text=(item["title"] + (" — " + snippet if snippet else ""))[:2000])
                 if opt.cap and len(found) >= opt.cap:
                     break
             if opt.cap and len(found) >= opt.cap:

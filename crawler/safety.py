@@ -22,8 +22,11 @@ from urllib.parse import urlparse
 PLATFORMS = ("google", "instagram", "x", "tiktok", "facebook", "threads", "youtube")
 HOSTS = {"instagram": ("instagram.com",), "x": ("x.com", "twitter.com"), "tiktok": ("tiktok.com",),
          "facebook": ("facebook.com", "fb.com"), "threads": ("threads.net", "threads.com"), "youtube": ("youtube.com",)}
+# "careful" budgets; the level multiplies them, and an admin can set any site's numbers (Settings → Safe mode)
 PER_HOUR = {"google": 40, "instagram": 60, "x": 120, "tiktok": 100, "facebook": 40, "threads": 100, "youtube": 300}
 PER_DAY = {"google": 150, "instagram": 200, "x": 400, "tiktok": 300, "facebook": 150, "threads": 300, "youtube": 1000}
+LEVELS = {"careful": 1, "normal": 2, "loose": 4}
+DEFAULT_LEVEL = "normal"
 REST_HOURS = {"google": 6}            # others: 24
 PAUSE_FACTOR = 1.7
 MIN_SCHEDULE_HOURS = 6                # schedules that use the accounts / Google's search pages
@@ -88,7 +91,50 @@ def set_enabled(on: bool) -> dict:
 
 
 def pause_factor() -> float:
-    return PAUSE_FACTOR if enabled() else 1.0
+    if not enabled():
+        return 1.0
+    return {"careful": PAUSE_FACTOR, "normal": 1.4, "loose": 1.15}.get(level(), PAUSE_FACTOR)
+
+
+def level() -> str:
+    lv = _load().get("level", DEFAULT_LEVEL)
+    return lv if lv in LEVELS else DEFAULT_LEVEL
+
+
+def limits(d: dict | None = None) -> dict:
+    """{site: (per_hour, per_day)} — the level's numbers, with the admin's own numbers on top."""
+    d = _load() if d is None else d
+    lv = d.get("level", DEFAULT_LEVEL)
+    f = LEVELS.get(lv, LEVELS[DEFAULT_LEVEL])
+    own = d.get("custom") or {}
+    out = {}
+    for p in PLATFORMS:
+        h, dd = PER_HOUR[p] * f, PER_DAY[p] * f
+        c = own.get(p) or {}
+        out[p] = (int(c.get("hour") or h), int(c.get("day") or dd))
+    return out
+
+
+def set_limits(level_name: str | None = None, custom: dict | None = None) -> dict:
+    """level: careful / normal / loose (clears own numbers); custom: {site: {"hour": n, "day": n}} (0 = level's)."""
+    with _LOCK:
+        d = _load()
+        if level_name:
+            if level_name not in LEVELS:
+                raise ValueError("Level is careful, normal or loose.")
+            d["level"], d["custom"] = level_name, {}
+        for p, v in (custom or {}).items():
+            if p not in PLATFORMS or not isinstance(v, dict):
+                continue
+            h, dd = max(0, int(v.get("hour") or 0)), max(0, int(v.get("day") or 0))
+            if h and dd and h > dd:
+                raise ValueError(f"{LABEL[p]}: the hour limit cannot be above the day limit.")
+            if h or dd:
+                d.setdefault("custom", {})[p] = {"hour": h, "day": dd}
+            else:
+                (d.get("custom") or {}).pop(p, None)
+        _save(d)
+    return status()
 
 
 def platform_of(url: str) -> str:
@@ -130,13 +176,14 @@ def check(url: str, n: int = 1, now: float | None = None) -> None:
                       f"(safe mode — {reason})")
     day, hour = _keys(now)
     d = _load()
+    per_h, per_d = limits(d)[plat]
     used_d = int(((d.get("day") or {}).get(day) or {}).get(plat, 0))
     used_h = int(((d.get("hour") or {}).get(hour) or {}).get(plat, 0))
-    if used_d + n > PER_DAY[plat]:
-        raise Resting(f"{LABEL[plat]}: today's safe-mode limit of {PER_DAY[plat]} pages is used — "
+    if used_d + n > per_d:
+        raise Resting(f"{LABEL[plat]}: today's safe-mode limit of {per_d} pages is used — "
                       f"continues tomorrow (what is missing is filled with the API if it is set up)")
-    if used_h + n > PER_HOUR[plat]:
-        raise Resting(f"{LABEL[plat]}: this hour's safe-mode limit of {PER_HOUR[plat]} pages is used — continues next hour")
+    if used_h + n > per_h:
+        raise Resting(f"{LABEL[plat]}: this hour's safe-mode limit of {per_h} pages is used — continues next hour")
 
 
 def spend(url: str, n: int = 1, now: float | None = None) -> None:
@@ -218,7 +265,10 @@ def status() -> dict:
     now = time.time()
     day, hour = _keys(now)
     d = _load()
-    out = {"enabled": bool(d.get("enabled", True)), "platforms": []}
+    lim = limits(d)
+    own = d.get("custom") or {}
+    out = {"enabled": bool(d.get("enabled", True)), "level": d.get("level", DEFAULT_LEVEL) if d.get("level") in LEVELS
+           else DEFAULT_LEVEL, "platforms": []}
     for p in PLATFORMS:
         until, reason = resting(p, now)
         if p == "google":
@@ -228,6 +278,6 @@ def status() -> dict:
                 until, reason = g, "Google answered 403 (this connection searched too much)"
         out["platforms"].append({
             "id": p, "label": LABEL[p], "today": int(((d.get("day") or {}).get(day) or {}).get(p, 0)),
-            "per_day": PER_DAY[p], "this_hour": int(((d.get("hour") or {}).get(hour) or {}).get(p, 0)),
-            "per_hour": PER_HOUR[p], "resting_until": int(until), "reason": reason})
+            "per_day": lim[p][1], "this_hour": int(((d.get("hour") or {}).get(hour) or {}).get(p, 0)),
+            "per_hour": lim[p][0], "custom": p in own, "resting_until": int(until), "reason": reason})
     return out

@@ -229,6 +229,8 @@ class ApiScrape(BaseModel):
 
 class SafetySettings(BaseModel):
     enabled: bool | None = None
+    level: str | None = Field(None, description="careful / normal / loose (clears own numbers)")
+    custom: dict | None = Field(None, description='{"instagram": {"hour": 100, "day": 500}, …} (0 = the level\'s)')
     release: str | None = Field(None, description="let a resting site go now: google, instagram, x, tiktok, …")
 
 
@@ -715,6 +717,12 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
         if body.enabled is not None:
             out = safety.set_enabled(body.enabled)
             log(request, "switched safe mode " + ("on" if body.enabled else "OFF"))
+        if body.level or body.custom:
+            try:
+                out = safety.set_limits(body.level, body.custom)
+            except (ValueError, TypeError) as e:
+                return {"ok": False, "error": str(e)}
+            log(request, "changed safe-mode limits", level=body.level or "", sites=list((body.custom or {}).keys()))
         if body.release:
             if body.release not in safety.PLATFORMS:
                 return {"ok": False, "error": "Unknown site."}

@@ -22,6 +22,7 @@ def test_platforms_and_budget(sf):
     assert sf.platform_of("https://m.facebook.com/a/posts/1") == "facebook"
     assert sf.platform_of("https://www.kompas.com/x") == ""
     url = "https://www.instagram.com/p/X/"
+    sf.set_limits("careful")
     for _ in range(sf.PER_HOUR["instagram"]):
         sf.check(url)
         sf.spend(url)
@@ -84,3 +85,17 @@ def test_schedules_spaced_out(sf):
     with pytest.raises(ScheduleError):
         clean({"kind": "news", "payload": {"keywords": ["pln"], "options": {"engine": "google"}}, "repeat": "hours",
                "hours": 2, "window": "today"})
+
+
+def test_levels_and_own_numbers(sf):
+    st = {p["id"]: p for p in sf.status()["platforms"]}
+    assert sf.status()["level"] == "normal" and st["instagram"]["per_day"] == 2 * sf.PER_DAY["instagram"]
+    sf.set_limits("loose")
+    assert {p["id"]: p for p in sf.status()["platforms"]}["instagram"]["per_hour"] == 4 * sf.PER_HOUR["instagram"]
+    sf.set_limits(custom={"instagram": {"hour": 150, "day": 900}})
+    st = {p["id"]: p for p in sf.status()["platforms"]}
+    assert (st["instagram"]["per_hour"], st["instagram"]["per_day"], st["instagram"]["custom"]) == (150, 900, True)
+    with pytest.raises(ValueError, match="above the day"):
+        sf.set_limits(custom={"x": {"hour": 500, "day": 100}})
+    sf.set_limits("careful")                                        # a level clears own numbers
+    assert {p["id"]: p for p in sf.status()["platforms"]}["instagram"]["per_day"] == sf.PER_DAY["instagram"]

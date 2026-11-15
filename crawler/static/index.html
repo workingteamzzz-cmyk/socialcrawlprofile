@@ -974,7 +974,11 @@ body::before{content:"";position:fixed;inset:-20%;z-index:-1;pointer-events:none
       </div></div>
       <div class="card" style="max-width:720px;margin-top:16px"><div class="card-hd"><h3>Safe mode</h3><div class="tools"><label class="switch" title="Safe mode on/off"><input type="checkbox" id="sfOn"><span></span></label></div></div><div class="card-bd">
         <p class="hint" style="margin-top:0">Keeps Google and the team's social media accounts from being blocked: a budget of pages per hour and per day for each site, calmer pauses, and when a site shows a block ("Try again later", "temporarily blocked", a checkpoint, Google's 403) it is left alone for a while (Google 6 h, platforms 24 h) and the team is told on Telegram. Schedules that use the accounts or Google's search pages run at most every 6 hours. What the browser could not read is filled with the API, if set up.</p>
-        <div style="overflow-x:auto"><table class="tbl" id="sfTbl"><thead><tr><th>Site</th><th class="num">This hour</th><th class="num">Today</th><th>Status</th><th></th></tr></thead><tbody></tbody></table></div>
+        <div class="field" style="max-width:380px;margin:4px 0 12px"><label for="sfLevel">Level</label>
+          <select id="sfLevel"><option value="careful">Careful — fewest pages (after a block)</option><option value="normal">Normal — recommended</option><option value="loose">Loose — more pages, more risk</option></select></div>
+        <div style="overflow-x:auto"><table class="tbl" id="sfTbl"><thead><tr><th>Site</th><th class="num">This hour (used / max)</th><th class="num">Today (used / max)</th><th>Status</th><th></th></tr></thead><tbody></tbody></table></div>
+        <ul class="errs" id="sfErrs"></ul>
+        <div style="display:flex;gap:8px;margin-top:12px"><button class="btn primary" id="sfSave">Save limits</button><small class="hint" style="align-self:center">Change a number to set that site yourself; choosing a level resets them.</small></div>
       </div></div>
 </section>
 
@@ -1979,16 +1983,30 @@ $('akBal').onclick = () => showBalance($('akBalOut'));
 async function loadSafety(){
   const d = await api('/api/safety');
   if (!d || !d.platforms) return;
-  $('sfOn').checked = !!d.enabled;
+  $('sfOn').checked = !!d.enabled; $('sfLevel').value = d.level || 'normal';
   const t = x => new Date(x * 1000).toLocaleString([], {day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'});
   $('sfTbl').querySelector('tbody').innerHTML = d.platforms.map(p => `<tr><td><b>${esc(p.label)}</b></td>
-    <td class="num">${fmt(p.this_hour)} / ${fmt(p.per_hour)}</td><td class="num">${fmt(p.today)} / ${fmt(p.per_day)}</td>
+    <td class="num">${fmt(p.this_hour)} / <input type="number" min="1" data-sfh="${esc(p.id)}" value="${p.per_hour}" style="width:80px"></td>
+    <td class="num">${fmt(p.today)} / <input type="number" min="1" data-sfd="${esc(p.id)}" value="${p.per_day}" style="width:90px">${p.custom ? ' <small class="hint">own</small>' : ''}</td>
     <td>${p.resting_until ? `<span class="tag" style="color:var(--bad)">resting until ${esc(t(p.resting_until))}</span><br><small class="hint">${esc(p.reason || '')}</small>` : (p.today >= p.per_day ? '<span class="tag">today\'s limit used</span>' : '<span class="tag likely">ok</span>')}</td>
     <td>${p.resting_until ? `<button class="btn sm" data-sfrel="${esc(p.id)}" title="Only if you checked the account / connection">Release now</button>` : ''}</td></tr>`).join('');
   document.querySelectorAll('[data-sfrel]').forEach(b => b.onclick = async () => {
     if (!confirm('Use this site again now? Only if you checked that the account / connection is fine again.')) return;
     await api('/api/safety', {release: b.dataset.sfrel}); loadSafety(); });
 }
+$('sfLevel').onchange = async () => {
+  const r = await api('/api/safety', {level: $('sfLevel').value});
+  if (!r.ok){ $('sfErrs').innerHTML = `<li>${esc(r.error || 'Could not save')}</li>`; return; }
+  $('sfErrs').innerHTML = ''; toast('Safe-mode level: ' + $('sfLevel').value); loadSafety();
+};
+$('sfSave').onclick = async () => {
+  const custom = {};
+  document.querySelectorAll('[data-sfh]').forEach(i => { custom[i.dataset.sfh] = {hour: +i.value || 0}; });
+  document.querySelectorAll('[data-sfd]').forEach(i => { (custom[i.dataset.sfd] = custom[i.dataset.sfd] || {}).day = +i.value || 0; });
+  const r = await api('/api/safety', {custom});
+  if (!r.ok){ $('sfErrs').innerHTML = `<li>${esc(r.error || 'Could not save')}</li>`; return; }
+  $('sfErrs').innerHTML = ''; toast('Limits saved'); loadSafety();
+};
 $('sfOn').onchange = async () => {
   if (!$('sfOn').checked && !confirm('Switch safe mode OFF? Big searches then run without limits — the accounts and this connection are more likely to be blocked.')){ $('sfOn').checked = true; return; }
   await api('/api/safety', {enabled: $('sfOn').checked}); toast('Safe mode ' + ($('sfOn').checked ? 'on' : 'OFF')); loadSafety();

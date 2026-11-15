@@ -194,6 +194,11 @@ class Handler(BaseHTTPRequestHandler):
             out = safety.status()
             if isinstance(data.get("enabled"), bool):
                 out = safety.set_enabled(data["enabled"])
+            if data.get("level") or data.get("custom"):
+                try:
+                    out = safety.set_limits(data.get("level"), data.get("custom"))
+                except (ValueError, TypeError) as e:
+                    return self._json({"ok": False, "error": str(e)})
             if data.get("release") in safety.PLATFORMS:
                 out = safety.release(data["release"])
             return self._json({"ok": True, **out})

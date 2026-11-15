@@ -114,7 +114,7 @@ class NewsOptions:
     retry_failed: bool = True      # multi: links that failed in earlier runs are tried again
     include_review: bool = False   # multi: also articles whose keyword could not be verified in the text
     max_harvest: int = 200         # multi: outlets asked one by one (site:) per keyword
-    fallback: bool = True          # multi: keywords it finds nothing for (or an engine failure) go to the browser
+    fallback: bool = True          # multi: if the engine fails, the browser reads the Google News feed instead
     target: str = "news"           # "news" = news media; "social" = Google Search limited to social media (site:)
     social: list[str] = field(default_factory=list)   # social target: instagram, threads, tiktok, x, facebook, youtube
     posts_only: bool = True        # social target: keep post links only (no profile / hashtag pages)

@@ -325,7 +325,7 @@ Schedule (or Start) ─┬─ Medsos (keyword search / profiles, browser, free)
                      │     5. Sentiment & Emotion (team lexicon) → Medsos Excel
                      └─ News (Multi-source engine, no browser)
                            1. Google News by date + per outlet, sitemaps, RSS, Bing, GDELT → decode → read articles
-                           2. a keyword with 0 articles (or an engine failure) → the browser engine takes over
+                           2. only if the engine fails → the browser reads the Google News feed (never Google's search pages)
                            3. INFLUENCER / PERSON / SENTIMENT, the team's cleaning rules → Online Excel
    → Exports + reporting database (topics → reports) + delivery webhook + Telegram message ("✅ … finished — N links", button to the dashboard)
    → a verification on the way → Telegram message with "Solve it" / "Skip"

@@ -126,6 +126,7 @@ def test_browser_takes_over_keywords_the_multi_engine_found_nothing_for(tmp_path
 
         def search(self, kw, opt, s, e):
             searched.append((kw, opt.engine, opt.detail))
+            assert opt.sources == ["feed"]                                 # the feed only, never Google's search pages
             return Result("ok", [{"url": "https://b.id/2", "title": "Longsor", "media": "B", "published": "2026-11-10",
                                   "ts": 2}], "")
 
@@ -141,8 +142,8 @@ def test_browser_takes_over_keywords_the_multi_engine_found_nothing_for(tmp_path
         time.sleep(0.1)
     s = j.state()
     assert not s["error"], s["error"]
-    assert searched == [("longsor", "google", "full")]                  # only the keyword multi found nothing for
-    assert {r["url"] for r in j.data["news"]["links"]} == {"https://a.id/1", "https://b.id/2"}
+    assert searched == []                       # nothing found is a normal result: no Google pages are opened
+    assert {r["url"] for r in j.data["news"]["links"]} == {"https://a.id/1"}
     assert any("_Online_" in f for f in s["modes"]["news"]["files"])
 
     # an engine failure: every keyword goes to the browser; with fallback off nothing does
@@ -153,7 +154,7 @@ def test_browser_takes_over_keywords_the_multi_engine_found_nothing_for(tmp_path
     j.start_news(["banjir"], "2026-11-10", "2026-11-10", "WIB", {"engine": "multi", "template": "online"})
     while j.running:
         time.sleep(0.1)
-    assert searched == [("banjir", "google", "full")]
+    assert searched == [("banjir", "google", "full")]                  # the engine failed: the browser takes over
     searched.clear()
     j.start_news(["banjir"], "2026-11-10", "2026-11-10", "WIB", {"engine": "multi", "fallback": False})
     while j.running:

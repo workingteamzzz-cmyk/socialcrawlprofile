@@ -864,9 +864,8 @@ class Job:
             stopped = self.stop_flag.is_set()
             for kw in kws:                                    # one status line per keyword, like the browser engine
                 mine = [r for r in rows if r.get("keyword") == kw]
-                record(kw, Result("ok", mine, f"{len(mine)} articles (multi-source)"))
-                if not mine:
-                    fallback.append(kw)
+                record(kw, Result("ok", mine, f"{len(mine)} articles (multi-source)"
+                                  + ("" if mine else " — nothing in the news for this period, or Google News was busy")))
             other = [r for r in rows if r.get("keyword") not in kws]   # links retried from earlier runs
             if other:
                 record(kws[0], Result("ok", other, f"{len(other)} articles from earlier runs' retry queue"))
@@ -882,7 +881,10 @@ class Job:
             fallback = list(kws)
         b.setdefault("extra_files", []).extend(extra)
         if fallback and opt.fallback and not stopped:
-            self.log(f"🔁 Taking over with the browser engine for: {', '.join(fallback)}")
+            # only when the engine itself failed — and then only the Google News feed (RSS), never Google's search
+            # pages, which block a connection that searches too much (403)
+            self.log(f"🔁 Taking over with the browser engine (Google News feed only) for: {', '.join(fallback)}")
+            opt.sources = ["feed"]
             return fallback
         files = self._finish_files(save, [xlsx, csvp], bool(statuses))
         b["files"] = files + extra

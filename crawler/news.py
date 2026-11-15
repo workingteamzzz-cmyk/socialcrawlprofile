@@ -866,6 +866,13 @@ class NewsCrawler(BrowserCrawler):
             nxt = self.page.query_selector("a#pnnext, a[aria-label='Next page'], a[aria-label='Halaman berikutnya']")
             if not nxt:
                 break
+            from . import safety
+            try:
+                safety.check(self.page.url)                   # safe mode: each result page counts
+            except safety.Resting as e:
+                self.log(f"   {e}")
+                break
+            safety.spend(self.page.url)
             self._pause(2.5, 5.5)                             # read the page like a person before moving on
             try:
                 with self.page.expect_navigation(wait_until="domcontentloaded", timeout=30000):

@@ -972,6 +972,10 @@ body::before{content:"";position:fixed;inset:-20%;z-index:-1;pointer-events:none
         <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap"><button class="btn primary" id="tgSave">Save</button><button class="btn" id="tgTest">Send test message</button><button class="btn danger" id="tgClear">Remove token</button></div>
         <div class="hint" id="tgOut" style="margin-top:10px"></div>
       </div></div>
+      <div class="card" style="max-width:720px;margin-top:16px"><div class="card-hd"><h3>Safe mode</h3><div class="tools"><label class="switch" title="Safe mode on/off"><input type="checkbox" id="sfOn"><span></span></label></div></div><div class="card-bd">
+        <p class="hint" style="margin-top:0">Keeps Google and the team's social media accounts from being blocked: a budget of pages per hour and per day for each site, calmer pauses, and when a site shows a block ("Try again later", "temporarily blocked", a checkpoint, Google's 403) it is left alone for a while (Google 6 h, platforms 24 h) and the team is told on Telegram. Schedules that use the accounts or Google's search pages run at most every 6 hours. What the browser could not read is filled with the API, if set up.</p>
+        <div style="overflow-x:auto"><table class="tbl" id="sfTbl"><thead><tr><th>Site</th><th class="num">This hour</th><th class="num">Today</th><th>Status</th><th></th></tr></thead><tbody></tbody></table></div>
+      </div></div>
 </section>
 
 
@@ -1243,7 +1247,7 @@ function go(p){
   if (p === 'users') loadUsers();
   if (p === 'apiscrape') loadApInfo();
   if (p === 'report') loadReport();
-  if (p === 'apikeys'){ loadApKeys(); loadTg(); }
+  if (p === 'apikeys'){ loadApKeys(); loadTg(); loadSafety(); }
 }
 document.querySelectorAll('#nav button').forEach(b => b.onclick = () => go(b.dataset.p));
 document.addEventListener('click', e => { const g = e.target.closest('[data-go]'); if (g){ e.preventDefault(); go(g.dataset.go); } });
@@ -1970,6 +1974,25 @@ $('akBal').onclick = () => showBalance($('akBalOut'));
   };
   show();
 })();
+
+/* ---------- safe mode ---------- */
+async function loadSafety(){
+  const d = await api('/api/safety');
+  if (!d || !d.platforms) return;
+  $('sfOn').checked = !!d.enabled;
+  const t = x => new Date(x * 1000).toLocaleString([], {day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'});
+  $('sfTbl').querySelector('tbody').innerHTML = d.platforms.map(p => `<tr><td><b>${esc(p.label)}</b></td>
+    <td class="num">${fmt(p.this_hour)} / ${fmt(p.per_hour)}</td><td class="num">${fmt(p.today)} / ${fmt(p.per_day)}</td>
+    <td>${p.resting_until ? `<span class="tag" style="color:var(--bad)">resting until ${esc(t(p.resting_until))}</span><br><small class="hint">${esc(p.reason || '')}</small>` : (p.today >= p.per_day ? '<span class="tag">today\'s limit used</span>' : '<span class="tag likely">ok</span>')}</td>
+    <td>${p.resting_until ? `<button class="btn sm" data-sfrel="${esc(p.id)}" title="Only if you checked the account / connection">Release now</button>` : ''}</td></tr>`).join('');
+  document.querySelectorAll('[data-sfrel]').forEach(b => b.onclick = async () => {
+    if (!confirm('Use this site again now? Only if you checked that the account / connection is fine again.')) return;
+    await api('/api/safety', {release: b.dataset.sfrel}); loadSafety(); });
+}
+$('sfOn').onchange = async () => {
+  if (!$('sfOn').checked && !confirm('Switch safe mode OFF? Big searches then run without limits — the accounts and this connection are more likely to be blocked.')){ $('sfOn').checked = true; return; }
+  await api('/api/safety', {enabled: $('sfOn').checked}); toast('Safe mode ' + ($('sfOn').checked ? 'on' : 'OFF')); loadSafety();
+};
 
 /* ---------- telegram (admin) ---------- */
 async function loadTg(){

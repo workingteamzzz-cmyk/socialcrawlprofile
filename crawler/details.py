@@ -78,12 +78,17 @@ def read_details(crawler, platform: str, url: str) -> dict:
 def _open(crawler, url: str):
     """Open a post like a person clicking it, without idling: the readers below wait for the content they need."""
     crawler._check_stop()
+    from . import safety
+    safety.check(url)                                      # safe mode: resting / budget used -> Resting
+    safety.spend(url)
     try:
         crawler.page.goto(url, wait_until="domcontentloaded", timeout=30000)
     except Exception as e:  # noqa: BLE001
         if "Timeout" not in str(e):
             raise
     crawler._pause(0.6, 1.2)
+    if hasattr(crawler, "_check_block"):
+        crawler._check_block()
 
 
 def _has_numbers(d: dict | None) -> bool:
@@ -148,6 +153,12 @@ def prefetch_details(crawler, platform: str, urls: list[str], progress=None) -> 
     for k in range(0, len(todo), step):
         crawler._check_stop()
         batch = todo[k:k + step]
+        from . import safety
+        try:
+            safety.check(batch[0], len(batch))                # safe mode: background reads count as pages too
+        except safety.Resting:
+            break                                          # the rest is opened (and refused) one by one, or left to the API
+        safety.spend(batch[0], len(batch))
         paths = [urlparse(u).path + (("?" + urlparse(u).query) if urlparse(u).query else "") for u in batch]
         try:
             pages = crawler.page.evaluate(_FETCH_MANY_JS, [paths, par]) or {}

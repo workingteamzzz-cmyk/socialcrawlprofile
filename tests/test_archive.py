@@ -92,8 +92,8 @@ def test_hourly_only_new(arch):
             {"platform": "x", "author": "b", "url": "https://x.com/b/status/2", "text": "pln", "ts": 1762780000}]
     arch.add_rows("medsos", rows[:1], WIB)                                 # delivered by the previous run
     assert [r["url"] for r in arch.only_new("medsos", rows, WIB)] == ["https://x.com/b/status/2"]
-    s = clean({"kind": "keywords", "payload": {"keywords": ["pln"]}, "repeat": "hours", "hours": 1,
-               "window": "today", "new_only": True})
+    s = clean({"kind": "news", "payload": {"keywords": ["pln"], "options": {"engine": "multi"}}, "repeat": "hours",
+               "hours": 1, "window": "today", "new_only": True})
     assert s["new_only"] and describe(s).startswith("every hour, only new results")
 
 
@@ -104,7 +104,7 @@ def test_hourly_only_new_survives_the_api(tmp_path, monkeypatch):
     monkeypatch.setattr(schedule, "SCHEDULER", schedule.Scheduler(str(tmp_path / "s.json"), None))
     app, _ = _app(tmp_path, monkeypatch)
     op = _client(app, "budi")
-    r = op.post("/api/schedules/save", json={"kind": "news", "payload": {"keywords": ["pln"]}, "repeat": "hours",
+    r = op.post("/api/schedules/save", json={"kind": "news", "payload": {"keywords": ["pln"], "options": {"engine": "multi"}}, "repeat": "hours",
                                              "hours": 1, "window": "today", "new_only": True}, headers=SITE).json()
     assert r["ok"] and r["schedule"]["new_only"] is True
     assert "only new results" in op.get("/api/schedules").json()["schedules"][0]["describe"]

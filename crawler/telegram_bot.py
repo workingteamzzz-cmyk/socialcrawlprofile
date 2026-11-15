@@ -193,6 +193,14 @@ def _status_text() -> str:
     if cap.get("pending"):
         line += f"\n🧩 A verification is waiting: {cap.get('label')}"
     try:
+        from . import safety
+        rest = [f"{p['label']} until {time.strftime('%d %b %H:%M', time.localtime(p['resting_until']))}"
+                for p in safety.status()["platforms"] if p["resting_until"]]
+        if rest:
+            line += "\n⛔ Resting (safe mode): " + ", ".join(rest)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
         from .apiscraper import settings
         u = settings.usage()
         line += f"\n💳 API credits today: {u['today']}" + (f" (left: {settings.credits_left()})"

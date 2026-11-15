@@ -227,6 +227,11 @@ class ApiScrape(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class SafetySettings(BaseModel):
+    enabled: bool | None = None
+    release: str | None = Field(None, description="let a resting site go now: google, instagram, x, tiktok, …")
+
+
 class TelegramSettings(BaseModel):
     token: str = Field("", description="the bot token from @BotFather (kept on the server, shown back as …last 4)")
     chats: str | None = Field(None, description="chat ids, comma separated (groups start with -)")
@@ -696,6 +701,26 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
             daily_cap=body.daily_cap, monthly_cap=body.monthly_cap,
             cleared=[k for k, v in (("api", body.clear_api_key), ("twitter", body.clear_twitter)) if v])
         return {"ok": True, **pub}
+
+    # ---------- safe mode ----------
+    @app.get("/api/safety", tags=["safe mode"], dependencies=auth, summary="Safe mode: pages used today, resting sites")
+    def safety_get():
+        from . import safety
+        return safety.status()
+
+    @app.post("/api/safety", tags=["safe mode"], dependencies=admin_only, summary="Switch safe mode, or release a site")
+    def safety_set(body: SafetySettings, request: Request):
+        from . import safety
+        out = safety.status()
+        if body.enabled is not None:
+            out = safety.set_enabled(body.enabled)
+            log(request, "switched safe mode " + ("on" if body.enabled else "OFF"))
+        if body.release:
+            if body.release not in safety.PLATFORMS:
+                return {"ok": False, "error": "Unknown site."}
+            out = safety.release(body.release)
+            log(request, "released a resting site", site=body.release)
+        return {"ok": True, **out}
 
     # ---------- Telegram bot (admin) ----------
     @app.get("/api/telegram", tags=["telegram"], dependencies=admin_only, summary="Telegram bot settings (token masked)")

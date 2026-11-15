@@ -96,6 +96,9 @@ class Handler(BaseHTTPRequestHandler):
 
             from .schedule import get
             return self._json({"schedules": get().list(), "now": int(_time.time())})
+        if u.path == "/api/safety":
+            from . import safety
+            return self._json(safety.status())
         if u.path == "/api/telegram":
             from . import telegram_bot
             return self._json(telegram_bot.public())
@@ -186,6 +189,14 @@ class Handler(BaseHTTPRequestHandler):
                 err = get().run_now(data.get("id", ""))
             except ScheduleError as e:
                 return self._json({"ok": False, "error": str(e)})
+        elif u.path == "/api/safety":
+            from . import safety
+            out = safety.status()
+            if isinstance(data.get("enabled"), bool):
+                out = safety.set_enabled(data["enabled"])
+            if data.get("release") in safety.PLATFORMS:
+                out = safety.release(data["release"])
+            return self._json({"ok": True, **out})
         elif u.path in ("/api/telegram", "/api/telegram/test"):
             from . import telegram_bot
             if u.path.endswith("/test"):

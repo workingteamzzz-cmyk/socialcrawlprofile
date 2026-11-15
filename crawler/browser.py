@@ -195,19 +195,38 @@ class BrowserCrawler:
             raise Stopped()
 
     def _pause(self, lo=1.2, hi=2.6):
-        end = time.time() + random.uniform(lo, hi)
+        from . import safety
+        f = safety.pause_factor()                          # safe mode: a calmer pace everywhere
+        end = time.time() + random.uniform(lo * f, hi * f)
         while time.time() < end:
             self._check_stop()
             self.page.wait_for_timeout(250)
 
     def _goto(self, url: str):
         self._check_stop()
+        from . import safety
+        safety.check(url)                                  # safe mode: resting site / budget used -> Resting
+        safety.spend(url)
         try:
             self.page.goto(url, wait_until="domcontentloaded", timeout=45000)
         except Exception as e:  # noqa: BLE001
             if "Timeout" not in str(e):
                 raise
         self._pause(2.5, 4.0)
+        self._check_block()
+
+    def _check_block(self):
+        """The platform's 'try again later' / 'temporarily blocked' / checkpoint page: rest that site (safe mode)."""
+        from . import safety
+        if not safety.enabled():
+            return
+        seen = safety.detect(self.page.url, self._body_text())
+        if seen:
+            plat = safety.platform_of(self.page.url)
+            until = safety.rest(plat, seen)
+            self.log(f"   ⛔ {safety.LABEL.get(plat, plat)} shows a block ({seen}). Safe mode leaves it alone until "
+                     f"{time.strftime('%d %b %H:%M', time.localtime(until))} — check the account in the app on a phone.")
+            raise safety.Resting(f"{safety.LABEL.get(plat, plat)} showed a block ({seen}) — resting")
 
     def _body_text(self) -> str:
         try:

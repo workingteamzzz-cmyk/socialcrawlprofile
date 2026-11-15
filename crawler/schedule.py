@@ -96,6 +96,12 @@ def clean(data: dict) -> dict:
             h = 0
         if not 1 <= h <= 24:
             raise ScheduleError("Repeat every 1 to 24 hours.")
+        from . import safety
+        least = safety.min_schedule_hours(kind, payload)
+        if least and h < least:
+            raise ScheduleError(f"Safe mode: searches with the social media accounts or on Google's search pages run "
+                                f"at most every {least} hours (so the accounts and this connection are not blocked). "
+                                "Choose 6 hours or more — or, for news, the Multi-source engine, which may run hourly.")
         s["hours"] = h
     else:
         raise ScheduleError("Choose how often: daily or every few hours.")
@@ -188,6 +194,15 @@ class Scheduler:
     def _run(self, s: dict, now: float, manual: bool = False) -> str | None:
         start, end = period(s, now)
         p = s["payload"]
+        from . import safety
+        least = safety.min_schedule_hours(s["kind"], p)
+        if (not manual and least and s.get("repeat") == "hours" and int(s.get("hours", 24)) < least
+                and s.get("last_run") and now - s["last_run"] < least * 3600):
+            with self.lock:                                   # an older, too-frequent schedule: safe mode spaces it out
+                s["next_run"] = s["last_run"] + least * 3600
+                s["last_result"] = f"postponed by safe mode (at most every {least} h)"
+                self._save()
+            return None
         self.job._next_origin = "Manual" if manual else "Auto"         # file names: 20261108_Online_Auto_24.00
         if s.get("new_only"):
             self.job._next_new_only = True                              # each file: only what is new since last run

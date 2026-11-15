@@ -310,6 +310,21 @@ with User ID, Username, Follower, User Image, **Sentiment and Emotion**, plus *R
 - API: `GET /api/apiscraper/info`, `POST /api/apiscraper/start`, `GET /api/apiscraper/balance` (operator);
   `GET/POST /api/apiscraper/settings` (admin).
 
+## Safe mode (on by default) — keeping Google and the accounts from being blocked
+
+- **Budget per site**: pages the app may open per hour / per day — Google Search 40/150, Instagram 60/200,
+  X 120/400, TikTok 100/300, Facebook 40/150, Threads 100/300, YouTube 300/1000 (search pages, post pages and
+  background reads all count). When a budget is used, that site waits; what the browser could not read is filled
+  with the API (if set up).
+- **Calmer pace**: every pause between pages is ~1.7× longer.
+- **Blocks are recognised and rested**: Instagram/Threads "Try again later" / "We restrict certain activity",
+  Facebook "You're temporarily blocked" / checkpoint, X rate limit / locked, TikTok "too many attempts", Google's 403 —
+  the site is then left alone (Google 6 h, platforms 24 h) instead of knocking again, and the team gets a Telegram
+  message. *Settings → Safe mode* shows each site's use and lets an admin release a resting site early.
+- **Schedules** that use the accounts or Google's search pages run at most every 6 hours (older, more frequent ones
+  are spaced out). News with the Multi-source engine (no accounts, no search pages) may run hourly.
+- Admins can switch it off in Settings (not recommended).
+
 ## Automation: the flow from search to the team's file
 
 ```

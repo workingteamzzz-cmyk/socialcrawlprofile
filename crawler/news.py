@@ -59,10 +59,36 @@ def note_google_block(hours: float = GOOGLE_REST_HOURS) -> float:
 
 
 def clear_google_block() -> None:
+    """An admin released Google: no rest, and the next run starts with fresh Google cookies in the app's browser."""
     try:
         os.remove(_block_path())
     except OSError:
         pass
+    try:
+        with open(_block_path() + ".reset", "w") as f:
+            f.write("1")
+    except OSError:
+        pass
+
+
+def _take_cookie_reset() -> bool:
+    try:
+        os.remove(_block_path() + ".reset")
+        return True
+    except OSError:
+        return False
+
+
+_GOOGLE_COOKIE_DOMAIN = re.compile(r"(^|\.)google\.[a-z.]+$")
+
+
+def reset_google_cookies(context) -> bool:
+    """Forget Google's cookies in the app's browser only (a 403 is often tied to them); other sites' logins stay."""
+    try:
+        context.clear_cookies(domain=_GOOGLE_COOKIE_DOMAIN)
+        return True
+    except Exception:  # noqa: BLE001  (older Playwright: no filter — then leave the cookies alone)
+        return False
 
 
 def social_platform(url: str) -> tuple[str, bool]:
@@ -453,6 +479,8 @@ class NewsCrawler(BrowserCrawler):
         super().__init__(*a, **kw)
         self.tz = tz
         self.debug_dir = debug_dir      # where to keep a copy of a results page that could not be read
+        if _take_cookie_reset():        # an admin released Google: start with fresh Google cookies
+            reset_google_cookies(self.ctx)
 
     def _wait_google_captcha(self) -> bool:
         """True when the page is usable; waits up to ~5 minutes for the user to solve a captcha."""
@@ -464,6 +492,18 @@ class NewsCrawler(BrowserCrawler):
                 return bool(self.page.query_selector("form#captcha-form, #recaptcha, iframe[src*='recaptcha']"))
             except Exception:  # noqa: BLE001
                 return False
+        if self._forbidden_page() and not self.__dict__.get("_google_cookies_reset"):
+            # often the 403 sticks to the browser's Google cookies, not the connection: forget them, try once, slowly
+            self._google_cookies_reset = True
+            if reset_google_cookies(getattr(self, "ctx", None)):
+                self.log("   ⚠ Google answered 403 — forgetting the app browser's Google cookies and trying once more, "
+                         "slowly (your social media logins stay)")
+                self._pause(20, 35)
+                try:
+                    self.page.reload(wait_until="domcontentloaded", timeout=45000)
+                except Exception:  # noqa: BLE001
+                    pass
+                self._pause(2, 4)
         if self._forbidden_page():
             until = note_google_block()
             self._google_gave_up = True

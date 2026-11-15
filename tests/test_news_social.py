@@ -99,3 +99,37 @@ def test_google_403_rests_instead_of_knocking(tmp_path, monkeypatch):
     assert res.status == "error" and "resting until" in res.note            # no request to Google at all
     news.clear_google_block()
     assert news.google_blocked_until() == 0
+
+
+def test_403_first_forgets_google_cookies_then_rests(tmp_path, monkeypatch):
+    from crawler import news, paths
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path))
+    cleared = []
+
+    class Ctx:
+        def clear_cookies(self, domain=None):
+            cleared.append(domain.pattern)
+
+    class Page:
+        url = "https://www.google.com/search?q=pln"
+        ok_after_reload = True
+
+        def title(self):
+            return "Google" if cleared and self.ok_after_reload else "Error 403 (Forbidden)!!1"
+
+        def inner_text(self, sel, timeout=0):
+            return "pln - Google Search" if cleared and self.ok_after_reload else "403. That’s an error."
+
+        def reload(self, **k):
+            pass
+
+        def query_selector(self, sel):
+            return None
+    c = news.NewsCrawler.__new__(news.NewsCrawler)
+    c.page, c.ctx, c.log = Page(), Ctx(), (lambda m: None)
+    monkeypatch.setattr(c, "_pause", lambda *a: None, raising=False)
+    assert c._wait_google_captcha() is True                       # fresh cookies were enough
+    assert cleared and news.google_blocked_until() == 0
+    # released from the dashboard: the next crawler starts with fresh Google cookies
+    news.clear_google_block()
+    assert news._take_cookie_reset() is True and news._take_cookie_reset() is False

@@ -6,6 +6,7 @@ Google shows a captcha when it sees too many searches too fast; the run waits so
 the browser window."""
 from __future__ import annotations
 
+import json
 import os
 import time
 import re
@@ -25,6 +26,43 @@ _SOCIAL_POST = {"instagram": r"/(p|reel|reels|tv)/[\w-]+", "threads": r"/@[\w.]+
                 "tiktok": r"/@[\w.-]+/(video|photo)/\d+", "x": r"/[\w]+/status/\d+",
                 "facebook": r"(/posts/|/videos/|/reel/|/watch|story_fbid=|/permalink|/photo|fbid=)",
                 "youtube": r"(/watch\?v=|/shorts/)[\w-]+"}
+
+
+# ---------- Google's hard block ("403 … Your client does not have permission"): rest, don't knock ----------
+GOOGLE_REST_HOURS = 6
+
+
+def _block_path() -> str:
+    from .paths import APP_DATA
+    return os.path.join(APP_DATA, "google_block.json")
+
+
+def google_blocked_until() -> float:
+    """Epoch time until which Google Search is left alone (0 = not blocked)."""
+    try:
+        with open(_block_path(), encoding="utf-8") as f:
+            until = float(json.load(f).get("until", 0))
+    except (OSError, ValueError, TypeError, AttributeError):
+        return 0.0
+    return until if until > time.time() else 0.0
+
+
+def note_google_block(hours: float = GOOGLE_REST_HOURS) -> float:
+    until = time.time() + hours * 3600
+    try:
+        os.makedirs(os.path.dirname(_block_path()), exist_ok=True)
+        with open(_block_path(), "w", encoding="utf-8") as f:
+            json.dump({"until": until, "since": time.time()}, f)
+    except OSError:
+        pass
+    return until
+
+
+def clear_google_block() -> None:
+    try:
+        os.remove(_block_path())
+    except OSError:
+        pass
 
 
 def social_platform(url: str) -> tuple[str, bool]:
@@ -426,6 +464,13 @@ class NewsCrawler(BrowserCrawler):
                 return bool(self.page.query_selector("form#captcha-form, #recaptcha, iframe[src*='recaptcha']"))
             except Exception:  # noqa: BLE001
                 return False
+        if self._forbidden_page():
+            until = note_google_block()
+            self._google_gave_up = True
+            self.log(f"   ⛔ Google blocked this internet connection (403 \"Your client does not have permission\"). "
+                     f"Google Search is left alone until {time.strftime('%H:%M', time.localtime(until))} so the block "
+                     f"ends sooner — use News Search → Multi-source meanwhile (it does not use Google's search pages).")
+            return False
         for i in range(1 if SERVER_MODE else 100):
             if not blocked_now():
                 return True
@@ -440,6 +485,18 @@ class NewsCrawler(BrowserCrawler):
                 self.log("   ⚠ Google is asking for a captcha — solve it in the browser window; waiting...")
             self._pause(3, 3)
         return False
+
+    def _forbidden_page(self) -> bool:
+        """Google's '403. That's an error … Your client does not have permission' page (no captcha to solve)."""
+        try:
+            title = (self.page.title() or "").lower()
+            if "403" in title and "error" in title:
+                return True
+            txt = (self.page.inner_text("body", timeout=2000) or "")[:600].lower()
+        except Exception:  # noqa: BLE001
+            return False
+        return "403" in txt and ("does not have permission" in txt or "that\u2019s an error" in txt
+                                 or "that's an error" in txt)
 
     def _accept_consent(self):
         try:
@@ -709,6 +766,13 @@ class NewsCrawler(BrowserCrawler):
                        tab: str = "news_tab") -> Result:
         """Google stops at ~300 results per search, so a longer period is searched day by day (newest first)
         when opt.by_day is on; results are merged and capped at opt.cap."""
+        q = google_query(kw, opt)
+        until = google_blocked_until()
+        if until:
+            self._google_gave_up = True
+            return Result("error", [], f"query: {q}; skipped — Google blocked this connection (403); resting until "
+                                       f"{time.strftime('%H:%M', time.localtime(until))} so the block ends sooner. "
+                                       "Use the Multi-source engine meanwhile")
         days = (end_local.date() - start_local.date()).days + 1
         windows = [(end_local - timedelta(days=i), end_local - timedelta(days=i)) for i in range(days)] \
             if opt.by_day and days > 1 else [(start_local, end_local)]
@@ -731,7 +795,7 @@ class NewsCrawler(BrowserCrawler):
                 cards += res.cards
                 if res.status == "error":
                     errors.append(res.note)
-                    if "captcha" in res.note.lower():
+                    if "captcha" in res.note.lower() or self.__dict__.get("_google_gave_up"):
                         break
                 notes.append(res.note)
         except Stopped:

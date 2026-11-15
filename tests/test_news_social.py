@@ -71,3 +71,31 @@ def test_job_writes_the_medsos_file(tmp_path, monkeypatch):
     assert ig["Sentiment"] and ig["Post ID"]
     from crawler import archive
     assert archive.stats()["medsos"]["items"] == 2
+
+
+def test_google_403_rests_instead_of_knocking(tmp_path, monkeypatch):
+    """Google's 403 page is recognised; Google Search is left alone for a few hours (other sources go on)."""
+    from crawler import news, paths
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path))
+    assert news.google_blocked_until() == 0
+
+    class Page:
+        url = "https://www.google.com/search?q=pln"
+
+        def title(self):
+            return "Error 403 (Forbidden)!!1"
+
+        def inner_text(self, sel, timeout=0):
+            return "403. That’s an error. Your client does not have permission to get URL /search"
+
+        def query_selector(self, sel):
+            return None
+    c = news.NewsCrawler.__new__(news.NewsCrawler)
+    c.page, logs = Page(), []
+    c.log = logs.append
+    assert c._wait_google_captcha() is False
+    assert news.google_blocked_until() > time.time() + 5 * 3600 and any("403" in ln for ln in logs)
+    res = c._search_google("pln", NewsOptions.from_dict({}), None, None, {})
+    assert res.status == "error" and "resting until" in res.note            # no request to Google at all
+    news.clear_google_block()
+    assert news.google_blocked_until() == 0

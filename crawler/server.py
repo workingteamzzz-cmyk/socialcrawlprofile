@@ -96,6 +96,10 @@ class Handler(BaseHTTPRequestHandler):
 
             from .schedule import get
             return self._json({"schedules": get().list(), "now": int(_time.time())})
+        if u.path == "/api/overview":
+            from . import overview as ov
+            from .paths import SERVER_MODE
+            return self._json(ov.build(SERVER_MODE))
         if u.path == "/api/safety":
             from . import safety
             return self._json(safety.status())

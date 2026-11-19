@@ -64,6 +64,7 @@ A platform can still sign you out on its own after a while — then use *Log in 
 
 | Page | What it does |
 | --- | --- |
+| **Home** | Is everything set up? A checklist (HTTPS, platform sign-ins, API key and credit limit, Telegram, safe mode, resting sites, schedules) and today's numbers (articles, posts, API credits). **New search** (top left) opens any search in one click |
 | **Collect** | Pick the period (presets or any dates, WIB/WITA/WIT), toggle platforms, start/stop, live progress |
 | **Accounts** | Several **account lists** (per client, project or topic): switch, create or delete lists; accounts grouped by **group** (organisation, brand, person); search, filter, select per account or group; **Add profiles** (any platform, `URL | Group`, or two columns pasted from Excel); remove accounts |
 | **Post Links** | Every link found, filterable by platform/search, plus Excel/CSV download |

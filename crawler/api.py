@@ -637,6 +637,11 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
         return answer(err)
 
     # ---------- logins ----------
+    @app.get("/api/overview", tags=["overview"], dependencies=auth, summary="Home: health checklist and today's numbers")
+    def overview():
+        from . import overview as ov
+        return ov.build(SERVER_MODE)
+
     @app.get("/api/logins", tags=["logins"], dependencies=auth, summary="Which platforms the server is signed in to")
     def logins(request: Request):
         return {**logins_info(), "server": SERVER_MODE, "who": getattr(request.state, "who", "")}

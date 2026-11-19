@@ -160,3 +160,58 @@ def test_browser_takes_over_keywords_the_multi_engine_found_nothing_for(tmp_path
     while j.running:
         time.sleep(0.1)
     assert searched == []
+
+
+def test_priority_media_always_first_and_coverage(tmp_path):
+    from crawler import news_multi
+    from crawler.medmas import pipeline
+    from crawler.medmas.config import Config
+    from crawler.medmas.db import Database
+    from crawler.news import NewsOptions
+    o = NewsOptions.from_dict({"engine": "multi", "coverage": "wide",
+                               "priority_media": "https://www.kompas.com/, radarbogor.id\ndetik.com"})
+    assert o.coverage == "wide" and o.priority_media == ["kompas.com", "radarbogor.id", "detik.com"]
+    db = Database(str(tmp_path / "m.db"))
+    pool = {f"outlet{i}.id" for i in range(50)} | {"kompas.com", "radarbogor.id"}
+    learned = sorted(f"seen{i}.id" for i in range(30))          # outlets seen before would fill a small cap
+    undo = news_multi._priority_first(pipeline, Database, o.priority_media)
+    try:
+        got = db.pick_sitemap_domains(pool, 5, first=learned)
+        assert got[:3] == ["kompas.com", "radarbogor.id", "detik.com"] and len(got) == 5
+        feeds = db.pick_feed_discovery(pool - {"kompas.com"}, 2)   # kompas.com: feed already known
+        assert feeds[0] == "radarbogor.id" and "kompas.com" not in feeds
+        cfg = Config(keywords=["pln"], max_media_harvest=3)
+        assert pipeline._harvest_domains(cfg, set(learned), lambda m: None, db)[:3] == o.priority_media
+    finally:
+        undo()
+    assert db.pick_sitemap_domains(pool, 5, first=learned)[0] == "seen0.id"   # back to the engine's own order
+    db.close()
+
+
+def test_sitemaps_and_feeds_read_once_per_run(monkeypatch):
+    from crawler import news_multi
+    from crawler.medmas.discovery import rss_feeds, sitemaps
+    calls = []
+    monkeypatch.setattr(sitemaps, "_fetch", lambda url, timeout=8: calls.append(url) or b"<urlset/>")
+    monkeypatch.setattr(rss_feeds, "fetch_feed", lambda url, timeout=20, fallback=True: calls.append(url) or "feed")
+
+    def dead(url, timeout=8):
+        calls.append(url)
+        raise TimeoutError("dead site")
+    undo = news_multi._shared_reads()
+    try:
+        for _kw in range(5):                                       # five keywords in one run
+            assert sitemaps._fetch("https://a.id/sitemap.xml") == b"<urlset/>"
+            assert rss_feeds.fetch_feed("https://a.id/rss") == "feed"
+        assert calls == ["https://a.id/sitemap.xml", "https://a.id/rss"]
+        orig = sitemaps._fetch
+        undo()
+        monkeypatch.setattr(sitemaps, "_fetch", dead)
+        undo = news_multi._shared_reads()
+        for _kw in range(3):
+            with pytest.raises(TimeoutError):
+                sitemaps._fetch("https://dead.id/sitemap.xml")
+        assert calls.count("https://dead.id/sitemap.xml") == 1      # a dead site costs one try per run
+        assert orig
+    finally:
+        undo()

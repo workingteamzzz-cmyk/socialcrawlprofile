@@ -772,6 +772,11 @@ body::before{content:"";position:fixed;inset:-20%;z-index:-1;pointer-events:none
               <div class="opt-row"><div class="t"><b>Include "needs review"</b><small>Articles where the keyword was not confirmed in the text (otherwise only in the review file)</small></div><label class="switch"><input type="checkbox" id="nInclReview"><span></span></label></div>
               <div class="opt-row"><div class="t"><b>Retry links that failed before</b></div><label class="switch"><input type="checkbox" id="nRetry" checked><span></span></label></div>
               <div class="opt-row"><div class="t"><b>Browser takes over if the engine fails</b><small>Only if this engine cannot run: the browser then reads the Google News feed (never Google's search pages, which block a connection that searches too much)</small></div><label class="switch"><input type="checkbox" id="nFallback" checked><span></span></label></div>
+              <div class="opt-row"><div class="t"><b>Media checked per run</b><small>Normal: 400 sitemaps + 300 new outlets probed for RSS per run (the whole list turns in ~1.3 days with hourly runs). Wide: 1,000 + 1,000 (~12 hours) — each run takes longer</small></div>
+                <select id="nCoverage"><option value="normal">Normal</option><option value="wide">Wide</option></select></div>
+              <div class="field" style="margin:8px 0 4px"><label for="nPriority">Priority media — always checked first, every run</label>
+                <textarea id="nPriority" rows="3" placeholder="kompas.com, detik.com, antaranews.com, radarbogor.id … (domains, comma or one per line)"></textarea>
+                <small class="hint">They never wait for their turn in the rotation, and also count as registered media.</small></div>
               <div class="opt-row"><div class="t"><b>Outlets searched one by one</b><small>Per keyword; more = more complete and slower</small></div>
                 <select id="nHarvest"><option value="50">50</option><option value="200" selected>200</option><option value="500">500</option><option value="0">All</option></select></div>
               <p class="hint">Keywords may use <code>"exact phrase"</code>, <code>AND</code>, <code>OR</code>, <code>NOT</code> and ( ), e.g. <code>"PLN" AND (padam OR pemadaman) NOT promo</code>. Output is always full articles; the Online layout gets INFLUENCER, PERSON and SENTIMENT filled.</p>
@@ -1648,6 +1653,7 @@ function nwOptions(){
     engine: radioValue('nEngine'), multi_sources: [...document.querySelectorAll('.nMs')].filter(c => c.checked).map(c => c.value),
     registered_only: $('nRegOnly').checked, new_only: $('nNewOnly').checked, include_review: $('nInclReview').checked,
     retry_failed: $('nRetry').checked, max_harvest: +$('nHarvest').value, fallback: $('nFallback').checked,
+    coverage: $('nCoverage').value, priority_media: $('nPriority').value.split(/[\s,;]+/).map(w => w.trim()).filter(Boolean),
     target: radioValue('nTarget') || 'news', social: [...document.querySelectorAll('.nSoc')].filter(c => c.checked).map(c => c.value),
     posts_only: $('nPostsOnly').checked };
 }
@@ -1676,12 +1682,13 @@ function nwEngineView(){
     if (o.multi_sources) document.querySelectorAll('.nMs').forEach(c => c.checked = o.multi_sources.includes(c.value));
     $('nRegOnly').checked = !!o.registered_only; $('nNewOnly').checked = !!o.new_only; $('nInclReview').checked = !!o.include_review;
     $('nRetry').checked = o.retry_failed !== false; $('nHarvest').value = String(o.max_harvest ?? 200);
-    $('nFallback').checked = o.fallback !== false; }
+    $('nFallback').checked = o.fallback !== false; $('nCoverage').value = o.coverage || 'normal';
+    $('nPriority').value = (o.priority_media || []).join(', '); }
   if (o.target){ document.querySelectorAll('input[name="nTarget"]').forEach(r => r.checked = r.value === o.target);
     if (o.social) document.querySelectorAll('.nSoc').forEach(c => c.checked = o.social.includes(c.value));
     $('nPostsOnly').checked = o.posts_only !== false; } }
   nwEngineView(); })();
-['nCap','nTemplate','nByDay','nSrcFeed','nSrcNews','nSrcAll','nMediaOnly','nExtraMedia','nResolve','nRegion','nExact','nExclude','nSites','nRegOnly','nNewOnly','nInclReview','nRetry','nHarvest','nFallback'].forEach(id => $(id).addEventListener(['nExclude','nSites','nExtraMedia'].includes(id) ? 'input' : 'change',
+['nCap','nTemplate','nByDay','nSrcFeed','nSrcNews','nSrcAll','nMediaOnly','nExtraMedia','nResolve','nRegion','nExact','nExclude','nSites','nRegOnly','nNewOnly','nInclReview','nRetry','nHarvest','nFallback','nCoverage','nPriority'].forEach(id => $(id).addEventListener(['nExclude','nSites','nExtraMedia'].includes(id) ? 'input' : 'change',
   () => { ls.set('nw_opts', nwOptions()); nwRender(); }));
 document.querySelectorAll('input[name="nEngine"], .nMs, input[name="nTarget"], .nSoc, #nPostsOnly').forEach(el => el.addEventListener('change', () => { nwEngineView(); ls.set('nw_opts', nwOptions()); nwRender(); }));
 function nwRender(){

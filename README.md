@@ -259,6 +259,12 @@ News Search has two engines (card **Search engine**):
   - a database in the data folder (`news_multi/medmascrawler.db`) remembers every link across runs:
     *Only articles not delivered before* makes each file hold only new articles
   - own media dictionary: put `media_dictionary.xlsx/.csv/.txt` in the data folder to replace the bundled one
+  - **Media checked per run**: *Normal* (400 sitemaps + 300 outlets probed for RSS per run — the whole dictionary
+    turns in ~1.3 days with hourly runs) or *Wide* (1,000 + 1,000 — ~12 hours; each run takes longer). Working RSS
+    feeds, once found, are read every run.
+  - **Priority media**: domains that are always checked first in every run (per-outlet search, sitemaps, RSS
+    discovery) — they never wait for their turn — and count as registered media.
+  - Hourly monitoring: schedule it every hour, period *Yesterday + today*, *only what is new* on.
 - **Browser (Google pages)** — the previous engine. Its Online file now also gets INFLUENCER/PERSON from the article text.
 
 The output is the same: News Links, the Online / Standard Excel, schedules and deliveries. Schedules made before

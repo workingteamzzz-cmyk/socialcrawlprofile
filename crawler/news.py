@@ -140,6 +140,8 @@ class NewsOptions:
     retry_failed: bool = True      # multi: links that failed in earlier runs are tried again
     include_review: bool = False   # multi: also articles whose keyword could not be verified in the text
     max_harvest: int = 200         # multi: outlets asked one by one (site:) per keyword
+    coverage: str = "normal"       # multi: media checked per run — normal (400 sitemaps) / wide (1,000)
+    priority_media: list[str] = field(default_factory=list)   # multi: always checked first, every run
     fallback: bool = True          # multi: if the engine fails, the browser reads the Google News feed instead
     target: str = "news"           # "news" = news media; "social" = Google Search limited to social media (site:)
     social: list[str] = field(default_factory=list)   # social target: instagram, threads, tiktok, x, facebook, youtube
@@ -181,6 +183,8 @@ class NewsOptions:
                    registered_only=bool(d.get("registered_only")), new_only=bool(d.get("new_only")),
                    retry_failed=bool(d.get("retry_failed", True)), include_review=bool(d.get("include_review")),
                    max_harvest=max(0, min(2000, int(d.get("max_harvest") or 200))),
+                   coverage="wide" if d.get("coverage") == "wide" else "normal",
+                   priority_media=hosts(d.get("priority_media"))[:300],
                    fallback=bool(d.get("fallback", True)))._social(d)
 
     def _social(self, d: dict) -> "NewsOptions":

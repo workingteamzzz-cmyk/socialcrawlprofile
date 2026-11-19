@@ -92,6 +92,78 @@ def engine_keyword(kw: str, opt) -> str:
     return q
 
 
+COVERAGE = {   # media checked per run: sitemaps read, outlets probed for an RSS feed, outlets searched one by one
+    "normal": {"sitemaps": 400, "feeds": 300, "harvest": 0},
+    "wide": {"sitemaps": 1000, "feeds": 1000, "harvest": 500},
+}
+
+
+def _priority_first(pipeline, Database, priority: list[str]):
+    """Priority media go to the front of every rotation (and are never cut by its per-run cap) — done by wrapping
+    two of the engine's choosers for this run, without changing the engine's code. Returns an undo function."""
+    pri = [d for d in dict.fromkeys(priority) if d]
+    if not pri:
+        return lambda: None
+    orig_h, orig_s, orig_f = pipeline._harvest_domains, Database.pick_sitemap_domains, Database.pick_feed_discovery
+
+    def front(lst, limit):
+        out = pri + [d for d in lst if d not in pri]
+        return out[:max(limit, len(pri))] if limit else out
+
+    def harvest(cfg, detected, log=print, db=None):
+        got = orig_h(cfg, detected, log, db)
+        return front(got, cfg.max_media_harvest or 0)
+
+    def sitemaps(self, all_domains, limit, first=()):
+        return front(orig_s(self, set(all_domains) | set(pri), 0, first), limit)
+
+    def feeds(self, pool, limit):                     # pool = outlets with no known feed yet
+        pool = set(pool)
+        got = orig_f(self, pool, 0)
+        head = [d for d in pri if d in pool]
+        out = head + [d for d in got if d not in head]
+        return out[:max(limit, len(head))] if limit else out
+    pipeline._harvest_domains, Database.pick_sitemap_domains, Database.pick_feed_discovery = harvest, sitemaps, feeds
+
+    def undo():
+        pipeline._harvest_domains, Database.pick_sitemap_domains, Database.pick_feed_discovery = orig_h, orig_s, orig_f
+    return undo
+
+
+def _shared_reads(ttl: float = 15 * 60):
+    """Within one run every keyword reads the same media sitemaps and RSS feeds: fetch each once and share it
+    (the engine itself reads them again per keyword). Wraps the two fetchers for this run only; returns undo."""
+    from .medmas.discovery import rss_feeds, sitemaps
+    import time as _t
+    cache: dict = {}
+    lock = threading.Lock()
+    orig_feed, orig_sm = rss_feeds.fetch_feed, sitemaps._fetch
+
+    def once(key, fn):
+        with lock:
+            hit = cache.get(key)
+        if hit and _t.time() - hit[0] < ttl:
+            if isinstance(hit[1], Exception):
+                raise hit[1]
+            return hit[1]
+        try:
+            val = fn()
+        except Exception as e:  # noqa: BLE001  a dead site fails once per run, not once per keyword
+            with lock:
+                cache[key] = (_t.time(), e)
+            raise
+        with lock:
+            cache[key] = (_t.time(), val)
+        return val
+
+    rss_feeds.fetch_feed = lambda url, timeout=20, fallback=True: once(("rss", url), lambda: orig_feed(url, timeout, fallback))
+    sitemaps._fetch = lambda url, timeout=8: once(("sm", url), lambda: orig_sm(url, timeout))
+
+    def undo():
+        rss_feeds.fetch_feed, sitemaps._fetch = orig_feed, orig_sm
+    return undo
+
+
 def run(keywords: list[str], start: str, end: str, opt, tz, log, stop_event: threading.Event,
         data_dir: str, out_dir: str) -> tuple[list[dict], list[str], dict]:
     """Crawl; returns (news rows, extra files written to out_dir, statistics)."""
@@ -104,12 +176,17 @@ def run(keywords: list[str], start: str, end: str, opt, tz, log, stop_event: thr
     to_dash = {engine_keyword(k, opt): k for k in keywords}
     cfg = Config(keywords=list(to_dash), start_date=start, end_date=end,
                  **{f: (k in srcs) for k, f in SOURCES.items()},
-                 extra_media=list(opt.extra_media), registered_media_only=bool(opt.registered_only),
+                 extra_media=list(dict.fromkeys(list(opt.priority_media) + list(opt.extra_media))),
+                 registered_media_only=bool(opt.registered_only),
                  report_new_only=bool(opt.new_only), retry_failed=bool(opt.retry_failed),
                  media_dictionary_file=_dictionary(data_dir), max_media_harvest=int(opt.max_harvest),
                  threads=8, output_folder=os.path.join(work, "export"), db_path=os.path.join(work, "medmascrawler.db"))
     if "permedia" in srcs and "gnews" not in srcs:
         cfg.use_google_news = True                    # per-media harvest is part of the Google News step
+    cov = COVERAGE.get(getattr(opt, "coverage", "normal"), COVERAGE["normal"])
+    cfg.sitemap_domains_per_run, cfg.feed_discovery_per_run = cov["sitemaps"], cov["feeds"]
+    if cov["harvest"] and cfg.max_media_harvest:
+        cfg.max_media_harvest = max(cfg.max_media_harvest, cov["harvest"])
     if not _RUN_LOCK.acquire(blocking=False):
         raise RuntimeError("Another multi-source news run is still going.")
     done = threading.Event()
@@ -119,6 +196,15 @@ def run(keywords: list[str], start: str, end: str, opt, tz, log, stop_event: thr
             if stop_event.is_set():
                 pipeline.request_stop()
                 return
+    undo_p = _priority_first(pipeline, Database, list(opt.priority_media))
+    undo_r = _shared_reads()
+
+    def undo():
+        undo_r()
+        undo_p()
+    if opt.priority_media:
+        log(f"⭐ Priority media checked first in every run: {', '.join(opt.priority_media[:10])}"
+            + (f" (+{len(opt.priority_media) - 10} more)" if len(opt.priority_media) > 10 else ""))
     try:
         pipeline.clear_stop()
         threading.Thread(target=watch, daemon=True).start()
@@ -127,6 +213,7 @@ def run(keywords: list[str], start: str, end: str, opt, tz, log, stop_event: thr
         stat = pipeline.run(cfg, log=log)
     finally:
         done.set()
+        undo()
         pipeline.clear_stop()
         _RUN_LOCK.release()
     db = Database(cfg.db_path)

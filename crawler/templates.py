@@ -146,6 +146,7 @@ def file_name(layout: str, end_date: str, tz, origin: str = "Manual", folder: st
 def online_row(r: dict, tz) -> list:
     """A news result -> the Online columns, with the team's final upload rules (online_clean.py)."""
     from . import online_clean as oc
+    from .people_clean import clean_names
     dt = None
     full = (r.get("published_full") or "").strip()            # from the article page, local time "YYYY-MM-DD HH:MM"
     if re.match(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", full):
@@ -170,7 +171,8 @@ def online_row(r: dict, tz) -> list:
 
         infl, pers = people(text)
     return [date_s, time_s, title, url, (r.get("image") or "").strip(), oc.media_from_url(url),
-            oc.format_names(merge_names(infl)), oc.format_names(merge_names(pers)), (r.get("author") or "").strip(),
+            oc.format_names(merge_names(clean_names(infl))), oc.format_names(merge_names(clean_names(pers))),
+            (r.get("author") or "").strip(),
             summary, oc.content_html(text, title, r.get("author") or ""),
             (r.get("sentiment") or analyze(f"{title}. {summary}")[0]).lower().strip()]
 

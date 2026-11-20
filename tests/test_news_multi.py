@@ -269,3 +269,18 @@ def test_articles_arrive_live_and_quick_sources_first(tmp_path, monkeypatch, fak
     assert detik in [c.value for c in ws["D"]]                        # saved live, still in this run's file
     from crawler import archive
     assert archive.stats()["online"]["items"] >= 1
+
+
+
+def test_spokesperson_columns_keep_only_people():
+    """INFLUENCER / PERSON: pronouns, ordinary words, bare titles and institutions are dropped; ranks, places and
+    units glued in front of a name are removed."""
+    from crawler import templates
+    from datetime import timezone
+    cols = templates.ONLINE_COLUMNS
+    row = templates.online_row({"url": "https://a.id/x", "title": "PLN", "text": "x",
+                                "influencer": "Kami, Saya, Menurutnya, Sumsel Irjen Pol Rony Samtana, Kapolresta",
+                                "person": "Rusia Vladimir Putin, Kostrad, Pertamina, Lapas Kotabaru, Irjen Pol, "
+                                          "Presiden Prabowo Subianto, Imam Sapto Riadi, Dedi, Pertumbuhan"}, timezone.utc)
+    assert row[cols.index("INFLUENCER")] == "rony samtana"
+    assert row[cols.index("PERSON")] == "vladimir putin,prabowo subianto,imam sapto riadi,dedi"

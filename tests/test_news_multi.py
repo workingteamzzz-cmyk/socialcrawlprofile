@@ -215,3 +215,14 @@ def test_sitemaps_and_feeds_read_once_per_run(monkeypatch):
         assert orig
     finally:
         undo()
+
+
+def test_online_people_left_empty_when_the_engine_found_none():
+    """Like the team's Uploader Online v2: an empty INFLUENCER / PERSON from the crawl stays empty."""
+    from crawler import templates
+    from datetime import timezone
+    cols = templates.ONLINE_COLUMNS
+    row = templates.online_row({"url": "https://a.id/x/", "title": "PLN", "text": "Listrik di Sukabumi pulih.",
+                                "influencer": "", "person": ""}, timezone.utc)
+    assert row[cols.index("INFLUENCER")] == "" and row[cols.index("PERSON")] == ""
+    assert row[cols.index("URL")] == "https://a.id/x" and row[cols.index("MEDIA")] == "a.id"

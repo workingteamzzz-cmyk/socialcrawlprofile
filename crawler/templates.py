@@ -166,7 +166,8 @@ def online_row(r: dict, tz) -> list:
     text = r.get("text") or ""
     summary = oc.clean_summary(r.get("description") or (re.sub(r"\s+", " ", text)[:400] if text else ""), title)
     infl, pers = r.get("influencer"), r.get("person")
-    if not (infl or pers) and text:                    # people in the article (the team's rule-based detector)
+    if infl is None and pers is None and text:         # engine without people detection (browser): the team's detector
+
         infl, pers = people(text)
     return [date_s, time_s, title, url, (r.get("image") or "").strip(), oc.media_from_url(url),
             oc.format_names(merge_names(infl)), oc.format_names(merge_names(pers)), (r.get("author") or "").strip(),

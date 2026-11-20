@@ -168,20 +168,31 @@ class Stream:
         self.db_path = os.path.join(self.folder, "stream.db")
         self._db = sqlite3.connect(self.db_path, timeout=30, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
-        self._db.execute("PRAGMA journal_mode=WAL")
-        self._db.execute("PRAGMA synchronous=NORMAL")
-        self._db.executescript(SCHEMA)
-        from .backfill import SCHEMA as ARCHIVE_SCHEMA
-        self._db.executescript(ARCHIVE_SCHEMA)
+        self.schema_busy = False
+        try:
+            self._db.execute("PRAGMA journal_mode=WAL")
+            self._db.execute("PRAGMA synchronous=NORMAL")
+            self._db.executescript(SCHEMA)
+            from .backfill import SCHEMA as ARCHIVE_SCHEMA
+            self._db.executescript(ARCHIVE_SCHEMA)
+        except sqlite3.OperationalError:
+            # the other process holds the database (e.g. building an index once after an update): the tables are
+            # there already — the dashboard reads on instead of failing until it is done
+            self.schema_busy = True
         for sql in ("ALTER TABLE hourly ADD COLUMN skipped INTEGER DEFAULT 0",          # databases from v23
                     "ALTER TABLE sources ADD COLUMN tier TEXT DEFAULT 'new'",
                     "ALTER TABLE articles ADD COLUMN sentiment TEXT DEFAULT ''",             # databases before v33
                     "ALTER TABLE articles ADD COLUMN tries INTEGER DEFAULT 0"):               # before v47
+            if self.schema_busy:
+                break
             try:
                 self._db.execute(sql)
             except sqlite3.OperationalError:
                 pass
-        self._db.commit()
+        try:
+            self._db.commit()
+        except sqlite3.OperationalError:
+            pass
         self.lock = threading.RLock()
         self._ctl = threading.Lock()           # start / stop never overlap
         self._local = threading.local()        # per-thread read-only connections (reads without the lock)
@@ -820,8 +831,11 @@ class Stream:
     def fetch_methods(self, days: int = 7) -> dict:
         """Articles read per method over the last days: normal, amp, googlebot, cloudscraper (+ share in %)."""
         since = (datetime.now(WIB) - timedelta(days=days - 1)).strftime("%Y-%m-%d")
-        got = {r["method"]: r["n"] for r in self.rq("SELECT method, SUM(n) n FROM fetch_methods WHERE day >= ? "
-                                                     "GROUP BY method", (since,))}
+        try:
+            got = {r["method"]: r["n"] for r in self.rq("SELECT method, SUM(n) n FROM fetch_methods WHERE day >= ? "
+                                                         "GROUP BY method", (since,))}
+        except sqlite3.Error:
+            got = {}                                   # the table comes with the worker's next start
         total = sum(got.values())
         return {"days": days, "total": total,
                 "methods": {m: {"n": n, "pct": round(n * 100 / total, 2) if total else 0} for m, n in got.items()}}
@@ -908,6 +922,10 @@ class Stream:
         """Indexes the dashboard's counts read without touching the articles themselves (Media Database: activity
         and access per outlet over 7 days — a million rows counted in seconds, not minutes). Built once, here in the
         stream's own process, never while a page waits."""
+        have = {r["name"] for r in self.rq("SELECT name FROM sqlite_master WHERE type='index'")}
+        if {"a_disc_ds", "a_fail_err", "a_new_fd"} <= have:
+            return
+        self.meta("maintenance", f"building indexes since {datetime.now(WIB):%H:%M} (once after an update)")
         with self.lock:
             self._db.execute("CREATE INDEX IF NOT EXISTS a_disc_ds ON articles(discovered, domain, status)")
             self._db.execute("CREATE INDEX IF NOT EXISTS a_fail_err ON articles(discovered, domain, error) "
@@ -915,6 +933,7 @@ class Stream:
             self._db.execute("CREATE INDEX IF NOT EXISTS a_new_fd ON articles(feed_date, discovered) "
                              "WHERE status='new'")      # the fresh lane's refill: news by date, never a scan
             self._db.commit()
+        self.meta("maintenance", "")
 
     def house_loop(self) -> None:
         ev = self.stop_event
@@ -1314,6 +1333,34 @@ class Stream:
                 self.queued.clear()
                 self.qn = self.qn_old = 0
 
+    def slow_counts(self) -> dict:
+        """Waiting / recent news waiting / stored: counting millions of rows takes seconds, so it is done in the
+        background at most every minute and the dashboard gets the last numbers at once (None the very first time)."""
+        c = self.__dict__.setdefault("_sc", {"t": 0.0, "v": {"queue": None, "queue_fresh": None, "stored": None},
+                                             "busy": False})
+        if time.time() - c["t"] > 60 and not c["busy"]:
+            c["busy"] = True
+
+            def run():
+                try:
+                    cut = self.cutoff()
+                    one = lambda sql, a=(): self.rq(sql, a)[0]["n"]  # noqa: E731
+                    c["v"] = {"queue": one("SELECT COUNT(*) n FROM articles WHERE status='new'"),
+                              "queue_fresh": one("SELECT COUNT(*) n FROM articles WHERE status='new' AND feed_date >= ?",
+                                                 (cut,)) + one("SELECT COUNT(*) n FROM articles WHERE status='new' AND "
+                                                               "feed_date = ''"),
+                              "stored": one("SELECT COUNT(*) n FROM articles WHERE status='success'")}
+                    c["t"] = time.time()
+                except Exception:  # noqa: BLE001  busy: try again shortly
+                    c["t"] = time.time() - 45
+                finally:
+                    c["busy"] = False
+            th = threading.Thread(target=run, daemon=True, name="stream-counts")
+            th.start()
+            if not c["t"]:
+                th.join(3)                             # the very first time: wait a moment (small databases: done)
+        return dict(c["v"])
+
     def live_state(self) -> dict:
         """What only the running engine knows (the worker process writes it for the web process every 2 s)."""
         rec = list(self.recent)
@@ -1370,10 +1417,7 @@ class Stream:
         per_min = sum(1 for t in rec if t > now - 300) / 5
         live = read_live() if _WORKER_PARENT else None
         out = {"running": self.running, "since": int(self.started) if self.running else 0, "settings": settings(),
-                "queue": self.rq("SELECT COUNT(*) n FROM articles WHERE status='new'")[0]["n"],
-                "queue_fresh": self.rq("SELECT COUNT(*) n FROM articles WHERE status='new' AND (feed_date >= ? OR "
-                                       "feed_date = '')", (self.cutoff(),))[0]["n"],
-                "stored": self.rq("SELECT COUNT(*) n FROM articles WHERE status='success'")[0]["n"],
+                **self.slow_counts(),
                 "per_minute": round(per_min, 1), "per_day_pace": int(per_min * 60 * 24), "today": day,
                 "hourly": series, "sources": src, "keywords": len(self.keywords()), "db_mb": round(size / 1e6, 1),
                 "tiers": {r["tier"] or "new": r["n"] for r in self.rq(
@@ -1384,6 +1428,7 @@ class Stream:
                 "disk": __import__("crawler.overview", fromlist=["disk"]).disk(),
                 "readers_busy": len(self.busy_domains), "last_error": self.last_error, "export": dict(self.export),
                 "days": self.days_with_articles(), "fetch_methods": self.fetch_methods(7),
+                "maintenance": self.meta("maintenance"),
                 "latest": [dict(r) for r in rows]}
         if live:                                             # the engine runs in its own process: its live state
             for k in ("running", "since", "per_minute", "per_day_pace", "readers_busy", "last_error", "export"):

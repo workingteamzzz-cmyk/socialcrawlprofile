@@ -2018,7 +2018,7 @@ async function loadLists(){
   $('listSel').innerHTML = lists.length ? lists.map(l => `<option value="${esc(l.id)}"${l.id === listId ? ' selected' : ''}>${esc(l.name)} (${l.count})</option>`).join('')
     : '<option value="">No lists yet</option>';
   $('btnDelList').disabled = $('btnAdd').disabled = !listId;
-  $('wsList').textContent = 'Media Monitoring' + (listId ? ' · ' + listId : '');
+  $('wsList').textContent = 'Media Monitoring';          // the brand line: never one client's list name
   $('runList').textContent = listId || 'none — create one on the Accounts page';
   $('addListName').textContent = listId;
 }
@@ -3003,10 +3003,26 @@ function drawStream(d){
     hit.dataset.tip = `<b>${h.hour.slice(5)}:00</b><div><i style='background:var(--s1)'></i>Read<span>${fmt(h.read)}</span></div><div><i style='background:var(--s2)'></i>Keyword matches<span>${fmt(h.matched)}</span></div><div>Links found<span>${fmt(h.found)}</span></div>`;
   });
 }
+function lsFill(cfg){ loadStream.filled = true;
+    $('lsSfThreads').value = cfg.threads; $('lsSfRss').value = cfg.rss_minutes; $('lsSfSm').value = cfg.sitemap_minutes;
+    $('lsSfOld').value = cfg.old_per_check; $('lsSfAll').checked = cfg.all_links !== false; $('lsSfHome').checked = cfg.homepage !== false;
+    $('lsSfHDay').value = cfg.health_weekday; $('lsSfHHour').value = cfg.health_hour; $('lsSfHStart').checked = cfg.health_on_start !== false;
+    $('lsSfCuD').value = cfg.catchup_days; $('lsSfCuH').value = cfg.catchup_hour;
+    $('lsSfTop').value = cfg.top_n; $('lsSfTop2').value = cfg.top2_n; $('lsSfA2').value = cfg.active2_hours; $('lsSfSemi').value = cfg.semi_hours; $('lsSfRare').value = cfg.rare_hours; $('lsSfIn').value = cfg.inactive_days; $('lsSfDead').value = cfg.dead_days; $('lsSfAge').value = cfg.max_age_hours;
+    $('lsSfRet').value = cfg.retention_days; $('lsSfGap').value = cfg.domain_gap; $('lsSfKw').value = (cfg.keywords || []).join('\n');
+    $('lsSfUseRss').checked = !!cfg.rss; $('lsSfUseSm').checked = !!cfg.sitemaps; $('lsSfRobots').checked = cfg.robots !== false;
+    $('lsSfGb').checked = cfg.fetch_googlebot !== false; $('lsSfCs').checked = cfg.fetch_cloudscraper !== false;
+    $('lsSfAuto').checked = cfg.auto_add_media !== false; $('lsSfRetry').checked = cfg.retry_failed !== false;
+    $('lsSfEx').value = (cfg.exclude_domains || []).join('\n'); }
 async function loadStream(){
+  if (!loadStream.filled){ const c = await api('/api/stream/config'); if (c && c.settings) lsFill(c.settings); }
   const d = await api('/api/stream?q=' + encodeURIComponent(($('lsStQ').value || '').trim()));
-  if (!d || !d.hourly) return;
+  if (!d || !d.hourly){                                  // busy (e.g. a one-time upgrade of the database): try again
+    $('lsStState').textContent = 'Loading…';
+    clearTimeout(loadStream.t); loadStream.t = setTimeout(() => { if ($('p-stream').classList.contains('on')) loadStream(); }, 8000);
+    return; }
   ST = d; const cfg = d.settings || {};
+  if (d.maintenance) toast('The stream database is being upgraded once (' + d.maintenance + ') — the stream continues by itself.');
   const fm = d.fetch_methods || {total: 0, methods: {}}, fmt1 = m => { const x = (fm.methods || {})[m]; return x ? `${fmt(x.n)} · ${x.pct}%` : '0'; };
   $('lsFmGb').textContent = fmt1('googlebot'); $('lsFmCs').textContent = fmt1('cloudscraper');
   $('lsFmAll').textContent = fm.total ? `Last 7 days: ${fmt(fm.total)} articles read — normal ${fmt1('normal')}, AMP ${fmt1('amp')}, Googlebot ${fmt1('googlebot')}, cloudscraper ${fmt1('cloudscraper')}.` : 'Counted from now on (per method, per day).';
@@ -3014,11 +3030,12 @@ async function loadStream(){
   $('lsStToggle').textContent = d.running ? 'Stop stream' : 'Start stream'; $('lsStToggle').classList.toggle('primary', !d.running);
   $('navStream').textContent = d.running ? '●' : '';
   $('lsStRet').textContent = cfg.retention_days ? cfg.retention_days + ' days' : 'for good';
-  $('lsSRead').textContent = fmt(d.today.read); $('lsSReadS').textContent = `${fmt(d.today.failed)} could not be read · ${fmt(d.today.skipped || 0)} skipped (robots.txt / excluded) · ${fmt(d.stored)} stored`;
+  $('lsSRead').textContent = fmt(d.today.read); $('lsSReadS').textContent = `${fmt(d.today.failed)} could not be read · ${fmt(d.today.skipped || 0)} skipped (robots.txt / excluded) · ${d.stored === null || d.stored === undefined ? '…' : fmt(d.stored)}} stored`;
   $('lsSPace').textContent = fmt(d.per_minute) + ' /min'; $('lsSPaceS').textContent = d.running ? `≈ ${fmt(d.per_day_pace)} per day at this pace` : 'stream is stopped';
   $('lsSMatch').textContent = fmt(d.today.matched); $('lsSMatchS').textContent = `${d.keywords} keyword(s) incl. report topics`;
-  $('lsSQueue').textContent = fmt(d.queue);
-  $('lsSQueueS').textContent = (d.queue_fresh !== undefined ? `${fmt(d.queue_fresh)} recent news (read first) · ${fmt(Math.max(0, d.queue - d.queue_fresh))} older · ` : '') + `${fmt(d.today.found)} new links found today`;
+  const cnt = v => v === null || v === undefined ? '…' : fmt(v);                 // counted in the background
+  $('lsSQueue').textContent = cnt(d.queue);
+  $('lsSQueueS').textContent = (d.queue_fresh !== null && d.queue_fresh !== undefined && d.queue !== null ? `${fmt(d.queue_fresh)} recent news (read first) · ${fmt(Math.max(0, d.queue - d.queue_fresh))} older · ` : '') + `${fmt(d.today.found)} new links found today`;
   const sr = d.sources || {}, row = (k, label) => { const x = sr[k] || {}; return `<div class="hs-foot" style="border-top:0;padding:4px 0"><span><b style="font-size:13px!important">${label}</b></span><b>${fmt(x.n || 0)}</b></div>
     <div class="hs-foot"><span>checked so far</span><b>${fmt(x.checked || 0)}</b></div><div class="hs-foot"><span>with new articles</span><b>${fmt(x.productive || 0)}</b></div><div class="hs-foot"><span>unreachable</span><b>${fmt(x.dead || 0)}</b></div>`; };
   const tr = d.tiers || {}, every = m => m >= 1440 ? `${+(m / 1440).toFixed(1)} day${m >= 2880 ? 's' : ''}` : m >= 60 ? `${+(m / 60).toFixed(1)} h` : `${m} min`;
@@ -3051,17 +3068,7 @@ async function loadStream(){
     <td><a class="lt-t" href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title || r.url)}</a></td><td class="nowrap">${esc(r.domain)}</td>
     <td>${r.matched ? r.matched.split(', ').map(k => `<span class="badge b-ok" style="margin:1px">${esc(k)}</span>`).join('') : '<span class="hint">—</span>'}</td></tr>`).join('')
     : `<tr><td colspan="4" class="empty-s">${d.running ? 'Starting up — the first articles arrive within minutes.' : 'Start the stream to read every new article from the registered media.'}</td></tr>`;
-  if (!loadStream.filled){ loadStream.filled = true;
-    $('lsSfThreads').value = cfg.threads; $('lsSfRss').value = cfg.rss_minutes; $('lsSfSm').value = cfg.sitemap_minutes;
-    $('lsSfOld').value = cfg.old_per_check; $('lsSfAll').checked = cfg.all_links !== false; $('lsSfHome').checked = cfg.homepage !== false;
-    $('lsSfHDay').value = cfg.health_weekday; $('lsSfHHour').value = cfg.health_hour; $('lsSfHStart').checked = cfg.health_on_start !== false;
-    $('lsSfCuD').value = cfg.catchup_days; $('lsSfCuH').value = cfg.catchup_hour;
-    $('lsSfTop').value = cfg.top_n; $('lsSfTop2').value = cfg.top2_n; $('lsSfA2').value = cfg.active2_hours; $('lsSfSemi').value = cfg.semi_hours; $('lsSfRare').value = cfg.rare_hours; $('lsSfIn').value = cfg.inactive_days; $('lsSfDead').value = cfg.dead_days; $('lsSfAge').value = cfg.max_age_hours;
-    $('lsSfRet').value = cfg.retention_days; $('lsSfGap').value = cfg.domain_gap; $('lsSfKw').value = (cfg.keywords || []).join('\n');
-    $('lsSfUseRss').checked = !!cfg.rss; $('lsSfUseSm').checked = !!cfg.sitemaps; $('lsSfRobots').checked = cfg.robots !== false;
-    $('lsSfGb').checked = cfg.fetch_googlebot !== false; $('lsSfCs').checked = cfg.fetch_cloudscraper !== false;
-    $('lsSfAuto').checked = cfg.auto_add_media !== false; $('lsSfRetry').checked = cfg.retry_failed !== false;
-    $('lsSfEx').value = (cfg.exclude_domains || []).join('\n'); }
+  if (!loadStream.filled) lsFill(cfg);
   const days = d.days || [], cur = $('lsDay').value;
   $('lsDay').innerHTML = days.length ? days.map(x => `<option value="${x}">${new Date(x + 'T00:00:00').toLocaleDateString([], {weekday: 'short', day: '2-digit', month: 'short', year: 'numeric'})}</option>`).join('') : '<option value="">No articles yet</option>';
   if (cur && days.includes(cur)) $('lsDay').value = cur;

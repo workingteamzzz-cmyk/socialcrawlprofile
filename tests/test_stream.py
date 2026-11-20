@@ -416,3 +416,25 @@ def test_disk_warnings_and_the_brake(tmp_path, monkeypatch):
     assert n == 1                                                               # the news only
     state.update(pct=60.0, free=25e9)
     assert not st.disk_guard(sent.append)["brake"] and not st.disk_brake
+
+
+def test_dashboard_reads_on_while_the_worker_holds_the_database(tmp_path, monkeypatch):
+    """After an update the worker builds indexes once (a long write): the web process's Stream still opens, status()
+    answers at once (counts follow in the background) and the settings have their own instant endpoint."""
+    import sqlite3
+    from crawler import paths, stream
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    folder = str(tmp_path / "s")
+    stream.Stream(folder)._db.execute("DROP TABLE fetch_methods")         # a table this version adds
+    hold = sqlite3.connect(f"{folder}/stream.db", timeout=1)
+    hold.execute("BEGIN EXCLUSIVE")                                        # the worker, mid index build
+    real_connect = sqlite3.connect
+    monkeypatch.setattr(stream.sqlite3, "connect", lambda *a, **k: real_connect(*a, **{**k, "timeout": 0.5}))
+    try:
+        st = stream.Stream(folder)
+        assert st.schema_busy
+    finally:
+        hold.rollback()
+        hold.close()
+    out = st.status(5)
+    assert "queue" in out and out["settings"]["threads"]

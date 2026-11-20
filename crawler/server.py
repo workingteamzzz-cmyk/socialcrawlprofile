@@ -185,6 +185,9 @@ class Handler(BaseHTTPRequestHandler):
                                                    int(g("size", "50") or 50), g("sort", "activity")))
             except ValueError:
                 return self._json({"ok": False, "error": "bad page"})
+        if u.path == "/api/stream/config":
+            from . import stream
+            return self._json({"ok": True, "settings": stream.settings()})
         if u.path == "/api/stream":
             from . import stream
             qs = parse_qs(u.query)

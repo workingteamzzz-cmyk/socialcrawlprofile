@@ -1213,6 +1213,11 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
         return {"ok": True, "file": r["file"], "access": r["access"], "tiers": r["tiers"]}
 
     # ---------- live news stream ----------
+    @app.get("/api/stream/config", tags=["stream"], dependencies=auth, summary="The stream's settings only (instant)")
+    def stream_config():
+        from . import stream
+        return {"ok": True, "settings": stream.settings()}
+
     @app.get("/api/stream", tags=["stream"], dependencies=auth, summary="Live news stream: pace, sources, latest articles")
     def stream_get(q: str = "", latest: int = 30):
         from . import stream

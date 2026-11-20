@@ -134,6 +134,12 @@ class NewsRequest(BaseModel):
                                                            "sources": ["feed", "news_tab", "all_tab"], "exclude": []}])
 
 
+class BulkLinks(BaseModel):
+    links: str = Field(..., examples=["https://www.kompas.com/...\nhttps://www.detik.com/..."])
+    tz: Tz = "WIB"
+    force: bool = False
+
+
 class CookieImport(BaseModel):
     cookies: str | list | dict = Field(..., description="Exported cookies: Cookie-Editor JSON, Playwright storage "
                                                         "state or a cookies.txt file's text")
@@ -664,6 +670,13 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
         err = JOB.start_news(body.keywords, body.start, body.end, body.tz, body.options)
         log(request, "started news search" if not err else "start refused", period=f"{body.start}..{body.end}",
             keywords=body.keywords[:20])
+        return answer(err)
+
+    @app.post("/api/news/bulk", tags=["jobs"], dependencies=op,
+              summary="Bulk links: read the articles of pasted links (no search, no date / keyword filter)")
+    def news_bulk(body: BulkLinks, request: Request):
+        err = JOB.start_bulk(body.links[:2_000_000], body.tz, body.force)
+        log(request, "started bulk links" if not err else "bulk links refused", links=body.links.count("http"))
         return answer(err)
 
     @app.post("/api/tools/decode", tags=["jobs"], dependencies=op,

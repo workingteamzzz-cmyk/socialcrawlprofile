@@ -329,6 +329,14 @@ Measured on a 4-CPU test machine with local test sites: ~37 articles/second (≈
 core. On the real internet the pace is set by how many articles the media publish and how fast their sites answer; the
 page shows the live pace and the "per day at this pace" figure.
 
+## Bulk links (read the articles of your own links)
+
+News Search → **Bulk links**: paste article links (one per line, thousands are fine) → **Process links**. Every link is
+opened and read like a search result — no search, no date or keyword filter. Google News links are turned into the
+media's own link first. Links the server read before are reused at once (tick *Read again even if already collected*
+for fresh text). Results arrive live on the News Links page and in an Online Excel file (Exports), and go to the
+reporting database, so News Stream and Reports show them too. API: `POST /api/news/bulk {"links": "...", "force": false}`.
+
 ## News Stream (reading view) and the client API
 
 **News Stream** (sidebar, News) reads the articles the Live Stream collected like a news app: filters on the left

@@ -606,7 +606,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
 .rd-face.pos{background:var(--ok-soft);color:var(--ok)}.rd-face.neg{background:var(--bad-soft);color:var(--bad)}.rd-face.neu{background:var(--soft);color:var(--muted)}
 .rd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px}
 .rd-filters input[type=date]{min-width:0;width:100%;padding-left:8px;padding-right:6px;font-size:13px}
-.rd-new[hidden]{display:none}
+.rd-new[hidden],.card[hidden],.btn[hidden]{display:none}
 .rd-grid.list{grid-template-columns:minmax(0,1fr)}
 .rd-card{display:flex;gap:14px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;cursor:pointer;box-shadow:var(--shadow);transition:border-color .12s,box-shadow .12s}
 .rd-card:hover{box-shadow:0 4px 14px rgba(16,24,40,.08)}
@@ -990,8 +990,17 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
     <!-- NEWS SEARCH -->
     <section class="page" id="p-nwsearch">
       <div class="pagehead"><div><h1>News Search</h1><p>Collect news articles for your keywords and period — media articles only. Two engines: <b>Multi-source</b> (Google News, every outlet, media sitemaps &amp; RSS, Bing, GDELT — no browser) or <b>Browser</b> (Google pages, the way a person searches). No API.</p></div></div>
+      <div class="seg nw-mode" id="nwMode" style="margin:0 0 16px"><button data-m="kw" class="on"><svg class="i"><use href="#i-search"/></svg> Search by keyword</button><button data-m="bulk"><svg class="i"><use href="#i-link"/></svg> Bulk links</button></div>
       <div class="collect">
-        <div style="display:flex;flex-direction:column;gap:16px">
+        <div style="display:flex;flex-direction:column;gap:16px" id="nwLeft">
+          <div class="card" id="nbCard" hidden><div class="card-hd"><h3>Bulk links</h3><div class="tools"><span class="tag likely" id="nbCount">0 links</span><button class="btn sm" id="nbClear">Clear</button></div></div>
+            <div class="card-bd">
+              <p class="hint" style="margin:0 0 8px">Paste article links — one per line, thousands are fine. Every link is opened and read straight away: <b>no search, no date or keyword filter</b>. Google News links are turned into the media's own link first.</p>
+              <div class="field" style="margin:0"><textarea id="nbLinks" rows="12" spellcheck="false" aria-label="Links to read" placeholder="https://www.kompas.com/...&#10;https://www.detik.com/..." style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px"></textarea></div>
+              <div class="opt-row" style="margin-top:8px"><div class="t"><b>Read again even if already collected</b><small>Fresh text for links the server read before (otherwise those are reused at once)</small></div>
+                <label class="switch"><input type="checkbox" id="nbForce"><span></span></label></div>
+              <p class="hint" style="margin:8px 0 0">Results: News Links page, an Online Excel file in Exports, and the reporting database — so they show in News Stream and Reports too.</p>
+            </div></div>
           <div class="card"><div class="card-hd"><h3>Keywords</h3><div class="tools"><button class="btn sm" id="nwClear">Clear</button></div></div>
             <div class="card-bd">
               <div class="kwbox" id="nwBox"><input id="nwInput" placeholder="Type a keyword and press Enter — e.g. pemadaman listrik, banjir Jakarta" autocomplete="off" aria-label="Add news keyword"></div>
@@ -1021,7 +1030,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
               <select id="nTemplate"><option value="online">Online (client format)</option><option value="medsos">Medsos (social media target)</option><option value="standard">Standard (this app)</option></select>
               <small class="hint">Online: DATE, TIME, TITLE, URL, IMAGE, MEDIA, AUTHOR, SUMMARY, CONTENT… IMAGE, AUTHOR, SUMMARY and CONTENT need “Full article” (always on with Multi-source). SENTIMENT, INFLUENCER and PERSON are filled from the article text (the team's rules, no AI).</small></div></div></div>
         </div>
-        <div style="display:flex;flex-direction:column;gap:16px">
+        <div style="display:flex;flex-direction:column;gap:16px" id="nwRight">
           <div class="card"><div class="card-hd"><h3>Run</h3></div>
             <div class="card-bd">
               <div class="stats">
@@ -2261,6 +2270,7 @@ function nwRender(){
 }
 function nwAlert(text, kind){ const m = $('nMsg'); m.textContent = text || ''; m.className = 'alert' + (text ? ' show ' + (kind || 'err') : ''); }
 $('nBtnStart').onclick = async () => {
+  if (NWMODE === 'bulk') return nbStart();
   NW.flush();
   if (!NW.items.length){ nwAlert('Add at least one keyword.'); $('nwInput').focus(); return; }
   if (!P3.start || !P3.end){ nwAlert('Choose a start and end date.'); return; }
@@ -2271,6 +2281,29 @@ $('nBtnStart').onclick = async () => {
   nwAlert(''); $('log').textContent = ''; logCount = 0; toast('News search started'); started();
 };
 $('nBtnStop').onclick = stopJob;
+let NWMODE = ls.get('nw_mode', 'kw');
+const nbLinks = () => [...new Set(($('nbLinks').value.match(/https?:\/\/[^\s,;<>"']+/g) || []))];
+function nwSetMode(m){
+  NWMODE = m; ls.set('nw_mode', m); const bulk = m === 'bulk';
+  document.querySelectorAll('#nwMode button').forEach(b => b.classList.toggle('on', b.dataset.m === m));
+  [...$('nwLeft').children].forEach(c => { c.hidden = c.id === 'nbCard' ? !bulk : bulk; });
+  [...$('nwRight').children].forEach((c, i) => { if (i) c.hidden = bulk; });     // the Run card stays
+  $('nBtnStart').innerHTML = bulk ? '<svg class="i"><use href="#i-link"/></svg>Process links' : '<svg class="i"><use href="#i-news"/></svg>Start news search';
+  $('nBtnSched').hidden = bulk; nbCount();
+  $('nwRight').children[0].querySelectorAll('.stats, .card-bd > p.hint').forEach(e => e.style.display = bulk ? 'none' : '');
+}
+function nbCount(){ const n = nbLinks().length; $('nbCount').textContent = `${fmt(n)} link${n === 1 ? '' : 's'}`; }
+document.querySelectorAll('#nwMode button').forEach(b => b.onclick = () => nwSetMode(b.dataset.m));
+$('nbLinks').addEventListener('input', nbCount);
+$('nbClear').onclick = () => { $('nbLinks').value = ''; nbCount(); };
+nwSetMode(NWMODE);
+async function nbStart(){
+  const n = nbLinks().length;
+  if (!n){ nwAlert('Paste at least one link (starting with http:// or https://).'); $('nbLinks').focus(); return; }
+  const r = await api('/api/news/bulk', {links: $('nbLinks').value, tz: (P3 && P3.tz) || 'WIB', force: $('nbForce').checked});
+  if (r.error){ nwAlert(r.error); return; }
+  nwAlert(''); $('log').textContent = ''; logCount = 0; toast(`Reading ${fmt(n)} links`); started();
+}
 const NEWS_COLS = {
   links: [['keyword', 'Keyword'], ['url', 'Link']],
   basic: [['published', 'Date'], ['keyword', 'Keyword'], ['media', 'Media'], ['title', 'Title'], ['url', 'Link']],

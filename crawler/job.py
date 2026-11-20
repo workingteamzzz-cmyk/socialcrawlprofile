@@ -946,6 +946,84 @@ class Job:
                  + (f" → {files[0]}" if files else ""))
         return None
 
+    def start_bulk(self, text, tz_name: str = "WIB", force: bool = False) -> str | None:
+        """Bulk links: paste article links (thousands are fine) — every one is opened and read like a news search's
+        result, no search and no date / keyword filter. Results: News Links page, an Online Excel file, the
+        reporting database (so News Stream and Reports have them too)."""
+        from . import news_multi
+        links = news_multi.clean_links(text)
+        if not links:
+            return "Paste at least one link (starting with http:// or https://)."
+        if len(links) > news_multi.MAX_BULK:
+            return f"Up to {news_multi.MAX_BULK:,} links per run — split the list."
+        miss = news_multi.check()
+        if miss:
+            return miss
+        return self._start("news", self._bulk, links, tz_name if tz_name in TIMEZONES else "WIB", bool(force))
+
+    def _bulk(self, links, tz_name, force):
+        from . import archive, news_multi, templates
+        from .news import _key
+        from .paths import APP_DATA
+        tz = timezone(timedelta(hours=TIMEZONES.get(tz_name, 7)))
+        today = datetime.now(tz)
+        b = self.data["news"]
+        b["period"] = None                          # pasted links: no period
+        b["meta"] = {"keywords": [news_multi.BULK_LABEL], "detail": "full", "cap": 0, "template": "online",
+                     "bulk": len(links)}
+        self.total = len(links)
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        base = self._out_base(f"bulk_links_{today:%Y%m%d_%H%M%S}", "online", today.replace(tzinfo=None), tz)
+        xlsx, csvp = (os.path.join(OUTPUT_DIR, base + ext) for ext in (".xlsx", ".csv"))
+        seen: dict[str, dict] = {}
+
+        def save(paths=None, force=False):
+            if not force and not self._autosave_due():
+                return True
+            x, c = paths or (xlsx, csvp)
+            rows = sorted(seen.values(), key=lambda r: -(r.get("ts") or 0))
+            return self._safe_save(lambda: templates.write("online", x, c, rows, tz, True), x)
+
+        def live(r):
+            k = _key(r["url"])
+            archive.add_rows("online", [r], tz)
+            with self.lock:
+                if k in seen:
+                    return
+                r["keywords"] = [r["keyword"]]
+                seen[k] = r
+                b["links"].append(r)
+                b["version"] += 1
+                self.done = len(seen)
+                n = len(seen)
+                if self._autosave_due():
+                    save(force=True)
+            if n == 1 or n % 25 == 0:
+                self.log(f"   🟢 Live: {n} article(s) read — in the dashboard, the reporting database and the Excel file")
+        self.log(f"📥 Bulk links: {len(links)} link(s) — every article is opened and read "
+                 f"(no search, no date or keyword filter){' — read again even if collected before' if force else ''}")
+        self.current = f"Reading {len(links)} pasted links"
+        rows, stat = news_multi.import_links(links, tz, self.log, self.stop_flag, APP_DATA, OUTPUT_DIR, force,
+                                             on_row=live)
+        with self.lock:                           # the final rows (with sentiment) replace the live copies
+            for r in rows:
+                r["keywords"] = [r["keyword"]]
+                seen[_key(r["url"])] = r
+            b["links"][:] = list(seen.values())
+            b["version"] += 1
+            self.done = len(seen)
+        failed = max(0, len(links) - len(seen))
+        st = {"keyword": news_multi.BULK_LABEL, "status": "ok", "count": len(seen),
+              "note": f"{len(seen)} of {len(links)} links read" + (f" — {failed} could not be read (not an article, "
+                                                                   "blocked, or offline)" if failed else "")}
+        b["statuses"].append(st)
+        files = self._finish_files(save, [xlsx, csvp], True)
+        b["files"] = files
+        self._archive("online", seen.values(), tz)
+        stopped = self.stop_flag.is_set()
+        self.log(("⏹ Stopped. " if stopped else "✅ Done. ") + f"{len(seen)} of {len(links)} articles read"
+                 + (f" → {files[0]}" if files else ""))
+
     def start_decode(self, name: str, data: bytes) -> str | None:
         """Fix the Google News links in an uploaded .xlsx/.csv/.txt file (the team's decoder, inside the app)."""
         base, ext = os.path.splitext(os.path.basename(name or "file"))

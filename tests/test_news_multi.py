@@ -296,3 +296,36 @@ def test_site_pages_never_in_the_online_file():
         ("Mengungkap Fakta Tersembunyi di Balik Stasiun Kereta Api Tertua", "https://a.com/travel/2026/11/20/stasiun")]]
     cols, values = templates.rows_for("online", rows, timezone.utc)
     assert [v[cols.index("TITLE")] for v in values] == ["Mengungkap Fakta Tersembunyi di Balik Stasiun Kereta Api Tertua"]
+
+
+def test_bulk_links_read_every_pasted_article(tmp_path, monkeypatch, fake_net):
+    """Bulk links: pasted links are read like search results — no date / keyword filter — into the Online file,
+    the dashboard and the reporting database (News Stream / Reports)."""
+    from crawler import archive, gnews, job, news_multi, paths
+    monkeypatch.setattr(job, "OUTPUT_DIR", str(tmp_path / "out"))
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    monkeypatch.setattr(gnews.Decoder, "decode", lambda self, u: ("https://radarbogor.id/2026/11/10/listrik-padam-lagi",
+                                                                  "OK"))
+    assert news_multi.clean_links("x https://a.id/1, https://a.id/1\nftp://b <https://c.id/2>") == \
+        ["https://a.id/1", "https://c.id/2"]
+    j = job.Job()
+    assert j.start_bulk("tidak ada link") and "Paste" in j.start_bulk("")
+    text = ("https://www.detik.com/jabar/berita/d-1/pemadaman-listrik-bogor\n"
+            "https://www.kompas.com/tag/pln\n"
+            "https://news.google.com/rss/articles/CBMiabc\n")
+    assert j.start_bulk(text) is None
+    t = time.time()
+    while j.running and time.time() - t < 60:
+        time.sleep(0.1)
+    s = j.state()
+    assert not s["error"], s["logs"]
+    news = s["modes"]["news"]
+    assert news["count"] == 2                      # the Cibinong article (no keyword needed) + detik; not the tag page
+    online = [f for f in news["files"] if "_Online_" in f and f.endswith(".xlsx")]
+    ws = openpyxl.load_workbook(tmp_path / "out" / online[0]).active
+    head = [c.value for c in ws[1]]
+    urls = {dict(zip(head, [c.value for c in r]))["URL"] for r in ws.iter_rows(min_row=2)}
+    assert urls == {"https://www.detik.com/jabar/berita/d-1/pemadaman-listrik-bogor",
+                    "https://radarbogor.id/2026/11/10/listrik-padam-lagi"}
+    assert archive.stats()["online"]["items"] == 2
+    assert j.results_view("news")["statuses"][0]["note"].startswith("2 of 3 links read")

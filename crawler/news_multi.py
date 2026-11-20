@@ -169,7 +169,7 @@ def _shared_reads(ttl: float = 15 * 60):
     return undo
 
 
-def _live(Database, on_hit, start: str, end: str, include_review: bool):
+def _live(Database, on_hit, start: str, end: str, include_review: bool, need_keyword: bool = True):
     """Every article the engine accepts is handed over the moment it has been read — not at the end of the run —
     so it reaches the reporting database, the dashboard and the Excel file while the search goes on. Done by
     wrapping three of the engine's database calls for this run (its code unchanged). Returns an undo function."""
@@ -200,7 +200,7 @@ def _live(Database, on_hit, start: str, end: str, include_review: bool):
             data = art.pop(url, None)                  # always: rejected articles never pile up in memory
             data = data if status in ok else None
             kw = kw_of.pop(url, "")
-        if not data or not kw:
+        if not data or (need_keyword and not kw):
             return
         d = str(data.get("date") or "")[:10]
         if start and end and not (start <= d <= end):
@@ -362,6 +362,94 @@ def run(keywords: list[str], start: str, end: str, opt, tz, log, stop_event: thr
             extra.append(dest)
     stat["needs_review_left"] = sum(1 for h in hits if h["status"] == "needs_review")
     return rows, extra, stat
+
+
+MAX_BULK = 20000
+
+
+def clean_links(text_or_list) -> list[str]:
+    """Pasted text (one per line, or separated by spaces / commas) -> unique http(s) links, in order."""
+    items = text_or_list if isinstance(text_or_list, list) else [text_or_list]
+    out, seen = [], set()
+    for line in items:
+        for u in re.split(r"[\s,;]+", str(line or "")):
+            u = u.strip().strip("<>\"'()[]")
+            if re.match(r"https?://[^/\s]+\.[^/\s]+", u) and u not in seen:
+                seen.add(u)
+                out.append(u)
+    return out
+
+
+def import_links(links: list[str], tz, log, stop_event: threading.Event, data_dir: str, out_dir: str,
+                 force: bool = False, on_row=None) -> tuple[list[dict], dict]:
+    """Bulk links: read every article of the user's own links — no search, no date or keyword filter (the links were
+    picked by hand). Google News links are turned into the media's own link first. Returns (rows, statistics)."""
+    from .medmas import pipeline
+    from .medmas.config import Config
+    from .medmas.db import Database
+    work = os.path.join(data_dir, "news_multi")
+    os.makedirs(work, exist_ok=True)
+    gn = [u for u in links if "news.google.com/" in u]
+    if gn:
+        from .gnews import Decoder
+        dec, real, fixed = Decoder(stop=stop_event), {}, 0
+        log(f"🔗 {len(gn)} Google News link(s): finding the media's own link first…")
+        for u in gn:
+            if stop_event.is_set():
+                break
+            r, status = dec.decode(u)
+            if status == "OK":
+                real[u] = r
+                fixed += 1
+        links = list(dict.fromkeys(real.get(u, u) for u in links))
+        log(f"   {fixed} of {len(gn)} decoded" + ("" if fixed == len(gn) else " — the rest are tried as they are"))
+    cfg = Config(keywords=[], media_dictionary_file=_dictionary(data_dir), threads=8,
+                 output_folder=os.path.join(work, "export_bulk"), db_path=os.path.join(work, "medmascrawler.db"))
+    if not _RUN_LOCK.acquire(blocking=False):
+        raise RuntimeError("Another multi-source news run is still going.")
+    done = threading.Event()
+
+    def watch():
+        while not done.wait(0.5):
+            if stop_event.is_set():
+                pipeline.request_stop()
+                return
+    try:
+        from . import media_db
+        media_db.install()                            # paid media: articles read with their logins
+    except Exception:  # noqa: BLE001
+        pass
+
+    def hit(h):
+        r = _row(h, tz)
+        r["keyword"] = BULK_LABEL
+        on_row(r)
+    undo = _live(Database, hit if on_row else None, "", "", True, need_keyword=False)
+    try:
+        pipeline.clear_stop()
+        threading.Thread(target=watch, daemon=True).start()
+        if os.path.isdir(cfg.output_folder):
+            shutil.rmtree(cfg.output_folder, ignore_errors=True)
+        stat = pipeline.import_links(cfg, links, log=log, label="", force=force)
+    finally:
+        done.set()
+        undo()
+        pipeline.clear_stop()
+        _RUN_LOCK.release()
+    db = Database(cfg.db_path)
+    try:
+        hits = results(db, stat["batch"], "", "", True)
+    finally:
+        db.close()
+    rows = []
+    for h in hits:
+        r = _row(h, tz)
+        r["keyword"] = BULK_LABEL
+        rows.append(r)
+    return rows, stat
+
+
+BULK_LABEL = "Bulk links"
 
 
 def check() -> str | None:

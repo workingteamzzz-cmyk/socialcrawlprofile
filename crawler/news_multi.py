@@ -140,7 +140,12 @@ def _shared_reads(ttl: float = 15 * 60):
     orig_feed, orig_sm = rss_feeds.fetch_feed, sitemaps._fetch
 
     def once(key, fn):
+        if threading.current_thread().name.startswith("stream"):
+            return fn()                                # the live stream reads fresh, and is never cached here
         with lock:
+            if len(cache) > 20000:                     # expired entries leave; memory stays bounded
+                for k in [k for k, v in cache.items() if _t.time() - v[0] >= ttl]:
+                    cache.pop(k, None)
             hit = cache.get(key)
         if hit and _t.time() - hit[0] < ttl:
             if isinstance(hit[1], Exception):
@@ -192,8 +197,9 @@ def _live(Database, on_hit, start: str, end: str, include_review: bool):
     def set_status(self, url, status):
         orig_s(self, url, status)
         with lock:
-            data = art.pop(url, None) if status in ok else None
-            kw = kw_of.get(url, "")
+            data = art.pop(url, None)                  # always: rejected articles never pile up in memory
+            data = data if status in ok else None
+            kw = kw_of.pop(url, "")
         if not data or not kw:
             return
         d = str(data.get("date") or "")[:10]

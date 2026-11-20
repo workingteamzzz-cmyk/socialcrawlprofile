@@ -278,13 +278,37 @@ def test_every_link_not_yet_known_is_taken_old_ones_behind_the_news(st, monkeypa
          ('["https://y.id/sitemap.xml"]',))
     st.running = True
     try:
-        assert st.check_source(st.q("SELECT * FROM sources")[0]) == 4    # today + 2 old (share per visit) + front page
+        assert st.check_source(st.q("SELECT * FROM sources")[0]) == 3    # today + 2 old; first visit: front page = old
         urls = [r["url"] for r in st.q("SELECT url FROM articles")]
-        assert "https://y.id/nasional/2026/berita-di-beranda-saja" in urls and not any("lain.com" in u for u in urls)
+        assert not any("lain.com" in u for u in urls)
         first = [st.next_job()[1]["url"]]
         assert first[0].endswith(("kabar-terbaru-hari-ini", "berita-di-beranda-saja"))     # news first
-        st.check_source(st.q("SELECT * FROM sources")[0])                 # next visit: the next share of old links
-        assert st.q("SELECT COUNT(*) n FROM articles")[0]["n"] == 6
+        st.check_source(st.q("SELECT * FROM sources")[0])                 # next visit: front page news + 2 more old
+        urls = [r["url"] for r in st.q("SELECT url FROM articles")]
+        assert len(urls) == 6 and "https://y.id/nasional/2026/berita-di-beranda-saja" in urls
         assert st.q("SELECT SUM(n) n FROM domain_days")[0]["n"] == 2     # activity counts new articles only
     finally:
         st.running = False
+
+
+def test_restart_never_leaves_old_threads_and_purged_links_are_not_read_again(st, monkeypatch):
+    import threading
+    from crawler import stream
+    monkeypatch.setattr(st, "sync_sources", lambda log=print: {"rss": 0, "sitemaps": 0, "added": 0})
+    monkeypatch.setattr(stream.Stream, "health_loop", lambda self: None)
+    st.cfg = stream.save_settings({"threads": 3})
+    before = threading.active_count()
+    for _ in range(3):
+        st.start(lambda m: None)
+        st.stop()
+    time.sleep(0.5)
+    assert threading.active_count() <= before + 1 and not st.running and st.qn == 0
+    # purge keeps the keys: the same old link is not taken again
+    st.cfg["retention_days"] = 1
+    st.x("INSERT INTO articles(key, url, domain, discovered, status) VALUES ('a.id/berita/x-y-z','https://a.id/berita/x-y-z','a.id',?, 'success')",
+         (time.time() - 3 * 86400,))
+    assert st.purge() == 1 and st.q("SELECT COUNT(*) n FROM articles")[0]["n"] == 0
+    assert st.add_found([{"url": "https://a.id/berita/x-y-z", "domain": "a.id"}], "rss") == 0
+    assert st.add_found([{"url": "https://a.id/berita/baru-sekali-ini", "domain": "a.id"}], "rss") == 1
+    st.recent.extend([time.time()] * 10)
+    assert st.status()["per_minute"] == 2.0

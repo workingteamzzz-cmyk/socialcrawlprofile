@@ -52,6 +52,8 @@ def main():
         telegram_bot.start()                  # TELEGRAM_BOT_TOKEN set: the team's chat can check and tap buttons
         from crawler import stream
         stream.autostart()                    # the live news stream, if it was left on
+        from crawler import insights
+        insights.start()                         # search index, top stories, spike alerts
     except Exception as e:  # noqa: BLE001
         print(f"Note: schedules are not running ({e}).")
     print(f"Account lists and results: {os.path.dirname(paths.LISTS_DIR)}")

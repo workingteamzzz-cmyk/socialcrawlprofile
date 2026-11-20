@@ -64,6 +64,11 @@ CREATE TABLE IF NOT EXISTS sources(
   id TEXT PRIMARY KEY, kind TEXT, domain TEXT, url TEXT DEFAULT '', next_check REAL, interval REAL,
   hits INTEGER DEFAULT 0, fails INTEGER DEFAULT 0, etag TEXT DEFAULT '', modified TEXT DEFAULT '', checked REAL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS s_next ON sources(next_check);
+CREATE INDEX IF NOT EXISTS s_domain ON sources(domain);
+CREATE INDEX IF NOT EXISTS a_succ ON articles(status, fetched);
+CREATE INDEX IF NOT EXISTS a_pub ON articles(status, pub_date);
+CREATE INDEX IF NOT EXISTS a_disc ON articles(discovered);
+CREATE TABLE IF NOT EXISTS seen(key TEXT PRIMARY KEY, t REAL);
 CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS site_health(domain TEXT PRIMARY KEY, checked REAL, alive INTEGER, sitemaps INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS domain_days(domain TEXT, day TEXT, n INTEGER DEFAULT 0, PRIMARY KEY(domain, day));
@@ -155,6 +160,9 @@ class Stream:
                 pass
         self._db.commit()
         self.lock = threading.RLock()
+        self._ctl = threading.Lock()           # start / stop never overlap
+        self._local = threading.local()        # per-thread read-only connections (reads without the lock)
+        self.qn = 0                            # articles waiting in the in-memory queue
         self.stop_event = threading.Event()
         self.threads: list[threading.Thread] = []
         self.running = False
@@ -182,6 +190,15 @@ class Stream:
     def q(self, sql: str, args=()):
         with self.lock:
             return self._db.execute(sql, args).fetchall()
+
+    def rq(self, sql: str, args=()):
+        """A read on this thread's own read-only connection: big reads never hold up the readers (WAL)."""
+        c = getattr(self._local, "c", None)
+        if c is None:
+            c = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True, timeout=30, check_same_thread=False)
+            c.row_factory = sqlite3.Row
+            self._local.c = c
+        return c.execute(sql, args).fetchall()
 
     def x(self, sql: str, args=()):
         with self.lock:
@@ -255,6 +272,7 @@ class Stream:
                 q = self.by_domain.pop(d, None)
                 for j in q or []:
                     self.queued.discard(j["key"])
+                    self.qn -= 1
                 self.tiers.pop(d, None)
             self._db.commit()
 
@@ -308,13 +326,14 @@ class Stream:
         tier now asks for an earlier check are moved forward."""
         today = datetime.now(WIB)
         d7, d30 = (today - timedelta(days=6)).strftime("%Y-%m-%d"), (today - timedelta(days=29)).strftime("%Y-%m-%d")
-        c7 = {r["domain"]: r["n"] for r in self.q("SELECT domain, SUM(n) n FROM domain_days WHERE day >= ? "
-                                                    "GROUP BY domain HAVING n > 0", (d7,))}
-        c30 = {r["domain"] for r in self.q("SELECT domain FROM domain_days WHERE day >= ? GROUP BY domain "
-                                            "HAVING SUM(n) > 0", (d30,))}
+        c7 = {r["domain"]: r["n"] for r in self.rq("SELECT domain, SUM(n) n FROM domain_days WHERE day >= ? "
+                                                     "GROUP BY domain HAVING n > 0", (d7,))}
+        c30 = {r["domain"] for r in self.rq("SELECT domain FROM domain_days WHERE day >= ? GROUP BY domain "
+                                             "HAVING SUM(n) > 0", (d30,))}
         ranked = sorted(c7, key=lambda d: -c7[d])
         top = set(ranked[:self.cfg["top_n"]])
-        rows = self.q("SELECT domain, MAX(fails) f, MAX(checked) c FROM sources GROUP BY domain")
+        rows = self.rq("SELECT domain, MAX(CASE WHEN kind='sitemap' THEN fails END) f, MAX(checked) c FROM sources "
+                       "GROUP BY domain")                      # a broken RSS feed alone never makes an outlet dead
         tiers = {}
         for r in rows:
             d = r["domain"]
@@ -363,6 +382,8 @@ class Stream:
             for row, old in rows:
                 if old and room_old <= 0:
                     continue                                   # older links: a share per visit, the rest next time
+                if self._db.execute("SELECT 1 FROM seen WHERE key=?", (row[0],)).fetchone():
+                    continue                                   # read before and purged since: not again
                 cur = self._db.execute("INSERT OR IGNORE INTO articles(key, url, domain, title, source, feed_date, "
                                        "feed_time, discovered) VALUES (?,?,?,?,?,?,?,?)", row)
                 if cur.rowcount:
@@ -380,6 +401,8 @@ class Stream:
             self.counts["found"] += len(fresh)
             if self.running:                     # straight to the readers, at the front: newest first, no waiting
                 for (key, url, dom, title, _src, fd, ft, _t), old in fresh:
+                    if self.qn >= 4000 and (old or not front):
+                        continue                       # the queue is full: it waits in the database (refill)
                     self._enqueue({"key": key, "url": url, "domain": dom, "title": title, "feed_date": fd,
                                    "feed_time": ft}, front=front and not old)       # older ones wait behind the news
         return len(fresh)
@@ -388,6 +411,7 @@ class Stream:
         if job["key"] in self.queued:
             return
         self.queued.add(job["key"])
+        self.qn += 1
         dom = job["domain"] or norm_key(job["url"]).split("/")[0]
         if dom not in self.by_domain:
             self.by_domain[dom] = deque()
@@ -472,7 +496,8 @@ class Stream:
             got = self.homepage_links(dom)
             if got is not None:
                 ok_any = True
-                items += got
+                first = not (src["checked"] if "checked" in src.keys() else 0)
+                items += [{**g, "old": True} for g in got] if first else got   # first visit: the menu, not news
         if not ok_any:
             if roots and src["url"]:                         # known sitemaps all failed: look for them again next time
                 extra["url"] = ""
@@ -513,7 +538,7 @@ class Stream:
     # ----- readers -----
     def refill(self) -> None:
         with self.lock:
-            if sum(len(d) for d in self.by_domain.values()) > 4000:
+            if self.qn > 4000:
                 return
             rows = self._db.execute("SELECT key, url, domain, title, feed_date, feed_time FROM articles "
                                     "WHERE status='new' ORDER BY discovered DESC LIMIT 3000").fetchall()
@@ -538,6 +563,7 @@ class Stream:
                 if dom in self.busy_domains or self.next_ok.get(dom, 0) > now:
                     continue
                 self.busy_domains.add(dom)
+                self.qn -= 1
                 return dom, q.popleft()
         return None
 
@@ -621,7 +647,10 @@ class Stream:
             self.bump("failed")
         if matched:
             self.bump("matched")
-            self.to_archive(job, res, d, t, matched)
+            try:
+                self.to_archive(job, res, d, t, matched)
+            except Exception as e:  # noqa: BLE001  the article itself was read fine
+                self.last_error = f"reports: {str(e)[:120]}"
         return status
 
     def to_archive(self, job, res, d, t, matched) -> None:
@@ -635,10 +664,11 @@ class Stream:
         archive.add_rows("online", [row], WIB)
 
     def reader_loop(self) -> None:
-        while not self.stop_event.is_set():
+        ev = self.stop_event                                 # this run's event: a restart never revives old threads
+        while not ev.is_set():
             got = self.next_job()
             if not got:
-                self.stop_event.wait(0.3)
+                ev.wait(0.3)
                 continue
             dom, job = got
             try:
@@ -659,51 +689,80 @@ class Stream:
 
     # ----- discovery + housekeeping -----
     def discovery_loop(self) -> None:
-        with ThreadPoolExecutor(max_workers=self.cfg["discovery_threads"]) as ex:
-            while not self.stop_event.is_set():
-                with self.lock:
-                    room = self.cfg["discovery_threads"] * 2 - len(self.inflight_sources)
-                if room > 0:
-                    for src in self.due_sources(room):
-                        with self.lock:
-                            if src["id"] in self.inflight_sources:
-                                continue
-                            self.inflight_sources.add(src["id"])
-                        ex.submit(self._check_one, src)
-                self.stop_event.wait(1.0)
+        ev = self.stop_event
+        with ThreadPoolExecutor(max_workers=self.cfg["discovery_threads"], thread_name_prefix="stream-src") as ex:
+            while not ev.is_set():
+                try:
+                    with self.lock:
+                        room = self.cfg["discovery_threads"] * 2 - len(self.inflight_sources)
+                    if room > 0:
+                        for src in self.due_sources(room):
+                            with self.lock:
+                                if src["id"] in self.inflight_sources:
+                                    continue
+                                self.inflight_sources.add(src["id"])
+                            ex.submit(self._check_one, src, ev)
+                except Exception as e:  # noqa: BLE001  a database hiccup never ends discovery
+                    self.last_error = f"discovery: {str(e)[:120]}"
+                ev.wait(1.0)
 
-    def _check_one(self, src) -> None:
+    def _check_one(self, src, ev=None) -> None:
         try:
-            if not self.stop_event.is_set():
+            if not (ev or self.stop_event).is_set():
                 self.check_source(src)
         finally:
             with self.lock:
                 self.inflight_sources.discard(src["id"])
 
     def house_loop(self) -> None:
+        ev = self.stop_event
         last_purge = last_tiers = 0.0
-        while not self.stop_event.is_set():
-            self.flush_counts()
-            self.refill()
+        while not ev.is_set():
+            for name, step in (("counts", self.flush_counts), ("queue", self.refill)):
+                try:
+                    step()
+                except Exception as e:  # noqa: BLE001  each step on its own: one failing never stops the others
+                    self.last_error = f"{name}: {str(e)[:120]}"
             if time.time() - last_tiers > 600:
                 last_tiers = time.time()
                 try:
                     self.compute_tiers()
-                except sqlite3.Error as e:
-                    self.last_error = f"tiers: {e}"
+                except Exception as e:  # noqa: BLE001
+                    self.last_error = f"tiers: {str(e)[:120]}"
             if time.time() - last_purge > 1800:
                 last_purge = time.time()
-                self.purge()
-                self.cfg = settings()
-            self.stop_event.wait(3.0)
-        self.flush_counts()
+                try:
+                    self.purge(ev)
+                    self.cfg = settings()
+                except Exception as e:  # noqa: BLE001
+                    self.last_error = f"purge: {str(e)[:120]}"
+            ev.wait(3.0)
+        try:
+            self.flush_counts()
+        except Exception:  # noqa: BLE001
+            pass
 
-    def purge(self) -> int:
+    def purge(self, ev=None) -> int:
+        """Articles older than retention_days leave, in small chunks (the readers never wait long); their keys stay in
+        `seen` for 60 days so the same old links are not read again every week."""
         cut = time.time() - self.cfg["retention_days"] * 86400
-        n = self.x("DELETE FROM articles WHERE discovered < ?", (cut,))
+        n = 0
+        while not (ev and ev.is_set()):
+            with self.lock:
+                rows = self._db.execute("SELECT rowid, key, discovered FROM articles WHERE discovered < ? LIMIT 5000",
+                                        (cut,)).fetchall()
+                if not rows:
+                    break
+                self._db.executemany("INSERT OR IGNORE INTO seen(key, t) VALUES (?,?)",
+                                     [(r["key"], r["discovered"]) for r in rows])
+                self._db.executemany("DELETE FROM articles WHERE rowid=?", [(r["rowid"],) for r in rows])
+                self._db.commit()
+            n += len(rows)
+            time.sleep(0.05)
         day = (datetime.now(WIB) - timedelta(days=max(30, self.cfg["retention_days"]))).strftime("%Y-%m-%d")
         self.x("DELETE FROM hourly WHERE hour < ?", (day,))
         self.x("DELETE FROM domain_days WHERE day < ?", ((datetime.now(WIB) - timedelta(days=35)).strftime("%Y-%m-%d"),))
+        self.x("DELETE FROM seen WHERE t < ?", (time.time() - 60 * 86400,))
         return n
 
     # ----- late articles: the daily catch-up sweep -----
@@ -717,15 +776,16 @@ class Stream:
     def run_catchup(self) -> dict:
         """Every reachable outlet's sitemaps for the last `catchup_days` days, once: links published earlier but
         listed late, or missed while an outlet was checked rarely. Known links are skipped (one row per article)."""
+        ev = self.stop_event
         days = int(self.cfg.get("catchup_days") or 0)
-        srcs = [r for r in self.q("SELECT * FROM sources WHERE kind='sitemap' AND fails < 3 AND checked > 0")
+        srcs = [r for r in self.rq("SELECT * FROM sources WHERE kind='sitemap' AND fails < 3 AND checked > 0")
                 if not self.excluded("https://" + r["domain"])] if days else []
         with self.lock:
             self.catchup = {"running": True, "done": 0, "total": len(srcs), "found": 0, "started": time.time(),
                             "finished": 0, "days": days}
 
         def one(src):
-            if self.stop_event.is_set():
+            if ev.is_set():
                 return
             try:
                 n, _failed, _extra = self.check_sitemap(src, catchup=days)
@@ -734,11 +794,13 @@ class Stream:
             with self.lock:
                 self.catchup["done"] += 1
                 self.catchup["found"] += n
-        with ThreadPoolExecutor(max_workers=max(2, self.cfg["discovery_threads"] // 2)) as ex:
+        with ThreadPoolExecutor(max_workers=max(2, self.cfg["discovery_threads"] // 2), thread_name_prefix="stream-cu") as ex:
             list(ex.map(one, srcs))
         with self.lock:
             self.catchup.update(running=False, finished=time.time())
             out = dict(self.catchup)
+        if ev.is_set():
+            return out                                      # cut short: today's sweep runs again after the restart
         self.meta("catchup_last", datetime.now(WIB).strftime("%Y-%m-%d"))
         self.meta("catchup_result", json.dumps({k: out[k] for k in ("total", "found", "started", "finished")}))
         return out
@@ -752,7 +814,8 @@ class Stream:
     def run_health(self) -> dict:
         """Every registered outlet once: does it answer, does it list sitemaps. A site that is down is not crawled
         (no feed, no sitemap) until the next site check; one that came back is put back in the rotation at once."""
-        doms = sorted({r["domain"] for r in self.q("SELECT DISTINCT domain FROM sources WHERE kind='sitemap'")})
+        ev = self.stop_event
+        doms = sorted({r["domain"] for r in self.rq("SELECT DISTINCT domain FROM sources WHERE kind='sitemap'")})
         doms = [d for d in doms if not self.excluded("https://" + d)]
         with self.lock:
             self.health = {"running": True, "done": 0, "total": len(doms), "alive": 0, "down": 0,
@@ -762,7 +825,7 @@ class Stream:
         results: dict = {}
 
         def probe(d):
-            if self.stop_event.is_set():
+            if ev.is_set():
                 return
             try:
                 alive, roots = self.check_site(d)
@@ -773,16 +836,20 @@ class Stream:
                 self.health["done"] += 1
                 self.health["alive" if alive else "down"] += 1
         workers = max(4, self.cfg["discovery_threads"])
-        with ThreadPoolExecutor(max_workers=workers) as ex:
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="stream-hc") as ex:
             list(ex.map(probe, doms))
         down = [d for d, (a, _r) in results.items() if not a]
-        if down and not self.stop_event.is_set():           # a site that looked down gets a second chance
-            self.stop_event.wait(60)
+        if down and not ev.is_set():                        # a site that looked down gets a second chance
+            ev.wait(60)
             with self.lock:
                 self.health["down"] -= len(down)
                 self.health["done"] -= len(down)
-            with ThreadPoolExecutor(max_workers=workers) as ex:
+            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="stream-hc") as ex:
                 list(ex.map(probe, down))
+        if ev.is_set():                                     # stopped part-way: mark nothing
+            with self.lock:
+                self.health.update(running=False, finished=time.time())
+                return dict(self.health)
         down = [d for d, (a, _r) in results.items() if not a]
         if results and len(down) > 0.6 * len(results):
             # most of the internet "down" at once is this server's connection, not the sites: change nothing
@@ -824,41 +891,44 @@ class Stream:
         return nxt.timestamp()
 
     def health_loop(self) -> None:
+        ev = self.stop_event
         first = True
-        while not self.stop_event.is_set():
-            now = datetime.now(WIB)
-            week = now.strftime("%G-W%V")
-            last = float(self.meta("health_last") or 0)
-            at_start = first and self.cfg.get("health_on_start", True) and time.time() - last > 20 * 3600
-            weekly = (now.weekday() == self.cfg.get("health_weekday", 6) and now.hour >= self.cfg.get("health_hour", 2)
-                      and self.meta("health_week") != week)
-            first = False
-            if at_start or weekly or self.health_now.is_set():
-                self.health_now.clear()
-                if weekly:
-                    self.meta("health_week", week)
-                try:
+        while not ev.is_set():
+            try:
+                now = datetime.now(WIB)
+                week = now.strftime("%G-W%V")
+                last = float(self.meta("health_last") or 0)
+                at_start = first and self.cfg.get("health_on_start", True) and time.time() - last > 20 * 3600
+                weekly = (now.weekday() == self.cfg.get("health_weekday", 6)
+                          and now.hour >= self.cfg.get("health_hour", 2) and self.meta("health_week") != week)
+                first = False
+                if at_start or weekly or self.health_now.is_set():
+                    self.health_now.clear()
+                    if weekly:
+                        self.meta("health_week", week)
                     self.run_health()
-                except Exception as e:  # noqa: BLE001
-                    self.last_error = f"site check: {str(e)[:120]}"
-                    with self.lock:
-                        self.health["running"] = False
-            self.stop_event.wait(30)
+            except Exception as e:  # noqa: BLE001
+                self.last_error = f"site check: {str(e)[:120]}"
+                with self.lock:
+                    self.health["running"] = False
+            ev.wait(30)
 
     def catchup_loop(self) -> None:
-        while not self.stop_event.is_set():
-            now = datetime.now(WIB)
-            due = (self.cfg.get("catchup_days") and now.hour >= self.cfg.get("catchup_hour", 1)
-                   and self.meta("catchup_last") != now.strftime("%Y-%m-%d"))
-            week = now.strftime("%G-W%V")
-            if (self.cfg.get("weekly_report", True) and now.weekday() == self.cfg.get("report_weekday", 0)
-                    and now.hour >= self.cfg.get("report_hour", 7) and self.meta("weekly_last") != week):
-                self.meta("weekly_last", week)
-                try:
+        ev = self.stop_event
+        while not ev.is_set():
+            due = False
+            try:
+                now = datetime.now(WIB)
+                due = bool(self.cfg.get("catchup_days") and now.hour >= self.cfg.get("catchup_hour", 1)
+                           and self.meta("catchup_last") != now.strftime("%Y-%m-%d"))
+                week = now.strftime("%G-W%V")
+                if (self.cfg.get("weekly_report", True) and now.weekday() == self.cfg.get("report_weekday", 0)
+                        and now.hour >= self.cfg.get("report_hour", 7) and self.meta("weekly_last") != week):
+                    self.meta("weekly_last", week)
                     from . import media_db
                     media_db.send_report()
-                except Exception as e:  # noqa: BLE001
-                    self.last_error = f"weekly report: {str(e)[:120]}"
+            except Exception as e:  # noqa: BLE001
+                self.last_error = f"weekly report: {str(e)[:120]}"
             if due or self.catchup_now.is_set():
                 self.catchup_now.clear()
                 try:
@@ -867,7 +937,7 @@ class Stream:
                     self.last_error = f"catch-up: {str(e)[:120]}"
                     with self.lock:
                         self.catchup["running"] = False
-            self.stop_event.wait(30)
+            ev.wait(30)
 
     # ----- every article of a day -> the team's Online file -----
     def export_day(self, day: str, out_dir: str) -> str:
@@ -880,7 +950,7 @@ class Stream:
         from . import templates, online_clean as oc
         if not re.match(r"\d{4}-\d{2}-\d{2}$", day or ""):
             raise ValueError("Date as YYYY-MM-DD.")
-        total = self.q("SELECT COUNT(*) n FROM articles WHERE status='success' AND pub_date=?", (day,))[0]["n"]
+        total = self.rq("SELECT COUNT(*) n FROM articles WHERE status='success' AND pub_date=?", (day,))[0]["n"]
         with self.lock:
             self.export = {"running": True, "done": 0, "total": total, "file": "", "error": "", "day": day}
         name = f"Stream_All_{day.replace('-', '')}_{datetime.now(WIB):%H%M}.xlsx"
@@ -902,8 +972,8 @@ class Stream:
         seen, last = set(), 0
         try:
             while True:
-                rows = self.q("SELECT rowid, * FROM articles WHERE status='success' AND pub_date=? AND rowid > ? "
-                              "ORDER BY rowid LIMIT 500", (day, last))
+                rows = self.rq("SELECT rowid, * FROM articles WHERE status='success' AND pub_date=? AND rowid > ? "
+                               "ORDER BY rowid LIMIT 500", (day, last))
                 if not rows:
                     break
                 for r in rows:
@@ -935,49 +1005,65 @@ class Stream:
 
     # ----- control -----
     def start(self, log=print) -> None:
-        with self.lock:
-            if self.running:
-                return
-            self.cfg = settings()
-            self.stop_event.clear()
-            self.running, self.started = True, time.time()
-        try:
-            from . import media_db
-            media_db.install()                                # paid media: their logins
-        except Exception:  # noqa: BLE001
-            pass
-        info = self.sync_sources(log)
-        log(f"🛰 News stream started: {info['rss']} RSS feeds + {info['sitemaps']} outlet sitemaps, "
-            f"{self.cfg['threads']} readers")
-        self.threads = [threading.Thread(target=self.discovery_loop, daemon=True, name="stream-discovery"),
-                        threading.Thread(target=self.catchup_loop, daemon=True, name="stream-catchup"),
-                        threading.Thread(target=self.health_loop, daemon=True, name="stream-health"),
-                        threading.Thread(target=self.house_loop, daemon=True, name="stream-house")]
-        self.threads += [threading.Thread(target=self.reader_loop, daemon=True, name=f"stream-reader-{i}")
-                         for i in range(self.cfg["threads"])]
-        for t in self.threads:
-            t.start()
+        with self._ctl:                                      # never at the same time as a stop
+            with self.lock:
+                if self.running:
+                    return
+                self.cfg = settings()
+                self.stop_event = threading.Event()          # a fresh event: old threads keep seeing theirs set
+                self.running, self.started = True, time.time()
+            try:
+                from . import media_db
+                media_db.install()                            # paid media: their logins
+            except Exception:  # noqa: BLE001
+                pass
+            info = self.sync_sources(log)
+            log(f"🛰 News stream started: {info['rss']} RSS feeds + {info['sitemaps']} outlet sitemaps, "
+                f"{self.cfg['threads']} readers")
+            self.threads = [threading.Thread(target=self.discovery_loop, daemon=True, name="stream-discovery"),
+                            threading.Thread(target=self.catchup_loop, daemon=True, name="stream-catchup"),
+                            threading.Thread(target=self.health_loop, daemon=True, name="stream-health"),
+                            threading.Thread(target=self.house_loop, daemon=True, name="stream-house")]
+            self.threads += [threading.Thread(target=self.reader_loop, daemon=True, name=f"stream-reader-{i}")
+                             for i in range(self.cfg["threads"])]
+            for t in self.threads:
+                t.start()
 
     def stop(self) -> None:
-        with self.lock:
-            if not self.running:
-                return
-            self.running = False
-        self.stop_event.set()
-        for t in self.threads:
-            t.join(timeout=25)
-        self.threads = []
-        with self.lock:
-            self.by_domain.clear()
-            self.rr.clear()
-            self.queued.clear()
-            self.busy_domains.clear()
+        with self._ctl:
+            with self.lock:
+                if not self.running:
+                    return
+                self.running = False
+                ev, threads = self.stop_event, self.threads
+            ev.set()
+            deadline = time.time() + 60                      # readers finish the page they are on
+            for t in threads:
+                t.join(timeout=max(0.1, deadline - time.time()))
+            self.threads = []
+            with self.lock:
+                self.by_domain.clear()
+                self.rr.clear()
+                self.queued.clear()
+                self.qn = 0
+
+    def days_with_articles(self) -> list[str]:
+        """The last 30 calendar days that have articles (one indexed look per day, not a scan)."""
+        now = datetime.now(WIB)
+        out = []
+        for k in range(31):
+            d = (now - timedelta(days=k)).strftime("%Y-%m-%d")
+            if self.rq("SELECT 1 FROM articles WHERE status='success' AND pub_date=? LIMIT 1", (d,)):
+                out.append(d)
+            if len(out) >= 14:
+                break
+        return out
 
     def status(self, latest: int = 30, q: str = "") -> dict:
         now = time.time()
         today = datetime.now(WIB).strftime("%Y-%m-%d")
         hours = [(datetime.now(WIB) - timedelta(hours=i)).strftime("%Y-%m-%d %H") for i in range(23, -1, -1)]
-        got = {r["hour"]: dict(r) for r in self.q("SELECT * FROM hourly WHERE hour >= ?", (hours[0],))}
+        got = {r["hour"]: dict(r) for r in self.rq("SELECT * FROM hourly WHERE hour >= ?", (hours[0],))}
         with self.lock:
             live = dict(self.counts)
         series = []
@@ -987,34 +1073,34 @@ class Stream:
                                          for k in ("found", "read", "failed", "matched", "skipped")}})
         day = {k: sum(s[k] for s in series if s["hour"].startswith(today))
                for k in ("found", "read", "failed", "matched", "skipped")}
-        src = {r["kind"]: dict(r) for r in self.q(
+        src = {r["kind"]: dict(r) for r in self.rq(
             "SELECT kind, COUNT(*) n, SUM(fails >= 3) dead, SUM(hits > 0) productive, SUM(checked > 0) checked "
             "FROM sources GROUP BY kind")}
         where, args = "status='success'", []
         if q:
             where += " AND (title LIKE ? OR matched LIKE ?)"
             args = [f"%{q}%", f"%{q}%"]
-        rows = self.q(f"SELECT url, domain, title, pub_date, pub_time, matched, fetched FROM articles WHERE {where} "
+        rows = self.rq(f"SELECT url, domain, title, pub_date, pub_time, matched, fetched FROM articles WHERE {where} "
                       "ORDER BY fetched DESC LIMIT ?", (*args, latest))
         try:
             size = os.path.getsize(self.db_path) + (os.path.getsize(self.db_path + "-wal")
                                                     if os.path.exists(self.db_path + "-wal") else 0)
         except OSError:
             size = 0
-        per_min = sum(1 for t in self.recent if t > now - 300) / 5
+        rec = list(self.recent)                              # readers append while we count
+        per_min = sum(1 for t in rec if t > now - 300) / 5
         return {"running": self.running, "since": int(self.started) if self.running else 0, "settings": settings(),
-                "queue": self.q("SELECT COUNT(*) n FROM articles WHERE status='new'")[0]["n"],
-                "stored": self.q("SELECT COUNT(*) n FROM articles WHERE status='success'")[0]["n"],
+                "queue": self.rq("SELECT COUNT(*) n FROM articles WHERE status='new'")[0]["n"],
+                "stored": self.rq("SELECT COUNT(*) n FROM articles WHERE status='success'")[0]["n"],
                 "per_minute": round(per_min, 1), "per_day_pace": int(per_min * 60 * 24), "today": day,
                 "hourly": series, "sources": src, "keywords": len(self.keywords()), "db_mb": round(size / 1e6, 1),
-                "tiers": {r["tier"] or "new": r["n"] for r in self.q(
+                "tiers": {r["tier"] or "new": r["n"] for r in self.rq(
                     "SELECT tier, COUNT(DISTINCT domain) n FROM sources GROUP BY tier")},
                 "health": {**dict(self.health), "last_result": json.loads(self.meta("health_result") or "{}")},
                 "catchup": {**dict(self.catchup), "last": self.meta("catchup_last"),
                             "last_result": json.loads(self.meta("catchup_result") or "{}")},
                 "readers_busy": len(self.busy_domains), "last_error": self.last_error, "export": dict(self.export),
-                "days": [r["d"] for r in self.q("SELECT DISTINCT pub_date d FROM articles WHERE status='success' "
-                                                 "AND pub_date != '' ORDER BY d DESC LIMIT 14")],
+                "days": self.days_with_articles(),
                 "latest": [dict(r) for r in rows]}
 
 
@@ -1083,10 +1169,12 @@ def start_export(day: str) -> dict:
     """In the background: the dashboard shows the progress, the file lands in Exports."""
     from .paths import OUTPUT_DIR
     s = get()
-    if s.export.get("running"):
-        return {"ok": False, "error": "An export is already running."}
     if not re.match(r"\d{4}-\d{2}-\d{2}$", day or ""):
         return {"ok": False, "error": "Date as YYYY-MM-DD."}
+    with s.lock:
+        if s.export.get("running"):
+            return {"ok": False, "error": "An export is already running."}
+        s.export = {"running": True, "done": 0, "total": 0, "file": "", "error": "", "day": day}
     threading.Thread(target=lambda: _quiet(s.export_day, day, OUTPUT_DIR), daemon=True).start()
     return {"ok": True}
 

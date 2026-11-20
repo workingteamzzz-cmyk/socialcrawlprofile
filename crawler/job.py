@@ -898,9 +898,10 @@ class Job:
             rows, extra, stat = news_multi.run(kws, f"{d_start:%Y-%m-%d}", f"{d_end:%Y-%m-%d}", opt, tz, self.log,
                                                self.stop_flag, APP_DATA, OUTPUT_DIR, on_row=live)
             with self.lock:                                   # the final rows (with the engine's sentiment) replace the live copies
-                for k in live_keys:
+                final = {_key(r["url"]) for r in rows} & live_keys   # a live article missing from the end stays
+                for k in final:
                     seen.pop(k, None)
-                b["links"][:] = [r for r in b["links"] if _key(r["url"]) not in live_keys]
+                b["links"][:] = [r for r in b["links"] if _key(r["url"]) not in final]
             stopped = self.stop_flag.is_set()
             for kw in kws:                                    # one status line per keyword, like the browser engine
                 mine = [r for r in rows if r.get("keyword") == kw]

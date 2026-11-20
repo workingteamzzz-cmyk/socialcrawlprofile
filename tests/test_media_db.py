@@ -89,6 +89,10 @@ def test_paid_login_cookies_used_for_that_outlet_only(md):
     extract.requests.get("https://www.kompas.id/baca/premium", headers={"User-Agent": "x"}, timeout=5)
     extract.requests.get("https://www.detik.com/berita", headers={"User-Agent": "x"}, timeout=5)
     assert sent[0][1]["Cookie"] == "sess=abc; uid=7" and "Cookie" not in sent[1][1]
+    for trick in ("https://evil.tld?.kompas.id/x", "https://kompas.id:x@evil.tld/2026/11/19/slug",
+                  "https://evil.tld/?u=https://kompas.id", "ftp://kompas.id/x", "https://notkompas.id/x"):
+        assert md.cookie_for(trick) == "", trick                       # never sent to another host
+    assert md.cookie_for("https://epaper.kompas.id/x") == "sess=abc; uid=7"
     assert extract.requests.exceptions.Timeout is TimeoutError
     md.set_subscription("kompas.id", None, clear=True)
     assert "kompas.id" not in md.subscriptions() and md.cookie_for("https://kompas.id/x") == ""

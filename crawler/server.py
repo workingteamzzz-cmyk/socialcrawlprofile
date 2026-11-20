@@ -108,6 +108,20 @@ class Handler(BaseHTTPRequestHandler):
             from . import overview as ov
             from .paths import SERVER_MODE
             return self._json(ov.build(SERVER_MODE))
+        if u.path in ("/api/search", "/api/stories", "/api/insights"):
+            from . import insights
+            qs = parse_qs(u.query)
+            g = lambda k, d="": qs.get(k, [d])[0]  # noqa: E731
+            try:
+                if u.path == "/api/search":
+                    return self._json({"ok": True, **insights.search(g("q")[:300], int(g("days", "7") or 7),
+                                                                       int(g("page", "1") or 1), int(g("size", "50") or 50),
+                                                                       g("domain")[:100])})
+                if u.path == "/api/stories":
+                    return self._json(insights.stories(int(g("hours", "6") or 6)))
+                return self._json(insights.status())
+            except ValueError as e:
+                return self._json({"ok": False, "error": str(e)})
         if u.path == "/api/media":
             from . import media_db
             qs = parse_qs(u.query)
@@ -213,6 +227,14 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"ok": ok, "error": None if ok else "That schedule no longer exists."})
                 err = get().run_now(data.get("id", ""))
             except ScheduleError as e:
+                return self._json({"ok": False, "error": str(e)})
+        elif u.path in ("/api/search/export", "/api/insights"):
+            from . import insights
+            try:
+                if u.path == "/api/insights":
+                    return self._json({"ok": True, **insights.save_settings(data)})
+                return self._json(insights.start_export(str(data.get("q") or "")[:300], int(data.get("days") or 7)))
+            except ValueError as e:
                 return self._json({"ok": False, "error": str(e)})
         elif u.path in ("/api/media/add", "/api/media/remove", "/api/media/login", "/api/media/report"):
             from . import media_db

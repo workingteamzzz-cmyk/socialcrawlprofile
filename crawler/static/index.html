@@ -514,7 +514,7 @@ body{font-feature-settings:"tnum" 1,"cv11" 1;letter-spacing:-.003em}
 .legend-row{margin-left:auto;display:flex;gap:14px;font-size:12.5px;color:var(--muted)}
 .legend-row span{display:flex;align-items:center;gap:6px}.legend-row i{width:10px;height:3px;border-radius:2px}
 .chart svg{display:block;overflow:visible}
-.g-2-1 > .card{display:flex;flex-direction:column}.g-2-1 > .card > .card-bd{flex:1;display:flex;flex-direction:column}
+.g-2-1 > .card.viz{display:flex;flex-direction:column}.g-2-1 > .card.viz > .card-bd{flex:1;display:flex;flex-direction:column}
 #chTrend,#lsChStream{flex:1;min-height:260px;position:relative}#chTrend svg,#lsChStream svg{position:absolute;inset:0}
 .chart .grid{stroke:var(--gridc);stroke-width:1}.chart .base{stroke:var(--axc);stroke-width:1}
 .chart .ax{fill:var(--faint);font-size:11px}
@@ -526,6 +526,10 @@ body{font-feature-settings:"tnum" 1,"cv11" 1;letter-spacing:-.003em}
 .sb-row+.sb-row{margin-top:22px}
 .sub-hd{font-size:11px;letter-spacing:.07em;text-transform:uppercase;font-weight:600;color:var(--faint);margin:22px 0 4px;padding-top:16px;border-top:1px solid var(--line)}
 #chPlat .hb{padding:4px 0}
+.story{display:flex;gap:12px;padding:12px 0;border-top:1px solid var(--line)}.story:first-child{border-top:0;padding-top:0}
+.story-n{width:24px;height:24px;border-radius:6px;background:var(--soft);display:grid;place-items:center;font-weight:700;font-size:12px;flex:none;color:var(--muted)}
+.story small{display:block;color:var(--muted);font-size:12px;margin-top:2px}
+mark{background:rgba(250,178,25,.35);color:inherit;border-radius:2px;padding:0 1px}
 .sb-hd{display:flex;align-items:baseline;margin-bottom:8px}.sb-hd b{font-size:13px;font-weight:600}.sb-hd span{margin-left:auto;font-size:12px;color:var(--faint)}
 .sbar{display:flex;gap:2px;height:12px}.sbar span{border-radius:2px;min-width:3px}
 .sbar span:first-child{border-radius:4px 2px 2px 4px}.sbar span:last-child{border-radius:2px 4px 4px 2px}.sbar span:only-child{border-radius:4px}
@@ -616,6 +620,7 @@ body{font-feature-settings:"tnum" 1,"cv11" 1;letter-spacing:-.003em}
       <button data-p="nwsearch"><svg class="i"><use href="#i-news"/></svg>News Search</button>
       <button data-p="nwlinks"><svg class="i"><use href="#i-link"/></svg>News Links<span class="count" id="navNews">0</span></button>
       <button data-p="stream"><svg class="i"><use href="#i-radio"/></svg>Live Stream<span class="count" id="navStream"></span></button>
+      <button data-p="explore"><svg class="i"><use href="#i-trophy"/></svg>Explore</button>
       <button data-p="media"><svg class="i"><use href="#i-building"/></svg>Media Database</button>
       <div class="sep need-op">API scraper</div>
       <button data-p="apiscrape" class="need-op"><svg class="i"><use href="#i-pulse"/></svg>API Scraper</button>
@@ -1118,6 +1123,34 @@ body{font-feature-settings:"tnum" 1,"cv11" 1;letter-spacing:-.003em}
       </div></div>
     </section>
 
+    <!-- EXPLORE -->
+    <section class="page" id="p-explore">
+      <div class="pagehead"><div><h1>Explore</h1><p>Search every article the live stream read, see which stories many outlets are carrying right now, and get told on Telegram when a keyword suddenly spikes.</p></div></div>
+      <div class="card" style="margin-bottom:16px"><div class="card-bd" style="padding-top:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <input class="search" id="exQ" placeholder='Search all articles — e.g. banjir "bekasi timur" -promo   ·   (padam OR byarpet) pln' style="flex:1;min-width:260px;height:40px;font-size:14px">
+        <select class="select" id="exDays" style="max-width:150px;height:40px"><option value="1">Last 24 hours</option><option value="3">Last 3 days</option><option value="7" selected>Last 7 days</option><option value="30">Last 30 days</option></select>
+        <button class="btn primary" id="exGo" style="height:40px"><svg class="i"><use href="#i-search"/></svg>Search</button>
+        <button class="btn need-op" id="exXls" style="height:40px"><svg class="i"><use href="#i-dl"/></svg>Excel</button>
+        <span class="hint" id="exMsg" style="flex-basis:100%"></span></div></div>
+      <div class="dgrid g-2-1">
+        <div class="card"><div class="card-hd"><h3>Results</h3><span class="hd-note" id="exCount"></span></div>
+          <div class="card-bd" id="exMedia" style="padding-bottom:0"></div>
+          <div class="tbl-wrap"><table class="tbl dtbl"><tbody id="exBody"><tr><td class="empty-s">Type a search above — every article the stream read is searched in a moment.</td></tr></tbody></table></div>
+          <div class="card-bd" style="display:flex;gap:8px;align-items:center;padding-top:12px"><span class="hint" id="exPage"></span><button class="btn sm" id="exPrev" style="margin-left:auto">Previous</button><button class="btn sm" id="exNext">Next</button></div></div>
+        <div style="display:grid;gap:16px;align-content:start">
+          <div class="card"><div class="card-hd"><h3>Top stories</h3><select class="select" id="exHours" style="margin-left:auto;max-width:130px;height:32px;padding-top:0;padding-bottom:0"><option value="3">Last 3 h</option><option value="6" selected>Last 6 h</option><option value="12">Last 12 h</option><option value="24">Last 24 h</option></select></div>
+            <div class="card-bd" id="exStories"></div></div>
+          <div class="card"><div class="card-hd"><h3>Spike alerts</h3><span class="hd-note">Telegram</span></div><div class="card-bd">
+            <div id="exSpikes"></div>
+            <div class="need-admin" style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px">
+              <label class="opt-row" style="border:0;padding:0 0 8px"><input type="checkbox" id="exSpOn"> Alert when a keyword spikes</label>
+              <div style="display:flex;gap:10px"><div class="field" style="flex:1"><label for="exSpF">≥ × usual hour</label><input id="exSpF" type="number" min="1.5" max="50" step="0.5"></div>
+                <div class="field" style="flex:1"><label for="exSpMin">and ≥ articles</label><input id="exSpMin" type="number" min="1" max="10000"></div></div>
+              <button class="btn sm" id="exSpSave">Save</button> <span class="hint" id="exSpMsg"></span></div></div></div>
+        </div>
+      </div>
+    </section>
+
     <!-- MEDIA DATABASE -->
     <section class="page" id="p-media">
       <div class="pagehead"><div><h1>Media Database</h1><p>The registered media the stream and News Search read: how often each publishes (last 7 days) and whether the app can read it. Add or remove outlets, set the login of a paid outlet.</p></div>
@@ -1565,6 +1598,7 @@ function go(p){
   if (p === 'home') loadHome();
   if (p === 'stream') loadStream();
   if (p === 'media') loadMedia();
+  if (p === 'explore') loadExplore();
   if (p === 'apikeys'){ loadApKeys(); loadTg(); loadSafety(); }
 }
 document.querySelectorAll('#nav button').forEach(b => b.onclick = () => go(b.dataset.p));
@@ -2360,7 +2394,7 @@ $('tgTest').onclick = async () => {
 
 /* ---------- look: icon colours, page header icons, new-search menu, tabs, home, me ---------- */
 const NAV_IC = {home: '#f59e0b', collect: '#22c55e', accounts: '#3b82f6', results: '#06b6d4', status: '#22c55e', kwsearch: '#8b5cf6',
-  kwlinks: '#06b6d4', nwsearch: '#3b82f6', nwlinks: '#06b6d4', stream: '#22c55e', media: '#a855f7', apiscrape: '#f43f5e', apikeys: '#f59e0b', report: '#10b981',
+  kwlinks: '#06b6d4', nwsearch: '#3b82f6', nwlinks: '#06b6d4', stream: '#22c55e', media: '#a855f7', explore: '#f59e0b', apiscrape: '#f43f5e', apikeys: '#f59e0b', report: '#10b981',
   schedules: '#f97316', exports: '#64748b', users: '#ec4899', log: '#94a3b8'};
 document.querySelectorAll('#nav button[data-p]').forEach(b => { if (NAV_IC[b.dataset.p]) b.style.setProperty('--ic', NAV_IC[b.dataset.p]); });
 document.querySelectorAll('section.page').forEach(sec => {
@@ -2657,6 +2691,70 @@ $('mdReport').onclick = async () => { $('mdRepMsg').textContent = 'Making the re
   $('mdRepMsg').innerHTML = r && r.ok ? `Ready: <a href="/download/${encodeURIComponent(r.file)}">${esc(r.file)}</a>` : esc((r && r.error) || 'Not made'); };
 $('mdWkSave').onclick = async () => { const r = await api('/api/stream', {weekly_report: $('mdWk').checked, report_weekday: +$('mdWkDay').value, report_hour: +$('mdWkHour').value});
   $('mdWkMsg').textContent = r && r.ok ? 'Saved.' : (r && r.error) || 'Not saved'; };
+
+/* ---------- explore: search, top stories, spikes ---------- */
+let EX = {page: 1, q: '', domain: ''};
+const markSafe = h => esc(h || '').replace(/&lt;mark&gt;/g, '<mark>').replace(/&lt;\/mark&gt;/g, '</mark>');
+async function exSearch(){
+  const q = $('exQ').value.trim(); if (!q) return;
+  if (q !== EX.q){ EX.page = 1; EX.q = q; }
+  $('exMsg').textContent = 'Searching…';
+  const d = await api(`/api/search?q=${encodeURIComponent(q)}&days=${$('exDays').value}&page=${EX.page}&size=30&domain=${encodeURIComponent(EX.domain)}`);
+  if (!d || d.ok === false){ $('exMsg').textContent = (d && d.error) || 'Search failed'; return; }
+  $('exMsg').textContent = ''; $('exCount').textContent = `${fmt(d.total)} article(s)`;
+  $('exMedia').innerHTML = EX.domain ? `<span class="qchip">only ${esc(EX.domain)} <button data-exdom="">×</button></span>` : d.media.length ? '<div class="sub-hd" style="margin:0 0 4px;padding:0;border:0">Most from (click to show only one)</div>' +
+    d.media.slice(0, 5).map(([m, n]) => `<span class="badge b-neu" style="margin:0 4px 4px 0;cursor:pointer" data-exdom="${esc(m)}">${esc(m)} · ${fmt(n)}</span>`).join('') : '';
+  $('exBody').innerHTML = d.rows.length ? d.rows.map(r => `<tr><td style="width:96px" class="nowrap"><b>${r.pub_date ? dShort(r.pub_date) : '–'}</b><small>${esc(r.pub_time || '')}</small></td>
+    <td><a class="lt-t" href="${esc(r.url)}" target="_blank" rel="noopener">${markSafe(r.title)}</a><small style="display:block;margin-top:3px;color:var(--muted)">${markSafe(r.snip)}</small>
+      <small>${esc(r.domain)}${r.matched ? ' · ' + r.matched.split(', ').map(k => `<span class="badge b-ok">${esc(k)}</span>`).join(' ') : ''}</small></td></tr>`).join('')
+    : `<tr><td class="empty-s">Nothing found for “${esc(q)}”.</td></tr>`;
+  const from = (d.page - 1) * d.size; $('exPage').textContent = d.total ? `${fmt(from + 1)}–${fmt(Math.min(d.total, from + d.size))} of ${fmt(d.total)}` : '';
+  $('exPrev').disabled = d.page <= 1; $('exNext').disabled = from + d.size >= d.total;
+}
+async function exStories(){
+  const d = await api('/api/stories?hours=' + $('exHours').value);
+  if (!d || !d.stories) return;
+  $('exStories').innerHTML = d.stories.length ? d.stories.slice(0, 12).map((s, i) => `<div class="story">
+    <div class="story-n">${i + 1}</div><div style="min-width:0"><a class="lt-t" href="${esc(s.url)}" target="_blank" rel="noopener"><b>${esc(s.title)}</b></a>
+    <small><b>${fmt(s.outlets)} outlets</b> · ${fmt(s.articles)} articles · since ${new Date(s.first_seen * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}</small>
+    <small>${s.media.slice(0, 4).map(esc).join(', ')}${s.media.length > 4 ? ` +${s.outlets - 4}` : ''}</small>
+    ${s.keywords.length ? `<div>${s.keywords.map(k => `<span class="badge b-ok">${esc(k)}</span>`).join(' ')}</div>` : ''}
+    <button class="btn sm" style="margin-top:6px" data-exstory="${esc(s.words.slice(0, 3).join(' '))}">Search this story</button></div></div>`).join('')
+    : `<p class="empty-s">No story carried by 2+ outlets in the last ${d.hours} h yet${d.articles ? '' : ' — start the Live Stream'}.</p>`;
+}
+async function exStatus(){
+  const d = await api('/api/insights'); if (!d || !d.settings) return;
+  const sp = d.spikes_now || [];
+  $('exSpikes').innerHTML = (sp.length ? sp.map(x => `<div class="hs-foot" style="border-top:0"><span><b style="font-size:13px!important;color:var(--text)">${esc(x.keyword)}</b> · ${fmt(x.last_hour)} in the last hour</span><b style="color:var(--bad)">×${x.factor}</b></div>`).join('')
+    : '<p class="hint" style="margin:0">No keyword is spiking right now.</p>') +
+    (d.alerts.length ? `<div class="sub-hd">Sent</div>` + d.alerts.slice(0, 5).map(a => `<p class="hint" style="margin:2px 0">${new Date(a.at * 1000).toLocaleString([], {day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'})} — ${esc(a.keyword)} ×${a.factor}</p>`).join('') : '') +
+    `<p class="hint" style="margin:8px 0 0">${fmt(d.indexed)} articles searchable.</p>`;
+  if (!exStatus.filled){ exStatus.filled = true; $('exSpOn').checked = !!d.settings.spike_alerts; $('exSpF').value = d.settings.spike_factor; $('exSpMin').value = d.settings.spike_min; }
+  const ex = d.export || {};
+  if (ex.running) $('exMsg').textContent = 'Making the Excel…';
+  else if (ex.file && exStatus.waiting){ exStatus.waiting = false; $('exMsg').innerHTML = `Ready: <a href="/download/${encodeURIComponent(ex.file)}">${esc(ex.file)}</a> (${fmt(ex.rows)} articles)`; }
+  else if (ex.error && exStatus.waiting){ exStatus.waiting = false; $('exMsg').textContent = 'Not made: ' + ex.error; }
+}
+function loadExplore(){ exStories(); exStatus(); if ($('exQ').value.trim()) exSearch(); }
+$('exGo').onclick = () => { EX.q = ''; EX.domain = ''; exSearch(); };
+$('exQ').addEventListener('keydown', e => { if (e.key === 'Enter'){ EX.q = ''; exSearch(); } });
+$('exDays').onchange = () => { EX.q = ''; exSearch(); };
+$('exHours').onchange = exStories;
+$('exPrev').onclick = () => { EX.page = Math.max(1, EX.page - 1); exSearch(); };
+$('exNext').onclick = () => { EX.page++; exSearch(); };
+$('p-explore').addEventListener('click', e => {
+  const st = e.target.closest('[data-exstory]'), dm = e.target.closest('[data-exdom]');
+  if (st){ $('exQ').value = st.dataset.exstory; EX.q = ''; exSearch(); window.scrollTo({top: 0, behavior: 'smooth'}); }
+  if (dm){ EX.domain = dm.dataset.exdom; EX.page = 1; exSearch(); }
+});
+$('exXls').onclick = async () => { const q = $('exQ').value.trim(); if (!q) return toast('Search first');
+  const r = await api('/api/search/export', {q, days: +$('exDays').value});
+  if (!r || r.ok === false) return $('exMsg').textContent = (r && r.error) || 'Not started';
+  exStatus.waiting = true; $('exMsg').textContent = 'Making the Excel…';
+  const t = setInterval(async () => { await exStatus(); if (!exStatus.waiting) clearInterval(t); }, 2000); };
+$('exSpSave').onclick = async () => { const r = await api('/api/insights', {spike_alerts: $('exSpOn').checked, spike_factor: +$('exSpF').value, spike_min: +$('exSpMin').value});
+  $('exSpMsg').textContent = r && r.ok ? 'Saved.' : (r && r.error) || 'Not saved'; };
+setInterval(() => { if (document.visibilityState === 'visible' && $('p-explore').classList.contains('on')){ exStories(); exStatus(); } }, 60000);
 
 /* ---------- reports ---------- */
 let TOPICS = [];

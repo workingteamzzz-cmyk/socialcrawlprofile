@@ -329,6 +329,19 @@ Measured on a 4-CPU test machine with local test sites: ~37 articles/second (≈
 core. On the real internet the pace is set by how many articles the media publish and how fast their sites answer; the
 page shows the live pace and the "per day at this pace" figure.
 
+## Explore (search everything, top stories, spike alerts)
+
+- **Search** every article the live stream read (title + summary, SQLite full-text index, kept as long as the stream
+  keeps articles): words, `"exact phrase"`, `OR`, `NOT` / `-word`, `( )`, `prefix*`. Results highlight the words,
+  show which outlets carry most, can be narrowed to one outlet, and go to one Online Excel with **Excel**.
+- **Top stories** — articles of the last 3–24 h whose titles share most of their meaningful words are one story,
+  ranked by how many outlets carry it; *Search this story* opens all its articles.
+- **Spike alerts** — every 15 minutes, for each stream keyword and report topic: the last hour against the usual hour
+  of the day before. ≥ 3× and ≥ 5 articles (adjustable) → one Telegram message, at most once per 3 h per keyword.
+
+Measured with 1,000,000 articles in the stream database: dashboard refresh 0.04 s, search 0.2 s, top stories 0.2 s,
+tiers 0.06 s, media statistics 2.7 s (cached 5 minutes).
+
 ## Media Database (registered media, activity, access, paid media)
 
 **Media Database** (sidebar, News) lists the registered media (~12,400 outlets; the bundled dictionary until an admin

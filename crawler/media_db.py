@@ -195,7 +195,16 @@ def set_subscription(domain: str, cookies: str | None, note: str = "", clear: bo
 
 
 def cookie_for(url: str) -> str:
-    host = re.sub(r"^https?://", "", url or "").split("/")[0].split(":")[0].lower()
+    """The login cookies for this exact site — only for a plain https/http URL whose real host is the outlet
+    (no user:password@ trick, no "?.kompas.id" in a query)."""
+    from urllib.parse import urlparse
+    try:
+        p = urlparse(url or "")
+    except ValueError:
+        return ""
+    if p.scheme not in ("http", "https") or "@" in (p.netloc or ""):
+        return ""
+    host = (p.hostname or "").lower()
     for d, v in _SUBS.items():
         if host == d or host.endswith("." + d):
             return v

@@ -283,6 +283,18 @@ class MediaLogin(BaseModel):
     clear: bool = False
 
 
+class SearchExport(BaseModel):
+    q: str
+    days: int = 7
+
+
+class InsightSettings(BaseModel):
+    spike_alerts: bool | None = None
+    spike_factor: float | None = Field(None, description="alert when the last hour is ≥ this × the usual hour")
+    spike_min: int | None = Field(None, description="… and at least this many articles")
+    spike_quiet_hours: int | None = Field(None, description="one alert per keyword per … hours")
+
+
 class StreamExport(BaseModel):
     day: str = Field(..., description="YYYY-MM-DD: every article published that day, as one Online Excel")
 
@@ -767,6 +779,46 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
             daily_cap=body.daily_cap, monthly_cap=body.monthly_cap,
             cleared=[k for k, v in (("api", body.clear_api_key), ("twitter", body.clear_twitter)) if v])
         return {"ok": True, **pub}
+
+    # ---------- insights: search, top stories, spikes ----------
+    @app.get("/api/search", tags=["insights"], dependencies=auth,
+             summary="Search every article the stream read (words, \"phrase\", OR, NOT/-word, ( ), prefix*)")
+    def search_get(q: str, days: int = 7, page: int = 1, size: int = 50, domain: str = ""):
+        from . import insights
+        try:
+            return {"ok": True, **insights.search(q[:300], days, page, size, domain[:100])}
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+
+    @app.post("/api/search/export", tags=["insights"], dependencies=op, summary="A search's articles -> Online Excel")
+    def search_export(body: SearchExport, request: Request):
+        from . import insights
+        try:
+            out = insights.start_export(body.q[:300], body.days)
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        log(request, "exported a search", q=body.q[:100])
+        return out
+
+    @app.get("/api/stories", tags=["insights"], dependencies=auth, summary="Top stories: one story, many outlets")
+    def stories_get(hours: int = 6):
+        from . import insights
+        return insights.stories(hours)
+
+    @app.get("/api/insights", tags=["insights"], dependencies=auth, summary="Search index, spike alerts, settings")
+    def insights_get():
+        from . import insights
+        return insights.status()
+
+    @app.post("/api/insights", tags=["insights"], dependencies=admin_only, summary="Spike-alert settings")
+    def insights_set(body: InsightSettings, request: Request):
+        from . import insights
+        try:
+            out = insights.save_settings(body.model_dump(exclude_none=True))
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        log(request, "changed spike alerts")
+        return {"ok": True, **out}
 
     # ---------- registered media ----------
     @app.get("/api/media", tags=["media"], dependencies=auth,

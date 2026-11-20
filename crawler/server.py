@@ -257,6 +257,12 @@ class Handler(BaseHTTPRequestHandler):
         elif u.path == "/api/news/start":
             err = JOB.start_news(data.get("keywords") or [], data.get("start", ""), data.get("end", ""),
                                  data.get("tz", "WIB"), data.get("options") or {})
+        elif u.path == "/api/compare":
+            from . import compare
+            try:
+                return self._json({"ok": True, **compare.compare(str(data.get("links") or "")[:3_000_000])})
+            except ValueError as e:
+                return self._json({"ok": False, "error": str(e)})
         elif u.path == "/api/news/bulk":
             err = JOB.start_bulk(str(data.get("links") or "")[:2_000_000], data.get("tz", "WIB"), bool(data.get("force")))
         elif u.path == "/api/keywords/start":

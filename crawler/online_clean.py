@@ -212,7 +212,10 @@ _JUNK_URL = re.compile(r"/(privacy|privacy-policy|kebijakan-privasi|privasi|term
                        r"syarat|syarat-dan-ketentuan|syarat-ketentuan|ketentuan|pedoman|pedoman-media-siber|disclaimer|"
                        r"about|about-us|tentang|tentang-kami|contact|contact-us|kontak|hubungi-kami|redaksi|susunan-redaksi|"
                        r"karir|career|careers|lowongan|advertise|iklan|pasang-iklan|info-iklan|kode-etik|"
-                       r"login|register|daftar|subscribe|langganan|faq|bantuan|help)(/|\.html?|\.php)?$", re.I)
+                       r"login|register|daftar|subscribe|langganan|faq|bantuan|help|kode-etik(-[a-z]+)?|"
+                       r"standar-perlindungan(-profesi)?-wartawan|pedoman-hak-jawab|hak-jawab|visi-misi|"
+                       r"media-kit|rate-card|susunan-redaksi|struktur-redaksi|box-redaksi|kebijakan-redaksi|"
+                       r"pengaduan|kerjasama|kerja-sama)(/|\.html?|\.php)?$", re.I)
 _JUNK_TITLE = re.compile(r"^\s*(privacy policy|kebijakan privasi|terms of (use|service)|syarat( dan|&)? ketentuan|"
                          r"pedoman (pemberitaan )?media siber|disclaimer|about us|tentang kami|contact us|kontak( kami)?|"
                          r"hubungi kami|susunan redaksi|redaksi|karir|careers?|info iklan|pasang iklan|kode etik|faq|"
@@ -233,6 +236,27 @@ _GENERIC_TITLE = re.compile(
     r"sponsored|ads|untitled|no title|tanpa judul|rss|sitemap|live( streaming)?|e-?paper|newsletter|"
     r"loading\.*|redirect(ing)?\.*)\s*[.…!]*\s*([|\-–—]\s*\S+(\s+\S+){0,3}\s*)?$", re.I)   # + a site name
 
+# a newsroom's own policy / about pages, published like articles in some outlets' sitemaps ("Kode Etik
+# Jurnalistik", "Standar Perlindungan Profesi Wartawan", "Pedoman Media Siber", "Susunan Redaksi Kompas")
+_POLICY_TITLE = re.compile(
+    r"^\s*(kode etik( (jurnalistik|wartawan|pers|media|profesi|aji|pwi|iwo|smsi|jmsi))?|"
+    r"(standar|pedoman) perlindungan (profesi )?wartawan|standar kompetensi wartawan|"
+    r"pedoman (pemberitaan )?(media siber|ramah anak|pemberitaan)|pedoman hak jawab|"
+    r"kebijakan (redaksi|privasi|editorial|layanan)|ketentuan (layanan|penggunaan)|syarat (dan|&) ketentuan|"
+    r"(susunan|struktur|box|tim|dewan|alamat) redaksi|redaksi( dan| &) (manajemen|kontak)|info redaksi|"
+    r"tentang (kami|kita|redaksi)|profil (perusahaan|redaksi|media)|visi( dan| &) misi|sejarah (kami|perusahaan)|"
+    r"media ?kit|rate ?card|tarif iklan|info (iklan|langganan)|pengaduan pembaca|kontak kami|hubungi kami|"
+    r"lowongan kerja (di )?redaksi|"
+    r"verifikasi dewan pers|terverifikasi dewan pers|sertifikat (dewan pers|verifikasi))"
+    r"\b\s*[|\-–—:]?\s*(?P<rest>[^,.!?;:\"“”]{0,45})$", re.I)
+
+
+def _policy_page(t: str) -> bool:
+    """The phrase, then at most the outlet's name (≤ 4 words, no comma): "Kode Etik Monitor Indonesia" yes,
+    "Kode Etik Jurnalistik Dilanggar, Dewan Pers …" (a news story) no."""
+    m = _POLICY_TITLE.match(t)
+    return bool(m) and len(m.group("rest").split()) <= 4
+
 _PLACEHOLDER_TITLE = re.compile(r"^\s*(banner( link)?|link banner|untitled|no title|tanpa judul|advertisement|"
                                 r"sponsored|loading\.*|redirect(ing)?\.*)\s*([|\-–—:].{0,80})?$", re.I)
 
@@ -249,7 +273,8 @@ def is_junk_page(title: str, url: str = "") -> bool:
     if path and _JUNK_URL.search(path.rstrip("/") or "/"):
         return True
     t = str(title or "")
-    return bool(_JUNK_TITLE.match(t) or _GENERIC_TITLE.match(t) or _PLACEHOLDER_TITLE.match(t))
+    return bool(_JUNK_TITLE.match(t) or _GENERIC_TITLE.match(t) or _PLACEHOLDER_TITLE.match(t)
+                or _policy_page(t))
 
 
 def safe_cell(v, column: str = ""):

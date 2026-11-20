@@ -25,8 +25,8 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    mem_limit: 3g                   # leaves room for the system, SSH and Caddy on a 4 GB server
-    cpus: "1.7"                     # of 2: the server always keeps some CPU for itself
+    mem_limit: ${COLLECTOR_MEM:-3g}     # set by install-server.sh from the server's size (4 GB server: ~3 GB)
+    cpus: "${COLLECTOR_CPUS:-1.7}"      # likewise (2 CPU: 1.7) — the server always keeps some for itself
     pids_limit: 2048
 
   caddy:

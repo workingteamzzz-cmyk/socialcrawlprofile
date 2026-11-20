@@ -249,7 +249,7 @@ def test_site_check_marks_down_sites_and_brings_back_living_ones(st, monkeypatch
     assert out["alive"] == 4 and out["down"] == 1 and calls.count("mati.id") == 2          # a second chance
     src = {r["id"]: r for r in st.q("SELECT * FROM sources")}
     assert src["sm:mati.id"]["tier"] == "dead" and src["rss:mati"]["tier"] == "dead"          # feed and sitemap: off
-    assert src["sm:mati.id"]["next_check"] > now + 86400                                       # until the next check
+    assert src["sm:mati.id"]["next_check"] >= st._next_health_time() - 60                      # until the next check
     assert src["sm:bangkit.id"]["tier"] == "inactive" and src["sm:bangkit.id"]["fails"] == 0
     assert src["sm:bangkit.id"]["next_check"] <= time.time() and "sitemap_news" in src["sm:bangkit.id"]["url"]
     assert src["sm:hidup.id"]["tier"] == "active"                                              # untouched
@@ -361,3 +361,58 @@ def test_fetch_fallbacks_can_be_switched_off_and_are_counted(tmp_path, monkeypat
             "SET n = n + 1", (m,))
     fm = s.fetch_methods(7)
     assert fm["total"] == 3 and fm["methods"]["googlebot"]["pct"] == 33.33
+
+
+def test_fresh_news_lane_comes_before_the_backlog(tmp_path, monkeypatch):
+    """Millions of older links never hold up today's news: fresh first, backlog when no fresh page can be read —
+    and one backlog reader keeps the archive moving."""
+    import time as _t
+    from crawler import paths, stream
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    st = stream.Stream(str(tmp_path / "s"))
+    st.cfg = {**stream.settings(), "domain_gap": 0}
+    today = stream.datetime.now(stream.WIB).strftime("%Y-%m-%d")
+    rows = [(f"old.id/{i}", f"https://old.id/{i}", "old.id", "2020-01-01", _t.time() + i) for i in range(50)]
+    rows += [(f"arch{i}.id/x", f"https://arch{i}.id/x", f"arch{i}.id", "2019-05-05", _t.time()) for i in range(5)]
+    rows += [("news.id/1", "https://news.id/1", "news.id", today, _t.time() - 100),
+             ("nodate.id/1", "https://nodate.id/1", "nodate.id", "", _t.time() - 200)]
+    with st.lock:
+        st._db.executemany("INSERT INTO articles(key, url, domain, feed_date, discovered, status) VALUES "
+                           "(?,?,?,?,?,'new')", rows)
+        st._db.commit()
+    st.ensure_indexes()
+    st.refill()
+    assert st.qn == 57 and st.qn_old == 55
+    first = [st.next_job()[0] for _ in range(2)]
+    assert set(first) == {"news.id", "nodate.id"}                               # fresh first, though found earlier
+    nxt = st.next_job()
+    assert nxt[0] in ("old.id",) or nxt[0].startswith("arch")                   # then the backlog
+    st.busy_domains.clear()
+    st._enqueue({"key": "news.id/2", "url": "https://news.id/2", "domain": "news.id", "feed_date": today})
+    assert st.next_job(backlog_first=True)[0] != "news.id"                      # the backlog reader
+    assert st.next_job()[0] == "news.id"
+
+
+def test_disk_warnings_and_the_brake(tmp_path, monkeypatch):
+    """75% and 90% full: one Telegram message each; under 5 GB free: older links are not taken in, news still is."""
+    from crawler import overview, paths, stream
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    st = stream.Stream(str(tmp_path / "s"))
+    st.cfg = stream.settings()
+    sent, state = [], {"pct": 50.0, "free": 30e9}
+    monkeypatch.setattr(overview, "disk", lambda: {"used_pct": state["pct"], "free": state["free"], "total": 60e9,
+                                                   "used": 0})
+    assert st.disk_guard(sent.append)["warned"] == 0 and not sent
+    state.update(pct=76.0, free=14e9)
+    st.disk_guard(sent.append)
+    st.disk_guard(sent.append)
+    assert len(sent) == 1 and "76%" in sent[0]                                  # once per level
+    state.update(pct=93.0, free=4e9)
+    out = st.disk_guard(sent.append)
+    assert len(sent) == 2 and out["brake"] and st.disk_brake
+    today = stream.datetime.now(stream.WIB).strftime("%Y-%m-%d")
+    n = st.add_found([{"url": "https://a.id/berita/2020/lama-sekali", "date": "2020-01-01", "domain": "a.id"},
+                      {"url": "https://a.id/berita/hari-ini-baru", "date": today, "domain": "a.id"}], "sitemap")
+    assert n == 1                                                               # the news only
+    state.update(pct=60.0, free=25e9)
+    assert not st.disk_guard(sent.append)["brake"] and not st.disk_brake

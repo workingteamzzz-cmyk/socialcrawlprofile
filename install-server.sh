@@ -109,6 +109,16 @@ EOF
   umask 022
 fi
 
+# ---------- 2b. the app's share of this server (follows a resize: run this script again after one) ----------
+mem_mb=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
+cpus=$(nproc 2>/dev/null || echo 2)
+if [ "$mem_mb" -le 8192 ]; then app_mb=$(( mem_mb - 1024 )); else app_mb=$(( mem_mb * 85 / 100 )); fi
+[ "$app_mb" -lt 1024 ] && app_mb=1024
+app_cpus=$(awk -v c="$cpus" 'BEGIN { v = (c <= 2) ? c - 0.3 : c - 0.5; if (v < 1) v = 1; printf "%.1f", v }')
+sed -i '/^COLLECTOR_MEM=/d; /^COLLECTOR_CPUS=/d' .env
+printf 'COLLECTOR_MEM=%sm\nCOLLECTOR_CPUS=%s\n' "$app_mb" "$app_cpus" >> .env
+echo "     Server: ${cpus} CPU, $(( mem_mb / 1024 )) GB RAM → the app may use ${app_cpus} CPU and ${app_mb} MB."
+
 # ---------- 3. start ----------
 if [ "${SKIP_START:-0}" != 1 ]; then
   bold "3/4  Building and starting the app (the first time takes 5-15 minutes)..."

@@ -107,6 +107,46 @@ def add(text: str) -> dict:
     return {"added": added, "already": known, "invalid": bad, "total": len(reg)}
 
 
+NOT_MEDIA = ("google.", "googleusercontent.", "msn.com", "yahoo.", "bing.com", "youtube.com", "youtu.be",
+             "facebook.com", "fb.com", "instagram.com", "tiktok.com", "twitter.com", "x.com", "threads.net",
+             "linkedin.com", "wikipedia.org", "blogspot.", "wordpress.com", "medium.com", "t.me", "whatsapp.com",
+             "scribd.com", "issuu.com", "slideshare.", "pinterest.", "reddit.com", "apple.com", "amazon.")
+
+
+def discover(urls, source: str = "News Search") -> list[str]:
+    """Outlets that a search found articles on but the list does not have yet -> added to the registered media, so
+    the Live Stream reads them from now on (the list grows by itself). Platforms, aggregators and excluded outlets
+    are left out; a sub-domain of a registered outlet (news.detik.com) counts as registered."""
+    try:
+        from . import stream
+        cfg = stream.settings()
+    except Exception:  # noqa: BLE001
+        cfg = {}
+    if not cfg.get("auto_add_media", True):
+        return []
+    excl = set(cfg.get("exclude_domains") or [])
+    reg = registry()
+    new: dict[str, int] = {}
+    for u in urls or []:
+        d = clean_domain(u)
+        if not d or any(x in d for x in NOT_MEDIA) or d in excl:
+            continue
+        parts = d.split(".")
+        if any(".".join(parts[i:]) in reg for i in range(len(parts) - 1)):
+            continue
+        new[d] = new.get(d, 0) + 1
+    if not new:
+        return []
+    out = add("\n".join(sorted(new)))["added"]
+    if out:
+        try:
+            with open(os.path.join(_data(), "stream", "discovered.log"), "a", encoding="utf-8") as f:
+                f.write("".join(f"{time.strftime('%Y-%m-%d %H:%M')}\t{d}\t{source}\n" for d in out))
+        except OSError:
+            pass
+    return out
+
+
 def remove(domains: list[str]) -> dict:
     gone = []
     with _LOCK:

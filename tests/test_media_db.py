@@ -114,3 +114,65 @@ def test_endpoints_roles(tmp_path, monkeypatch):
     assert admin.post("/api/media/login", json={"domain": "baru.id", "cookies": "a=1"}, headers=SITE).json()["subscribed"]
     assert op.post("/api/media/report", headers=SITE).json()["ok"]
     stream.get().stop()
+
+
+def test_outlets_found_by_searches_join_the_list(tmp_path, monkeypatch):
+    """News Search / Bulk links find an outlet the list lacks -> it is registered (the stream reads it from now on);
+    platforms, aggregators, excluded outlets and sub-domains of registered ones are not."""
+    from crawler import media_db, paths, stream
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    media_db.add("detik.com\nkompas.com")
+    stream.save_settings({"exclude_domains": "dilarang.id"})
+    got = media_db.discover(["https://news.detik.com/berita/1", "https://www.radarbaru.id/2026/11/x",
+                             "https://radarbaru.id/y", "https://www.msn.com/id-id/news/z", "https://x.com/a/status/1",
+                             "https://dilarang.id/a", "https://kabarbaru.co.id/b"])
+    assert got == ["kabarbaru.co.id", "radarbaru.id"] and "radarbaru.id" in media_db.registry()
+    assert media_db.discover(["https://radarbaru.id/z"]) == []                     # once
+    stream.save_settings({"auto_add_media": False})
+    assert media_db.discover(["https://lain.id/a"]) == []
+
+
+def test_temporary_failures_are_tried_again(tmp_path, monkeypatch):
+    import time as _t
+    from crawler import paths, stream
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    s = stream.Stream(str(tmp_path / "s"))
+    s.cfg = stream.settings()
+    old = _t.time() - 5 * 3600
+    rows = [("a/1", "Timeout", old, 0), ("a/2", "HTTP 503", old, 1), ("a/3", "HTTP 404", old, 0),
+            ("a/4", "Timeout", _t.time(), 0), ("a/5", "ConnectionError", old, 2)]
+    with s.lock:
+        s._db.executemany("INSERT INTO articles(key, url, domain, status, discovered, fetched, error, tries) VALUES "
+                          "(?, 'https://a.id/x', 'a.id', 'failed', ?, ?, ?, ?)",
+                          [(k, old, f, e, t) for k, e, f, t in rows])
+        s._db.commit()
+    assert s.retry_failed() == 2                                   # not a 404, not too soon, not a third time
+    assert {r["key"] for r in s.rq("SELECT key FROM articles WHERE status='new'")} == {"a/1", "a/2"}
+
+
+def test_compare_with_a_competitors_list(tmp_path, monkeypatch):
+    """Each link of another list: in the database, or why not — and what can be read at once."""
+    import time as _t
+    from crawler import compare, media_db, paths, stream
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    media_db.add("ada.id\ngagal.id\nbelum.id")
+    s = stream.Stream(str(tmp_path / "data" / "stream"))
+    with s.lock:
+        s._db.executemany("INSERT INTO articles(key, url, domain, status, discovered, error, title) VALUES "
+                          "(?,?,?,?,?,?,?)",
+                          [(stream.norm_key(u), u, d, st, _t.time(), e, "T")
+                           for u, d, st, e in [("https://ada.id/1", "ada.id", "success", ""),
+                                               ("https://gagal.id/2", "gagal.id", "failed", "HTTP 403"),
+                                               ("https://ada.id/kode-etik", "ada.id", "filtered", ""),
+                                               ("https://ada.id/3", "ada.id", "new", "")]])
+        s._db.commit()
+    out = compare.compare("https://www.ada.id/1/\nhttps://gagal.id/2\nhttps://ada.id/kode-etik\nhttps://ada.id/3\n"
+                          "https://belum.id/9\nhttps://lain.co.id/7")
+    st = {r["url"]: r["status"] for r in out["rows"]}
+    assert st == {"https://www.ada.id/1/": "have", "https://gagal.id/2": "failed", "https://ada.id/kode-etik":
+                  "not_article", "https://ada.id/3": "waiting", "https://belum.id/9": "not_found",
+                  "https://lain.co.id/7": "not_registered"}
+    assert out["have"] == 1 and out["have_pct"] == 16.7 and out["missing_outlets"] == [("lain.co.id", 1)]
+    assert set(out["fetchable"]) == {"https://gagal.id/2", "https://ada.id/3", "https://belum.id/9",
+                                     "https://lain.co.id/7"}
+    assert [r for r in out["rows"] if r["status"] == "failed"][0]["error"] == "HTTP 403"

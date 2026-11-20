@@ -606,7 +606,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
 .rd-face.pos{background:var(--ok-soft);color:var(--ok)}.rd-face.neg{background:var(--bad-soft);color:var(--bad)}.rd-face.neu{background:var(--soft);color:var(--muted)}
 .rd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px}
 .rd-filters input[type=date]{min-width:0;width:100%;padding-left:8px;padding-right:6px;font-size:13px}
-.rd-new[hidden],.card[hidden],.btn[hidden],.tag[hidden],#kApiOpts[hidden]{display:none}
+.rd-new[hidden],.card[hidden],.btn[hidden],.tag[hidden],#kApiOpts[hidden],#nwRight[hidden],#cmpOut[hidden]{display:none}
 .rd-grid.list{grid-template-columns:minmax(0,1fr)}
 .rd-card{display:flex;gap:14px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;cursor:pointer;box-shadow:var(--shadow);transition:border-color .12s,box-shadow .12s}
 .rd-card:hover{box-shadow:0 4px 14px rgba(16,24,40,.08)}
@@ -1011,9 +1011,24 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
     <!-- NEWS SEARCH -->
     <section class="page" id="p-nwsearch">
       <div class="pagehead"><div><h1>News Search</h1><p>Collect news articles for your keywords and period — media articles only. Two engines: <b>Multi-source</b> (Google News, every outlet, media sitemaps &amp; RSS, Bing, GDELT — no browser) or <b>Browser</b> (Google pages, the way a person searches). No API.</p></div></div>
-      <div class="seg nw-mode" id="nwMode" style="margin:0 0 16px"><button data-m="kw" class="on"><svg class="i"><use href="#i-search"/></svg> Search by keyword</button><button data-m="bulk"><svg class="i"><use href="#i-link"/></svg> Bulk links</button></div>
+      <div class="seg nw-mode" id="nwMode" style="margin:0 0 16px"><button data-m="kw" class="on"><svg class="i"><use href="#i-search"/></svg> Search by keyword</button><button data-m="bulk"><svg class="i"><use href="#i-link"/></svg> Bulk links</button><button data-m="compare"><svg class="i"><use href="#i-chart"/></svg> Compare with a list</button></div>
       <div class="collect">
         <div style="display:flex;flex-direction:column;gap:16px" id="nwLeft">
+          <div class="card" id="cmpCard" hidden><div class="card-hd"><h3>Compare with another list</h3><div class="tools"><span class="tag likely" id="cmpCount">0 links</span></div></div>
+            <div class="card-bd">
+              <p class="hint" style="margin:0 0 8px">Paste the links another service delivered (e.g. a competitor, for the same keyword and day). For each one: whether this server has it — and if not, <b>why</b>. Then read the missing ones at once.</p>
+              <div class="field" style="margin:0"><textarea id="cmpLinks" rows="10" spellcheck="false" aria-label="Links to compare" placeholder="https://…&#10;https://…" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px"></textarea></div>
+              <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px"><button class="btn primary" id="cmpGo"><svg class="i"><use href="#i-chart"/></svg>Compare</button></div>
+              <div class="alert" id="cmpMsg"></div>
+              <div id="cmpOut" hidden style="margin-top:12px;display:flex;flex-direction:column;gap:12px">
+                <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><b id="cmpHave" style="font-size:26px"></b><span class="hint" id="cmpHaveS"></span></div>
+                <div class="bar-stack" id="cmpBar" style="display:flex;height:10px;border-radius:5px;overflow:hidden;background:var(--line)"></div>
+                <div id="cmpReasons" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:6px 14px;font-size:13px"></div>
+                <div id="cmpOutlets" class="hint"></div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" id="cmpFetch">Read the missing ones now</button><button class="btn need-admin" id="cmpAdd">Add the missing outlets to the list</button></div>
+                <div class="tblwrap" style="max-height:420px;overflow:auto"><table class="tbl"><thead><tr><th>Link</th><th>Status</th><th>Detail</th></tr></thead><tbody id="cmpBody"></tbody></table></div>
+              </div>
+            </div></div>
           <div class="card" id="nbCard" hidden><div class="card-hd"><h3>Bulk links</h3><div class="tools"><span class="tag likely" id="nbCount">0 links</span><button class="btn sm" id="nbClear">Clear</button></div></div>
             <div class="card-bd">
               <p class="hint" style="margin:0 0 8px">Paste article links — one per line, thousands are fine. Every link is opened and read straight away: <b>no search, no date or keyword filter</b>. Google News links are turned into the media's own link first.</p>
@@ -1311,7 +1326,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
         </div>
         <div class="field" style="margin-top:12px"><label for="lsSfKw">Stream keywords (one per line; every report topic is added automatically)</label><textarea id="lsSfKw" rows="4" placeholder="banjir&#10;pemadaman listrik&#10;&quot;air bersih&quot; NOT iklan"></textarea></div>
         <div class="field" style="margin-top:12px"><label for="lsSfEx">Never read these outlets (one per line, e.g. a media that forbids crawling without permission)</label><textarea id="lsSfEx" rows="3" placeholder="antaranews.com"></textarea></div>
-        <div style="display:flex;gap:18px;margin:6px 0 14px;flex-wrap:wrap"><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfUseRss"> RSS engine</label><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfUseSm"> Sitemap engine</label><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfRobots"> Respect each outlet's robots.txt (recommended)</label><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfHStart"> Check every site when the stream starts</label><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfAll"> Take every link not yet in the database, whatever its date</label><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfHome"> Also read each outlet's front page</label></div>
+        <div style="display:flex;gap:18px;margin:6px 0 14px;flex-wrap:wrap"><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfUseRss"> RSS engine</label><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfUseSm"> Sitemap engine</label><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfRobots"> Respect each outlet's robots.txt (recommended)</label><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfHStart"> Check every site when the stream starts</label><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfAll"> Take every link not yet in the database, whatever its date</label><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfHome"> Also read each outlet's front page</label><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfAuto"> Add outlets that News Search / Bulk links find (the list grows by itself)</label><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfRetry"> Try failed articles again later (timeouts, busy servers)</label></div>
         <div style="border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:0 0 14px">
           <b style="font-size:13.5px">When a site refuses the normal request</b>
           <p class="hint" style="margin:4px 0 8px">The article reader then tries other ways. Two of them get round a site's own refusal — you choose. The numbers show what each brought in the last 7 days, so you can see what turning one off would cost.</p>
@@ -2411,8 +2426,11 @@ const nbLinks = () => [...new Set(($('nbLinks').value.match(/https?:\/\/[^\s,;<>
 function nwSetMode(m){
   NWMODE = m; ls.set('nw_mode', m); const bulk = m === 'bulk';
   document.querySelectorAll('#nwMode button').forEach(b => b.classList.toggle('on', b.dataset.m === m));
-  [...$('nwLeft').children].forEach(c => { c.hidden = c.id === 'nbCard' ? !bulk : bulk; });
-  [...$('nwRight').children].forEach((c, i) => { if (i) c.hidden = bulk; });     // the Run card stays
+  const cmp = m === 'compare';
+  [...$('nwLeft').children].forEach(c => { c.hidden = c.id === 'nbCard' ? !bulk : c.id === 'cmpCard' ? !cmp : (bulk || cmp); });
+  [...$('nwRight').children].forEach((c, i) => { if (i) c.hidden = bulk || cmp; });     // the Run card stays
+  $('nwRight').hidden = cmp;
+  $('nwLeft').style.gridColumn = cmp ? '1 / -1' : '';
   $('nBtnStart').innerHTML = bulk ? '<svg class="i"><use href="#i-link"/></svg>Process links' : '<svg class="i"><use href="#i-news"/></svg>Start news search';
   $('nBtnSched').hidden = bulk; nbCount();
   $('nwRight').children[0].querySelectorAll('.stats, .card-bd > p.hint').forEach(e => e.style.display = bulk ? 'none' : '');
@@ -2422,6 +2440,36 @@ document.querySelectorAll('#nwMode button').forEach(b => b.onclick = () => nwSet
 $('nbLinks').addEventListener('input', nbCount);
 $('nbClear').onclick = () => { $('nbLinks').value = ''; nbCount(); };
 nwSetMode(NWMODE);
+const CMPC = {have: 'var(--ok, #16a34a)', waiting: '#14b8a6', failed: 'var(--bad, #d03b3b)', not_article: '#8a92a3', refused: '#b45309', not_found: '#e0a100', not_registered: '#2a78d6'};
+let CMP = null;
+const cmpLinks = () => [...new Set(($('cmpLinks').value.match(/https?:\/\/[^\s,;<>"']+/g) || []))];
+$('cmpLinks').addEventListener('input', () => { const n = cmpLinks().length; $('cmpCount').textContent = `${fmt(n)} link${n === 1 ? '' : 's'}`; });
+$('cmpGo').onclick = async () => {
+  const m = $('cmpMsg'); m.className = 'alert';
+  if (!cmpLinks().length){ m.textContent = 'Paste the other list\'s links first.'; m.className = 'alert show err'; return; }
+  $('cmpGo').disabled = true; $('cmpGo').textContent = 'Comparing…';
+  const r = await api('/api/compare', {links: $('cmpLinks').value});
+  $('cmpGo').disabled = false; $('cmpGo').innerHTML = '<svg class="i"><use href="#i-chart"/></svg>Compare';
+  if (!r || !r.ok){ m.textContent = (r && r.error) || 'Not compared'; m.className = 'alert show err'; return; }
+  CMP = r; $('cmpOut').hidden = false;
+  $('cmpHave').textContent = r.have_pct + '%';
+  $('cmpHaveS').textContent = `of ${fmt(r.total)} links are in your database (${fmt(r.have)}) · ${fmt(r.total - r.have)} missing`;
+  const ks = Object.keys(r.counts).filter(k => r.counts[k].n);
+  $('cmpBar').innerHTML = ks.map(k => `<span title="${esc(r.counts[k].label)}: ${r.counts[k].n}" style="width:${r.counts[k].n * 100 / r.total}%;background:${CMPC[k]}"></span>`).join('');
+  $('cmpReasons').innerHTML = ks.map(k => `<span style="display:flex;align-items:center;gap:7px"><i style="width:9px;height:9px;border-radius:2px;background:${CMPC[k]}"></i>${esc(r.counts[k].label)}<b style="margin-left:auto">${fmt(r.counts[k].n)}</b></span>`).join('');
+  $('cmpOutlets').innerHTML = r.top_missing_outlets.length ? 'Most missing from: ' + r.top_missing_outlets.slice(0, 10).map(([d, n]) => `<b>${esc(d)}</b> ${n}`).join(' · ') : '';
+  $('cmpFetch').textContent = `Read the ${fmt(r.fetchable.length)} missing ones now`; $('cmpFetch').disabled = !r.fetchable.length;
+  $('cmpAdd').textContent = `Add ${fmt(r.missing_outlets.length)} missing outlet(s) to the list`; $('cmpAdd').disabled = !r.missing_outlets.length;
+  $('cmpBody').innerHTML = r.rows.filter(x => x.status !== 'have').concat(r.rows.filter(x => x.status === 'have')).slice(0, 1500).map(x => `<tr>
+    <td class="url"><a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.url.replace(/^https?:\/\/(www\.)?/, ''))}</a></td>
+    <td><span style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap"><i style="width:8px;height:8px;border-radius:2px;background:${CMPC[x.status]}"></i>${esc(x.reason)}</span></td>
+    <td><small>${esc(x.error || x.title || '')}</small></td></tr>`).join('');
+};
+$('cmpFetch').onclick = () => { if (!CMP) return; $('nbLinks').value = CMP.fetchable.join('\n'); nwSetMode('bulk'); nbCount();
+  toast(`${fmt(CMP.fetchable.length)} links ready — press Process links`); };
+$('cmpAdd').onclick = async () => { if (!CMP) return;
+  const r = await api('/api/media/add', {text: CMP.missing_outlets.map(([d]) => d).join('\n')});
+  toast(r && r.ok ? `${fmt((r.added || []).length)} outlet(s) added — the Live Stream reads them from now on` : (r && r.error) || 'Not added'); };
 async function nbStart(){
   const n = nbLinks().length;
   if (!n){ nwAlert('Paste at least one link (starting with http:// or https://).'); $('nbLinks').focus(); return; }
@@ -2969,7 +3017,8 @@ async function loadStream(){
   $('lsSRead').textContent = fmt(d.today.read); $('lsSReadS').textContent = `${fmt(d.today.failed)} could not be read · ${fmt(d.today.skipped || 0)} skipped (robots.txt / excluded) · ${fmt(d.stored)} stored`;
   $('lsSPace').textContent = fmt(d.per_minute) + ' /min'; $('lsSPaceS').textContent = d.running ? `≈ ${fmt(d.per_day_pace)} per day at this pace` : 'stream is stopped';
   $('lsSMatch').textContent = fmt(d.today.matched); $('lsSMatchS').textContent = `${d.keywords} keyword(s) incl. report topics`;
-  $('lsSQueue').textContent = fmt(d.queue); $('lsSQueueS').textContent = `${fmt(d.today.found)} new links found today`;
+  $('lsSQueue').textContent = fmt(d.queue);
+  $('lsSQueueS').textContent = (d.queue_fresh !== undefined ? `${fmt(d.queue_fresh)} recent news (read first) · ${fmt(Math.max(0, d.queue - d.queue_fresh))} older · ` : '') + `${fmt(d.today.found)} new links found today`;
   const sr = d.sources || {}, row = (k, label) => { const x = sr[k] || {}; return `<div class="hs-foot" style="border-top:0;padding:4px 0"><span><b style="font-size:13px!important">${label}</b></span><b>${fmt(x.n || 0)}</b></div>
     <div class="hs-foot"><span>checked so far</span><b>${fmt(x.checked || 0)}</b></div><div class="hs-foot"><span>with new articles</span><b>${fmt(x.productive || 0)}</b></div><div class="hs-foot"><span>unreachable</span><b>${fmt(x.dead || 0)}</b></div>`; };
   const tr = d.tiers || {}, every = m => m >= 1440 ? `${+(m / 1440).toFixed(1)} day${m >= 2880 ? 's' : ''}` : m >= 60 ? `${+(m / 60).toFixed(1)} h` : `${m} min`;
@@ -3011,6 +3060,7 @@ async function loadStream(){
     $('lsSfRet').value = cfg.retention_days; $('lsSfGap').value = cfg.domain_gap; $('lsSfKw').value = (cfg.keywords || []).join('\n');
     $('lsSfUseRss').checked = !!cfg.rss; $('lsSfUseSm').checked = !!cfg.sitemaps; $('lsSfRobots').checked = cfg.robots !== false;
     $('lsSfGb').checked = cfg.fetch_googlebot !== false; $('lsSfCs').checked = cfg.fetch_cloudscraper !== false;
+    $('lsSfAuto').checked = cfg.auto_add_media !== false; $('lsSfRetry').checked = cfg.retry_failed !== false;
     $('lsSfEx').value = (cfg.exclude_domains || []).join('\n'); }
   const days = d.days || [], cur = $('lsDay').value;
   $('lsDay').innerHTML = days.length ? days.map(x => `<option value="${x}">${new Date(x + 'T00:00:00').toLocaleDateString([], {weekday: 'short', day: '2-digit', month: 'short', year: 'numeric'})}</option>`).join('') : '<option value="">No articles yet</option>';
@@ -3031,7 +3081,8 @@ $('lsSfSave').onclick = async () => {
     catchup_days: +$('lsSfCuD').value, catchup_hour: +$('lsSfCuH').value,
     top_n: +$('lsSfTop').value, top2_n: +$('lsSfTop2').value, active2_hours: +$('lsSfA2').value, semi_hours: +$('lsSfSemi').value, rare_hours: +$('lsSfRare').value, inactive_days: +$('lsSfIn').value, dead_days: +$('lsSfDead').value,
     rss: $('lsSfUseRss').checked, sitemaps: $('lsSfUseSm').checked, robots: $('lsSfRobots').checked, exclude_domains: $('lsSfEx').value,
-    fetch_googlebot: $('lsSfGb').checked, fetch_cloudscraper: $('lsSfCs').checked});
+    fetch_googlebot: $('lsSfGb').checked, fetch_cloudscraper: $('lsSfCs').checked,
+    auto_add_media: $('lsSfAuto').checked, retry_failed: $('lsSfRetry').checked});
   $('lsSfMsg').textContent = r && r.ok ? 'Saved.' : (r && r.error) || 'Not saved'; loadStream.filled = false; loadStream(); };
 $('lsExport').onclick = async () => { const r = await api('/api/stream/export', {day: $('lsDay').value});
   if (r && r.ok === false) return toast(r.error || 'Not started'); toast('Making the Excel…'); setTimeout(loadStream, 800);

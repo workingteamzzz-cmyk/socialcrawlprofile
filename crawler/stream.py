@@ -34,7 +34,8 @@ DEFAULTS = {"enabled": False, "threads": 8, "discovery_threads": 8, "rss_minutes
             "top_n": 1000, "top2_n": 2000, "active2_hours": 2, "semi_hours": 4, "rare_hours": 24, "inactive_days": 3, "dead_days": 7,
             "retention_days": 0, "max_age_hours": 48, "all_links": True, "old_per_check": 1000, "homepage": True, "domain_gap": 1.5, "rss": True, "sitemaps": True,
             "keywords": [], "robots": True, "exclude_domains": [],
-            "fetch_googlebot": True, "fetch_cloudscraper": True}     # refused pages: see fetch_policy.py
+            "fetch_googlebot": True, "fetch_cloudscraper": True,     # refused pages: see fetch_policy.py
+            "auto_add_media": True, "retry_failed": True}             # outlets found by News Search; retry later
 LIMITS = {"threads": (2, 64), "discovery_threads": (2, 48), "rss_minutes": (2, 240), "sitemap_minutes": (10, 720),
           "old_per_check": (0, 20000),
           "catchup_days": (0, 7), "catchup_hour": (0, 23), "health_weekday": (0, 6), "health_hour": (0, 23), "report_weekday": (0, 6), "report_hour": (0, 23),
@@ -135,7 +136,7 @@ def save_settings(data: dict) -> dict:
         elif k == "domain_gap":
             v = max(0.5, min(30.0, float(v)))
         elif k in ("rss", "sitemaps", "robots", "weekly_report", "health_on_start", "all_links", "homepage",
-                   "fetch_googlebot", "fetch_cloudscraper"):
+                   "fetch_googlebot", "fetch_cloudscraper", "auto_add_media", "retry_failed"):
             v = bool(v)
         elif k == "exclude_domains":
             items = v if isinstance(v, list) else re.split(r"[\n,\s]+", str(v or ""))
@@ -156,7 +157,7 @@ def _write_settings(cur: dict) -> None:
     os.replace(tmp, os.path.join(_dir(), "settings.json"))
 
 
-JUNK_VERSION = "v42"                       # bump when online_clean's page filter learns new titles
+JUNK_VERSION = "v47"                       # bump when online_clean's page filter learns new titles
 
 
 # ---------- the engine ----------
@@ -174,7 +175,8 @@ class Stream:
         self._db.executescript(ARCHIVE_SCHEMA)
         for sql in ("ALTER TABLE hourly ADD COLUMN skipped INTEGER DEFAULT 0",          # databases from v23
                     "ALTER TABLE sources ADD COLUMN tier TEXT DEFAULT 'new'",
-                    "ALTER TABLE articles ADD COLUMN sentiment TEXT DEFAULT ''"):            # databases before v33
+                    "ALTER TABLE articles ADD COLUMN sentiment TEXT DEFAULT ''",             # databases before v33
+                    "ALTER TABLE articles ADD COLUMN tries INTEGER DEFAULT 0"):               # before v47
             try:
                 self._db.execute(sql)
             except sqlite3.OperationalError:
@@ -203,7 +205,12 @@ class Stream:
         self.by_domain: dict[str, deque] = {}
         self.busy_domains: set = set()
         self.next_ok: dict[str, float] = {}
-        self.rr = deque()                      # round-robin over domains with work
+        self.rr = deque()                      # round-robin over domains with work (fresh news lane)
+        self.by_domain_old: dict[str, deque] = {}   # the backlog lane: older articles and media-archive jobs
+        self.rr_old = deque()
+        self.qn_old = 0                        # of qn, how many wait in the backlog lane
+        self._cut = (0.0, "")                  # cutoff date, cached for a minute
+        self.disk_brake = False                # the disk is nearly full: no older links taken in
         self.kw_cache = (0.0, [])
         self.last_error = ""
         self.cfg = settings()
@@ -295,6 +302,10 @@ class Stream:
                 for j in q or []:
                     self.queued.discard(j["key"])
                     self.qn -= 1
+                for j in self.by_domain_old.pop(d, None) or []:
+                    self.queued.discard(j["key"])
+                    self.qn -= 1
+                    self.qn_old -= 1
                 self.tiers.pop(d, None)
             self._db.commit()
 
@@ -388,7 +399,7 @@ class Stream:
         from .medmas.filters import is_article_link
         from .online_clean import is_junk_page
         cutoff = self.cutoff()
-        take_all = bool(self.cfg.get("all_links", True))
+        take_all = bool(self.cfg.get("all_links", True)) and not self.disk_brake
         room_old = int(self.cfg.get("old_per_check", 1000)) if take_all else 0
         now, rows = time.time(), []
         for it in items:
@@ -433,16 +444,33 @@ class Stream:
                                    "feed_time": ft}, front=front and not old)       # older ones wait behind the news
         return len(fresh)
 
+    def _fresh_cutoff(self) -> str:
+        if time.time() - self._cut[0] > 60:
+            self._cut = (time.time(), self.cutoff())
+        return self._cut[1]
+
+    def is_fresh(self, job: dict) -> bool:
+        """The fresh-news lane: published within the stream's days (or no date known) and not a media-archive job."""
+        if (job.get("source") or "").startswith("backfill:"):
+            return False
+        d = (job.get("feed_date") or "")[:10]
+        return not d or d >= self._fresh_cutoff()
+
     def _enqueue(self, job: dict, front: bool = False) -> None:
         if job["key"] in self.queued:
             return
         self.queued.add(job["key"])
         self.qn += 1
         dom = job["domain"] or norm_key(job["url"]).split("/")[0]
-        if dom not in self.by_domain:
-            self.by_domain[dom] = deque()
-            self.rr.appendleft(dom) if front else self.rr.append(dom)
-        (self.by_domain[dom].appendleft if front else self.by_domain[dom].append)(job)
+        if self.is_fresh(job):
+            by, rr = self.by_domain, self.rr
+        else:
+            by, rr = self.by_domain_old, self.rr_old
+            self.qn_old += 1
+        if dom not in by:
+            by[dom] = deque()
+            rr.appendleft(dom) if front else rr.append(dom)
+        (by[dom].appendleft if front else by[dom].append)(job)
 
     def check_rss(self, src) -> tuple[int, bool, dict]:
         import requests
@@ -563,34 +591,58 @@ class Stream:
 
     # ----- readers -----
     def refill(self) -> None:
+        """Articles waiting in the database -> the lanes: fresh news first (by date, then the undated, newest
+        found first); the backlog lane is topped up separately, so millions of older links never crowd the news."""
+        cols = "key, url, domain, title, feed_date, feed_time, source"
         with self.lock:
-            if self.qn > 4000:
-                return
-            rows = self._db.execute("SELECT key, url, domain, title, feed_date, feed_time, source FROM articles "
-                                    "WHERE status='new' ORDER BY discovered DESC LIMIT 3000").fetchall()
-            for r in rows:                       # left-overs (e.g. after a restart), newest first
-                self._enqueue(dict(r))
+            fresh_n = self.qn - self.qn_old
+            if fresh_n < 2000:
+                cut = self._fresh_cutoff()
+                rows = self._db.execute(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date >= ? "
+                                        "ORDER BY feed_date DESC LIMIT 3000", (cut,)).fetchall()
+                rows += self._db.execute(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date = '' "
+                                         "ORDER BY discovered DESC LIMIT 1500").fetchall()
+                for r in rows:
+                    self._enqueue(dict(r))
+            if self.qn_old < 1500:
+                cut = self._fresh_cutoff()
+                for r in self._db.execute(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date > '' AND "
+                                          "feed_date < ? ORDER BY feed_date DESC LIMIT 2000", (cut,)).fetchall():
+                    self._enqueue(dict(r))
 
-    def next_job(self):
-        """The next article to read: round robin over outlets, one page at a time per outlet, a pause between."""
+    def _take(self, by: dict, rr: deque, now: float):
+        for _ in range(len(rr)):
+            dom = rr[0]
+            rr.rotate(-1)
+            q = by.get(dom)
+            if not q:
+                by.pop(dom, None)
+                try:
+                    rr.remove(dom)
+                except ValueError:
+                    pass
+                continue
+            if dom in self.busy_domains or self.next_ok.get(dom, 0) > now:
+                continue
+            self.busy_domains.add(dom)
+            self.qn -= 1
+            return dom, q.popleft()
+        return None
+
+    def next_job(self, backlog_first: bool = False):
+        """The next article to read: round robin over outlets, one page at a time per outlet, a pause between.
+        Fresh news always first; the backlog lane only when no fresh page can be read right now — except for the
+        one backlog reader (backlog_first), which keeps the archive moving."""
         with self.lock:
             now = time.time()
-            for _ in range(len(self.rr)):
-                dom = self.rr[0]
-                self.rr.rotate(-1)
-                q = self.by_domain.get(dom)
-                if not q:
-                    self.by_domain.pop(dom, None)
-                    try:
-                        self.rr.remove(dom)
-                    except ValueError:
-                        pass
-                    continue
-                if dom in self.busy_domains or self.next_ok.get(dom, 0) > now:
-                    continue
-                self.busy_domains.add(dom)
-                self.qn -= 1
-                return dom, q.popleft()
+            lanes = [(self.by_domain_old, self.rr_old, True), (self.by_domain, self.rr, False)] if backlog_first else \
+                [(self.by_domain, self.rr, False), (self.by_domain_old, self.rr_old, True)]
+            for by, rr, old in lanes:
+                got = self._take(by, rr, now)
+                if got:
+                    if old:
+                        self.qn_old -= 1
+                    return got
         return None
 
     def keywords(self) -> list[str]:
@@ -714,10 +766,10 @@ class Stream:
                "keyword": ", ".join(matched)}
         archive.add_rows("online", [row], WIB)
 
-    def reader_loop(self) -> None:
+    def reader_loop(self, backlog_first: bool = False) -> None:
         ev = self.stop_event                                 # this run's event: a restart never revives old threads
         while not ev.is_set():
-            got = self.next_job()
+            got = self.next_job(backlog_first)
             if not got:
                 ev.wait(0.3)
                 continue
@@ -774,6 +826,66 @@ class Stream:
         return {"days": days, "total": total,
                 "methods": {m: {"n": n, "pct": round(n * 100 / total, 2) if total else 0} for m, n in got.items()}}
 
+    TEMPORARY = ("Timeout", "ConnectionError", "HTTP 429", "HTTP 500", "HTTP 502", "HTTP 503", "HTTP 504",
+                 "HTTP 520", "HTTP 521", "HTTP 522", "HTTP 523", "HTTP 524", "Empty content")
+
+    def retry_failed(self, after_h: float = 3, max_tries: int = 2, days: int = 3) -> int:
+        """Articles that failed for a passing reason (timeout, connection, a busy server: 5xx / 429, an empty
+        answer) go back to the queue after a few hours — at most twice, only from the last days."""
+        if not self.cfg.get("retry_failed", True):
+            return 0
+        now = time.time()
+        q = ','.join('?' * len(self.TEMPORARY))
+        keys = [r["key"] for r in self.rq(
+            f"SELECT key FROM articles WHERE status='failed' AND discovered > ? AND fetched < ? AND "
+            f"COALESCE(tries, 0) < ? AND error IN ({q}) LIMIT 5000",
+            (now - days * 86400, now - after_h * 3600, max_tries, *self.TEMPORARY))]
+        if not keys:
+            return 0
+        with self.lock:
+            for i in range(0, len(keys), 500):
+                part = keys[i:i + 500]
+                self._db.execute(f"UPDATE articles SET status='new', tries=COALESCE(tries, 0) + 1 WHERE key IN "
+                                 f"({','.join('?' * len(part))})", part)
+            self._db.commit()
+            self.counts["retried"] = self.counts.get("retried", 0) + len(keys)
+        return len(keys)
+
+    DISK_WARN = (75, 90)            # % used: a Telegram message once per level (again after it went back down)
+    DISK_BRAKE_GB = 5               # free space below this: older links are not taken in (news still is)
+
+    def disk_guard(self, notify=None) -> dict:
+        """Warns before the disk fills and, when it nearly has, stops taking in older links (the backlog), so today's
+        news keeps being stored. The brake lifts by itself once there is room again."""
+        from .overview import disk
+        d = disk()
+        if not d:
+            return {}
+        pct, free_gb = d["used_pct"], d["free"] / 1e9
+        level = max([w for w in self.DISK_WARN if pct >= w], default=0)
+        sent = int(self.meta("disk_warned") or 0)
+        if level > sent:
+            msg = (f"💽 Server disk {pct:.0f}% full — {free_gb:.1f} GB left. "
+                   + ("Make the disk bigger soon, or free up space (Exports → Free up space by period)." if level < 90
+                      else "Make the disk bigger now — older links stop being taken in at "
+                           f"{self.DISK_BRAKE_GB} GB left."))
+            try:
+                if notify:
+                    notify(msg)
+                else:
+                    from .captcha import notify as _notify
+                    _notify(msg)
+            except Exception:  # noqa: BLE001
+                pass
+            self.meta("disk_warned", str(level))
+        elif level < sent:
+            self.meta("disk_warned", str(level))
+        brake = free_gb < self.DISK_BRAKE_GB
+        if brake != self.disk_brake:
+            self.disk_brake = brake
+            self.last_error = (f"disk: {free_gb:.1f} GB left — older links paused, news still read" if brake else "")
+        return {"used_pct": pct, "free_gb": round(free_gb, 1), "brake": brake, "warned": max(level, 0)}
+
     def drop_junk_titles(self) -> int:
         """Articles read before the filter knew their title was no news ("Banner Link", "Berita Terkini"…): taken out
         of News Stream, the search and the exports (status 'filtered'). Once per filter version."""
@@ -800,11 +912,15 @@ class Stream:
             self._db.execute("CREATE INDEX IF NOT EXISTS a_disc_ds ON articles(discovered, domain, status)")
             self._db.execute("CREATE INDEX IF NOT EXISTS a_fail_err ON articles(discovered, domain, error) "
                              "WHERE status='failed'")
+            self._db.execute("CREATE INDEX IF NOT EXISTS a_new_fd ON articles(feed_date, discovered) "
+                             "WHERE status='new'")      # the fresh lane's refill: news by date, never a scan
             self._db.commit()
 
     def house_loop(self) -> None:
         ev = self.stop_event
         last_purge = last_tiers = 0.0
+        last_retry = time.time()
+        last_disk = 0.0
         try:
             self.ensure_indexes()
         except Exception as e:  # noqa: BLE001
@@ -819,6 +935,18 @@ class Stream:
                     step()
                 except Exception as e:  # noqa: BLE001  each step on its own: one failing never stops the others
                     self.last_error = f"{name}: {str(e)[:120]}"
+            if time.time() - last_disk > 600:
+                last_disk = time.time()
+                try:
+                    self.disk_guard()
+                except Exception as e:  # noqa: BLE001
+                    self.last_error = f"disk check: {str(e)[:120]}"
+            if time.time() - last_retry > 1800:
+                last_retry = time.time()
+                try:
+                    self.retry_failed()
+                except Exception as e:  # noqa: BLE001
+                    self.last_error = f"retry: {str(e)[:120]}"
             if time.time() - last_tiers > 600:
                 last_tiers = time.time()
                 try:
@@ -1160,7 +1288,8 @@ class Stream:
                             threading.Thread(target=self.house_loop, daemon=True, name="stream-house"),
                             threading.Thread(target=self._feeds_loop, daemon=True, name="stream-feeds"),
                             threading.Thread(target=self._backfill_loop, daemon=True, name="stream-archive")]
-            self.threads += [threading.Thread(target=self.reader_loop, daemon=True, name=f"stream-reader-{i}")
+            self.threads += [threading.Thread(target=self.reader_loop, args=(i == 0 and self.cfg["threads"] >= 4,),
+                                              daemon=True, name=f"stream-reader-{i}")      # reader 0: the backlog's
                              for i in range(self.cfg["threads"])]
             for t in self.threads:
                 t.start()
@@ -1180,8 +1309,10 @@ class Stream:
             with self.lock:
                 self.by_domain.clear()
                 self.rr.clear()
+                self.by_domain_old.clear()
+                self.rr_old.clear()
                 self.queued.clear()
-                self.qn = 0
+                self.qn = self.qn_old = 0
 
     def live_state(self) -> dict:
         """What only the running engine knows (the worker process writes it for the web process every 2 s)."""
@@ -1191,7 +1322,8 @@ class Stream:
         with self.lock:
             return {"t": now, "running": self.running, "since": int(self.started) if self.running else 0,
                     "per_minute": round(per_min, 1), "per_day_pace": int(per_min * 60 * 24),
-                    "readers_busy": len(self.busy_domains), "queue_mem": self.qn, "last_error": self.last_error,
+                    "readers_busy": len(self.busy_domains), "queue_mem": self.qn, "queue_backlog_mem": self.qn_old,
+                    "last_error": self.last_error,
                     "export": dict(self.export), "health": dict(self.health), "catchup": dict(self.catchup)}
 
     def days_with_articles(self) -> list[str]:
@@ -1239,6 +1371,8 @@ class Stream:
         live = read_live() if _WORKER_PARENT else None
         out = {"running": self.running, "since": int(self.started) if self.running else 0, "settings": settings(),
                 "queue": self.rq("SELECT COUNT(*) n FROM articles WHERE status='new'")[0]["n"],
+                "queue_fresh": self.rq("SELECT COUNT(*) n FROM articles WHERE status='new' AND (feed_date >= ? OR "
+                                       "feed_date = '')", (self.cutoff(),))[0]["n"],
                 "stored": self.rq("SELECT COUNT(*) n FROM articles WHERE status='success'")[0]["n"],
                 "per_minute": round(per_min, 1), "per_day_pace": int(per_min * 60 * 24), "today": day,
                 "hourly": series, "sources": src, "keywords": len(self.keywords()), "db_mb": round(size / 1e6, 1),

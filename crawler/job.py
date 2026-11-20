@@ -197,6 +197,18 @@ class Job:
         self.thread.start()
         return None
 
+    def _discover(self, urls, source: str) -> None:
+        """Outlets this run found that the Live Stream does not read yet are added to the registered media."""
+        try:
+            from . import media_db
+            added = media_db.discover(urls, source)
+        except Exception as e:  # noqa: BLE001
+            self.log(f"⚠ New outlets not added: {str(e)[:120]}")
+            return
+        if added:
+            self.log(f"🆕 {len(added)} new outlet(s) added to the Live Stream: {', '.join(added[:12])}"
+                     + (f" (+{len(added) - 12} more)" if len(added) > 12 else ""))
+
     def _run_summary(self, kind: str) -> None:
         """What this run did, against what the server already had: found, new, already known, taken from the Live
         Stream instead of downloaded, credits — in the log, and for the schedule (its pace and its history)."""
@@ -1101,6 +1113,7 @@ class Job:
             rows, extra, stat = news_multi.run(kws, f"{d_start:%Y-%m-%d}", f"{d_end:%Y-%m-%d}", opt, tz, self.log,
                                                self.stop_flag, APP_DATA, OUTPUT_DIR, on_row=live)
             self._reused = stat.get("reused_stream", 0)
+            self._discover([r.get("url") for r in rows], "News Search")
             with self.lock:                                   # the final rows (with the engine's sentiment) replace the live copies
                 final = {_key(r["url"]) for r in rows} & live_keys   # a live article missing from the end stays
                 for k in final:
@@ -1202,6 +1215,7 @@ class Job:
         rows, stat = news_multi.import_links(links, tz, self.log, self.stop_flag, APP_DATA, OUTPUT_DIR, force,
                                              on_row=live)
         self._reused = stat.get("reused_stream", 0)
+        self._discover([r.get("url") for r in rows], "Bulk links")
         with self.lock:                           # the final rows (with sentiment) replace the live copies
             for r in rows:
                 r["keywords"] = [r["keyword"]]

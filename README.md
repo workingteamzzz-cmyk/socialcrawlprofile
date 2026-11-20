@@ -329,6 +329,25 @@ Measured on a 4-CPU test machine with local test sites: ~37 articles/second (≈
 core. On the real internet the pace is set by how many articles the media publish and how fast their sites answer; the
 page shows the live pace and the "per day at this pace" figure.
 
+## Richer data (v47)
+
+- **Fresh-news lane**: the Live Stream keeps two queues — news from the stream's days (and undated links) and the
+  backlog (older links, media-archive jobs). Readers always take fresh news first; one reader works the backlog, the
+  others take it only when no fresh page can be read. "Waiting to be read" shows both.
+- **The media list grows by itself**: an outlet News Search or Bulk links found that the list lacks is registered and
+  read by the Live Stream from then on (platforms, aggregators and excluded outlets are left out; Stream settings).
+- **Second tries**: articles that failed for a passing reason (timeout, connection, 5xx / 429, empty answer) are
+  queued again after 3 hours, at most twice.
+- **Compare with a list** (News Search): paste another service's links — the share already in your database, and for
+  each missing one why (could not be read, filtered, outlet registered but article not found, outlet not in the list);
+  read the missing ones at once, add the missing outlets.
+- **Disk safety**: a Telegram message at 75% and at 90% full; under 5 GB free, older links are not taken in (news
+  still is) until there is room again.
+- **Follows a server resize**: `install-server.sh` sets the app's memory / CPU share from the server's size
+  (`COLLECTOR_MEM`, `COLLECTOR_CPUS` in `.env`). After a resize, run it again.
+- Newsroom policy pages ("Kode Etik Jurnalistik", "Standar Perlindungan Profesi Wartawan", "Susunan Redaksi …") are
+  not news: skipped, and ones already stored leave News Stream and the exports.
+
 ## When a site refuses the normal request (Googlebot / cloudscraper)
 
 The article reader (the team's engine) tries a normal browser request, then — when refused — asks again as

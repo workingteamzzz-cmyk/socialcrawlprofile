@@ -751,3 +751,17 @@ def test_scrolling_stops_where_earlier_runs_got_to():
     screens = iter([[f"https://x.com/a/status/{i}" for i in range(s, s + 5)] for s in range(0, 100, 5)])
     shown.clear()
     assert len(c._scroll_loop({}, extract, 0, 5, 50, 0)) == 100              # manual runs: everything, as before
+
+
+def test_newsroom_policy_pages_are_not_news():
+    """'Kode Etik Jurnalistik', 'Standar Perlindungan Profesi Wartawan'… pages are skipped; news about them stays."""
+    from crawler.online_clean import is_junk_page
+    for t in ("Kode Etik Jurnalistik", "Kode Etik Monitor Indonesia", "Standar Perlindungan Profesi Wartawan",
+              "Pedoman Media Siber - Kompas.com", "Susunan Redaksi Radar Bogor", "Visi dan Misi", "Kontak Kami"):
+        assert is_junk_page(t), t
+    for t in ("Kode Etik Jurnalistik Dilanggar, Dewan Pers Panggil Redaksi Tempo", "Hak Jawab PT XYZ atas Pemberitaan",
+              "Karir Messi di Barcelona Berakhir", "Kontak Senjata di Papua, Dua Prajurit Gugur",
+              "Kerja Sama RI-China Kunci Ketahanan Pangan", "Sejarah Kota Bogor"):
+        assert not is_junk_page(t), t
+    assert is_junk_page("", "https://monitorindonesia.com/kode-etik-jurnalistik/")
+    assert is_junk_page("", "https://koranbuleleng.com/standar-perlindungan-profesi-wartawan")

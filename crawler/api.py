@@ -672,6 +672,17 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
             keywords=body.keywords[:20])
         return answer(err)
 
+    @app.post("/api/compare", tags=["jobs"], dependencies=op,
+              summary="Compare with another list (e.g. a competitor's links): have it, or why not")
+    def compare_lists(body: dict, request: Request):
+        from . import compare
+        try:
+            out = compare.compare(str(body.get("links") or "")[:3_000_000])
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        log(request, "compared with another list", links=out["total"], have=out["have"])
+        return {"ok": True, **out}
+
     @app.post("/api/news/bulk", tags=["jobs"], dependencies=op,
               summary="Bulk links: read the articles of pasted links (no search, no date / keyword filter)")
     def news_bulk(body: BulkLinks, request: Request):

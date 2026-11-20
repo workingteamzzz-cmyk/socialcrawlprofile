@@ -1211,6 +1211,7 @@ mark{background:rgba(250,178,25,.35);color:inherit;border-radius:2px;padding:0 1
             <div class="hint" id="apUsage" style="margin-bottom:6px"></div>
             <div class="hint" id="apBalOut" style="margin-bottom:10px"></div>
             <button class="btn primary lg need-op" id="apStart"><svg class="i"><use href="#i-play"/></svg>Start API scraper</button>
+            <button class="btn lg need-op" id="apSched"><svg class="i"><use href="#i-cal"/></svg>Schedule it (runs by itself)…</button>
             <button class="btn danger lg need-op" id="apStop" style="display:none"><svg class="i"><use href="#i-stop"/></svg>Stop (keeps what was collected)</button>
             <div class="alert" id="apMsg"></div>
             <small class="hint">Progress and the cost estimate show in the Activity Log; the file appears in Exports as <code>Data …xlsx</code>.</small>
@@ -2294,6 +2295,13 @@ $('apStart').onclick = async () => {
   apAlert(''); $('log').textContent = ''; logCount = 0; toast('API scraper started'); started(); go('log');
 };
 $('apStop').onclick = () => api('/api/stop', {});
+$('apSched').onclick = () => {
+  if (!$('apQ').value.trim() && !$('apImport').value.trim()){ apAlert('Type at least one keyword or link.'); $('apQ').focus(); return; }
+  if (!(+$('apBudget').value > 0)){ apAlert('Set Max credits for each run first — a schedule never spends more than that per run.'); return; }
+  const cfg = apCfg(), q = cfg.queries.split(/\n/).filter(Boolean);
+  openSch('apiscrape', {cfg, tz: 'WIB'}, `API scraper (${cfg.mode}${cfg.mode === 'keyword' ? ' · ' + cfg.platform : ''}): ${q.slice(0, 5).join(', ') || 'links'} — at most ${fmt(cfg.budget)} credits per run, plus the daily/monthly limit. Keyword runs collect the period chosen below.`,
+    'API: ' + (q.join(', ') || 'links').slice(0, 50));
+};
 async function showBalance(el){
   el.textContent = 'Checking…';
   const r = await api('/api/apiscraper/balance');
@@ -2870,7 +2878,7 @@ $('nBtnSched').onclick = () => {
   openSch('news', {keywords: [...NW.items], tz: P3.tz, options: nwOptions()},
     `News search: ${NW.items.join(', ')} — with the sources and options set on the page.`, 'News: ' + NW.items.join(', ').slice(0, 50));
 };
-const KIND_LABEL = {news: 'News', keywords: 'Keyword search', profiles: 'Accounts'};
+const KIND_LABEL = {news: 'News', keywords: 'Keyword search', profiles: 'Accounts', apiscrape: 'API scraper'};
 const when = t => t ? new Date(t * 1000).toLocaleString('en-GB', {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'}) : '—';
 let schList = [];
 async function loadSchedules(){

@@ -19,7 +19,7 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
-KINDS = ("news", "keywords", "profiles")
+KINDS = ("news", "keywords", "profiles", "apiscrape")
 # period collected at run time: (first day, last day) relative to the run's day
 WINDOWS = {"yesterday": (-1, -1), "today": (0, 0), "yesterday_today": (-1, 0), "last_7_days": (-7, -1)}
 WINDOW_LABEL = {"yesterday": "yesterday", "today": "today", "yesterday_today": "yesterday + today",
@@ -67,7 +67,7 @@ def clean(data: dict) -> dict:
     """Validate a schedule sent by the dashboard/API. Raises ScheduleError with a readable message."""
     kind = data.get("kind")
     if kind not in KINDS:
-        raise ScheduleError("Choose what to run: news, keywords or profiles.")
+        raise ScheduleError("Choose what to run: news, keywords, profiles or the API scraper.")
     payload = dict(data.get("payload") or {})
     payload.pop("start", None)
     payload.pop("end", None)
@@ -75,6 +75,13 @@ def clean(data: dict) -> dict:
         raise ScheduleError("Add at least one keyword.")
     if kind == "profiles" and not (payload.get("ids") or str(payload.get("text") or "").strip()):
         raise ScheduleError("Select at least one account.")
+    if kind == "apiscrape":
+        cfg = payload.get("cfg") or {}
+        if not str(cfg.get("queries") or "").strip() and not str(cfg.get("import") or "").strip():
+            raise ScheduleError("Type at least one keyword, post link or profile link.")
+        if not int(cfg.get("budget") or 0):
+            raise ScheduleError("A scheduled API run needs a credit budget per run (Max credits), so it never spends "
+                                "more than you planned.")
     payload["tz"] = payload.get("tz") if payload.get("tz") in TIMEZONES else "WIB"
     repeat = data.get("repeat")
     s = {"kind": kind, "payload": payload, "repeat": repeat, "window": data.get("window"),
@@ -108,8 +115,9 @@ def clean(data: dict) -> dict:
     if s["window"] not in WINDOWS:
         raise ScheduleError("Choose the period to collect.")
     if not s["name"]:
-        what = ", ".join(payload.get("keywords") or [])[:40] or "accounts"
-        s["name"] = f"{kind.capitalize()}: {what}"
+        what = ", ".join(payload.get("keywords") or [])[:40] or \
+            " ".join(str((payload.get("cfg") or {}).get("queries") or "").split())[:40] or "accounts"
+        s["name"] = f"{'API scraper' if kind == 'apiscrape' else kind.capitalize()}: {what}"
     return s
 
 
@@ -214,6 +222,13 @@ class Scheduler:
         elif s["kind"] == "keywords":
             err = self.job.start_keywords(p.get("keywords") or [], start, end, p["tz"], p.get("platforms") or [],
                                           p.get("options") or {})
+        elif s["kind"] == "apiscrape":
+            cfg = dict(p.get("cfg") or {})
+            if cfg.get("mode", "keyword") == "keyword":          # the schedule's period becomes the time filter
+                cfg["time_from"], cfg["time_to"] = f"{start} 00:00", f"{end} 23:55"
+            if s.get("new_only"):
+                cfg["delta"] = True                             # the engine skips posts it already delivered
+            err = self.job.start_apiscrape(cfg)
         else:
             from . import store
             text = store.lines_for(p.get("list", ""), p["ids"]) if p.get("ids") else p.get("text", "")
@@ -243,13 +258,17 @@ class Scheduler:
         st = self.job.state()
         mode = (st.get("modes") or {}).get(kind) or {}
         files = [f for f in mode.get("files") or [] if f.endswith(".xlsx")]
+        if kind == "apiscrape":
+            files = [f for f in getattr(self.job, "api_files", None) or [] if f.endswith(".xlsx")]
+            mode = {"count": len(files)}
         same_job = job_id == st.get("job_id")
         if not same_job:
             result = "finished"
         elif st.get("error"):
             result = "error: " + st["error"][:120]
         else:
-            result = f"{mode.get('count', 0)} links" + (f" — {files[0]}" if files else "")
+            result = (f"{len(files)} file(s)" if kind == "apiscrape" else f"{mode.get('count', 0)} links") + \
+                (f" — {files[0]}" if files else "")
         with self.lock:
             self.running_id = None
             s = next((x for x in self.items if x["id"] == sid), None)

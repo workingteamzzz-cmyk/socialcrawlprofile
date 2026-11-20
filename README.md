@@ -469,6 +469,11 @@ API: `GET/POST /api/report/topics`, `POST /api/report/topics/delete`, `POST /api
 
 ## Schedules (searches that run by themselves)
 
+The **API Scraper** can be scheduled too (*Schedule it* on its page): any interval from every hour (safe mode does not
+limit it — no account is used), a **credit budget per run** is required, the daily/monthly credit limits still apply,
+keyword runs collect the schedule's period (e.g. "today" every hour), and *only new* makes the engine skip posts it
+already delivered. Files land in Exports and in the reporting database (Home, Reports, Explore).
+
 Set a search up on the **News Search**, **Keyword Search** or **Collect** page as usual, then click
 **Schedule it (runs by itself)…** instead of Start. Choose how often (every day at a set time, or every 1–12 hours)
 and which period each run collects (yesterday, today so far, yesterday + today, or the 7 days before). The

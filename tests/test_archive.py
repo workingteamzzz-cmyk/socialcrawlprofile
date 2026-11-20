@@ -108,3 +108,39 @@ def test_hourly_only_new_survives_the_api(tmp_path, monkeypatch):
                                              "hours": 1, "window": "today", "new_only": True}, headers=SITE).json()
     assert r["ok"] and r["schedule"]["new_only"] is True
     assert "only new results" in op.get("/api/schedules").json()["schedules"][0]["describe"]
+
+
+def test_api_scraper_can_be_scheduled(tmp_path, monkeypatch):
+    """The API scraper runs by itself too: hourly is allowed (no account to protect), a credit budget per run is
+    required, keyword runs collect the schedule's period, "only new" uses the engine's own memory of delivered posts."""
+    from crawler import schedule
+    with pytest.raises(schedule.ScheduleError):
+        schedule.clean({"kind": "apiscrape", "payload": {"cfg": {"queries": "pln"}}, "repeat": "hours", "hours": 1,
+                        "window": "today"})                                     # no budget
+    s = schedule.clean({"kind": "apiscrape", "payload": {"cfg": {"queries": "pln\nbanjir", "budget": 50,
+                                                                  "mode": "keyword", "platform": "TikTok"}},
+                        "repeat": "hours", "hours": 1, "window": "today", "new_only": True})
+    assert s["hours"] == 1 and s["name"] == "API scraper: pln banjir"
+    started = []
+
+    class FakeJob:
+        running = False
+        job_id = "j1"
+        api_files = ["Data TikTok_pln.xlsx"]
+
+        def start_apiscrape(self, cfg):
+            started.append(cfg)
+
+        def log(self, m):
+            pass
+
+        def state(self):
+            return {"job_id": "j1", "modes": {}}
+    sch = schedule.Scheduler(str(tmp_path / "s.json"), FakeJob())
+    item = sch.save(dict(s))
+    sch._run(item, 1_764_000_000)
+    cfg = started[0]
+    day = schedule.period(item, 1_764_000_000)[0]
+    assert cfg["time_from"] == f"{day} 00:00" and cfg["time_to"].endswith("23:55") and cfg["delta"] is True
+    sch._check_finished()
+    assert sch.items[0]["last_result"] == "1 file(s) — Data TikTok_pln.xlsx"

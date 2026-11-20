@@ -255,6 +255,8 @@ def min_schedule_hours(kind: str, payload: dict) -> int:
     search pages: every 6 hours at most; the multi-source news engine (no accounts, no search pages): any."""
     if not enabled():
         return 0
+    if kind == "apiscrape":
+        return 0                                      # the scraping API: no account, no Google page to protect
     opt = (payload or {}).get("options") or {}
     if kind == "news" and opt.get("engine") == "multi" and opt.get("target") != "social":
         return 0

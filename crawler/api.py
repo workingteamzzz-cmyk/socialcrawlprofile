@@ -173,7 +173,7 @@ class ScheduleIn(BaseModel):
     """A search that runs by itself. `payload` is what the matching start endpoint takes, without start/end."""
     id: str = Field("", description="Empty = a new schedule; an id = change that schedule")
     name: str = ""
-    kind: Literal["news", "keywords", "profiles"]
+    kind: Literal["news", "keywords", "profiles", "apiscrape"]
     payload: dict = Field(..., examples=[{"keywords": ["tarif listrik", "PLN"], "tz": "WIB",
                                           "options": {"sources": ["feed"], "cap": 300}}])
     repeat: Literal["daily", "hours"] = "daily"

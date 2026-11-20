@@ -3030,7 +3030,7 @@ async function loadStream(){
   $('lsStToggle').textContent = d.running ? 'Stop stream' : 'Start stream'; $('lsStToggle').classList.toggle('primary', !d.running);
   $('navStream').textContent = d.running ? '●' : '';
   $('lsStRet').textContent = cfg.retention_days ? cfg.retention_days + ' days' : 'for good';
-  $('lsSRead').textContent = fmt(d.today.read); $('lsSReadS').textContent = `${fmt(d.today.failed)} could not be read · ${fmt(d.today.skipped || 0)} skipped (robots.txt / excluded) · ${d.stored === null || d.stored === undefined ? '…' : fmt(d.stored)}} stored`;
+  $('lsSRead').textContent = fmt(d.today.read); $('lsSReadS').textContent = `${fmt(d.today.failed)} could not be read · ${fmt(d.today.skipped || 0)} skipped (robots.txt / excluded) · ${d.stored === null || d.stored === undefined ? '…' : fmt(d.stored)} stored`;
   $('lsSPace').textContent = fmt(d.per_minute) + ' /min'; $('lsSPaceS').textContent = d.running ? `≈ ${fmt(d.per_day_pace)} per day at this pace` : 'stream is stopped';
   $('lsSMatch').textContent = fmt(d.today.matched); $('lsSMatchS').textContent = `${d.keywords} keyword(s) incl. report topics`;
   const cnt = v => v === null || v === undefined ? '…' : fmt(v);                 // counted in the background

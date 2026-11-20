@@ -642,6 +642,12 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
         from . import overview as ov
         return ov.build(SERVER_MODE)
 
+    @app.get("/api/dashboard", tags=["overview"], dependencies=auth,
+             summary="Home dashboard: trend, sentiment, top media / keywords, latest items from the report database")
+    def dashboard(days: int = 14, q: str = ""):
+        from . import dashboard as db
+        return db.build(days, q)
+
     @app.get("/api/logins", tags=["logins"], dependencies=auth, summary="Which platforms the server is signed in to")
     def logins(request: Request):
         return {**logins_info(), "server": SERVER_MODE, "who": getattr(request.state, "who", "")}

@@ -485,6 +485,76 @@ body{font-feature-settings:"tnum" 1,"cv11" 1;letter-spacing:-.003em}
 .badge{font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:5px;white-space:nowrap}
 .b-ok{background:var(--ok-soft);color:var(--ok)}.b-warn{background:var(--warn-soft);color:var(--warn)}.b-bad{background:var(--bad-soft);color:var(--bad)}
 @media (max-width:860px){.topbar{margin:-16px -16px 18px;padding:0 16px}.tb-clock{display:none}}
+/* ================= Monitoring dashboard ================= */
+.viz{--s1:#2a78d6;--s2:#eb6834;--neg:#e34948;--neu:#c3c2b7;--pos:#2a78d6;--gridc:#e9eaee;--axc:#c9ccd3}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .viz{--s1:#3987e5;--s2:#d95926;--neg:#e66767;--neu:#55554f;--pos:#3987e5;--gridc:#232a38;--axc:#343c4c}}
+:root[data-theme="dark"] .viz{--s1:#3987e5;--s2:#d95926;--neg:#e66767;--neu:#55554f;--pos:#3987e5;--gridc:#232a38;--axc:#343c4c}
+.tb-search{position:relative;flex:1;max-width:460px;margin-left:24px}
+.tb-search svg.i{position:absolute;left:10px;top:50%;transform:translateY(-50%);width:15px;height:15px;color:var(--faint)}
+.tb-search input{width:100%;height:34px;border:1px solid var(--line);border-radius:7px;background:var(--panel);padding:0 12px 0 32px;font-size:13px;color:var(--text);outline:none}
+.tb-search input:focus{border-color:var(--accent-ring);box-shadow:0 0 0 3px var(--accent-soft)}
+.tb-bell{all:unset;position:relative;width:34px;height:34px;display:grid;place-items:center;border-radius:7px;color:var(--muted);cursor:pointer}
+.tb-bell:hover{background:var(--hover);color:var(--text)}
+.tb-bell svg.i{width:18px;height:18px}
+.tb-bell em{position:absolute;top:3px;right:2px;min-width:16px;height:16px;border-radius:8px;background:var(--bad);color:#fff;font:600 10px/16px system-ui;text-align:center;font-style:normal;padding:0 4px;border:2px solid var(--bg)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;background:var(--panel);padding:2px;box-shadow:var(--shadow)}
+.seg button{all:unset;cursor:pointer;font-size:12.5px;font-weight:600;color:var(--muted);padding:5px 11px;border-radius:5px}
+.seg button.on{background:var(--soft);color:var(--text)}
+.seg button:hover{color:var(--text)}
+.qchip{display:inline-flex;align-items:center;gap:4px;background:var(--accent-soft);color:var(--accent);border-radius:5px;padding:0 4px 0 7px;font-weight:600}
+.qchip button{all:unset;cursor:pointer;padding:0 3px;font-size:14px}
+.kpi b{margin-top:6px}
+.dl{font-weight:600;color:var(--muted)}.dl.up{color:#0b8a3e}.dl.down{color:var(--bad)}
+.dgrid{display:grid;gap:16px;margin-bottom:16px}
+.g-2-1{grid-template-columns:minmax(0,2fr) minmax(0,1fr)}
+.g-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media (max-width:1100px){.g-2-1,.g-3{grid-template-columns:minmax(0,1fr)}}
+.dgrid > .card{margin:0}
+.hd-note{margin-left:auto;font-size:12px;color:var(--faint)}
+.legend-row{margin-left:auto;display:flex;gap:14px;font-size:12.5px;color:var(--muted)}
+.legend-row span{display:flex;align-items:center;gap:6px}.legend-row i{width:10px;height:3px;border-radius:2px}
+.chart svg{display:block;overflow:visible}
+.g-2-1 > .card{display:flex;flex-direction:column}.g-2-1 > .card > .card-bd{flex:1;display:flex;flex-direction:column}
+#chTrend{flex:1;min-height:260px;position:relative}#chTrend svg{position:absolute;inset:0}
+.chart .grid{stroke:var(--gridc);stroke-width:1}.chart .base{stroke:var(--axc);stroke-width:1}
+.chart .ax{fill:var(--faint);font-size:11px}
+.chart .cross{stroke:var(--axc);stroke-width:1;stroke-dasharray:3 3}
+.vtip{position:fixed;z-index:200;pointer-events:none;background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(16,24,40,.14);padding:8px 10px;font-size:12.5px;min-width:150px}
+.vtip b{display:block;margin-bottom:4px;font-weight:600}
+.vtip div{display:flex;align-items:center;gap:7px;color:var(--muted)}.vtip div span{margin-left:auto;color:var(--text);font-weight:600;padding-left:12px}
+.vtip i{width:8px;height:8px;border-radius:2px;flex:none}
+.sb-row+.sb-row{margin-top:22px}
+.sub-hd{font-size:11px;letter-spacing:.07em;text-transform:uppercase;font-weight:600;color:var(--faint);margin:22px 0 4px;padding-top:16px;border-top:1px solid var(--line)}
+#chPlat .hb{padding:4px 0}
+.sb-hd{display:flex;align-items:baseline;margin-bottom:8px}.sb-hd b{font-size:13px;font-weight:600}.sb-hd span{margin-left:auto;font-size:12px;color:var(--faint)}
+.sbar{display:flex;gap:2px;height:12px}.sbar span{border-radius:2px;min-width:3px}
+.sbar span:first-child{border-radius:4px 2px 2px 4px}.sbar span:last-child{border-radius:2px 4px 4px 2px}.sbar span:only-child{border-radius:4px}
+.sb-pct{display:flex;gap:14px;margin-top:8px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+.sb-pct span{display:flex;align-items:center;gap:5px}.sb-pct i{width:8px;height:8px;border-radius:2px}.sb-pct b{color:var(--text);font-weight:600}
+.hb{display:grid;grid-template-columns:minmax(0,118px) minmax(0,1fr) 44px;gap:10px;align-items:center;padding:6px 0;font-size:13px}
+.hb-l{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+.hb-t{height:8px;background:var(--soft);border-radius:4px;overflow:hidden}.hb-t span{display:block;height:100%;background:var(--s1);border-radius:0 4px 4px 0}
+.hb-v{text-align:right;font-weight:600;color:var(--text)}
+.hb:hover .hb-t span{filter:brightness(1.1)}
+.empty-s{color:var(--faint);font-size:13px;text-align:center;padding:22px 8px!important}
+.hs-foot{display:flex;font-size:12.5px;color:var(--muted);padding:7px 0;border-top:1px solid var(--line)}
+.hs-foot:first-of-type{margin-top:14px}.hs-foot b{margin-left:auto;color:var(--text);font-weight:600;font-size:12.5px!important;display:inline!important;margin-top:0!important}
+.score .segbar{margin:10px 0 12px}
+.score #hPassed{font-size:28px}
+.tabs.mini{border:0;margin:0 0 0 18px}.tabs.mini button{padding:4px 0;margin-right:16px;font-size:13px}
+.tbl-wrap{overflow-x:auto}
+.dtbl td{vertical-align:middle;padding:10px 20px}.dtbl th{padding:9px 20px}
+.dtbl td small{display:block;color:var(--faint);font-size:11.5px}
+.dtbl .nowrap{white-space:nowrap}
+.lt-t{color:var(--text);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.lt-t:hover{color:var(--accent)}
+.b-neu{background:var(--soft);color:var(--muted)}
+.ck-card{margin-top:16px}
+.ck-card summary{list-style:none;cursor:pointer}.ck-card summary::-webkit-details-marker{display:none}
+.ck-card summary::after{content:"▸";margin-left:12px;color:var(--faint);transition:transform .15s}
+.ck-card[open] summary::after{transform:rotate(90deg)}
+.ck-card:not([open]) summary{border-bottom:0}
+@media (max-width:860px){.tb-search{margin-left:0}.crumb{display:none}}
 </style>
 </head>
 <body>
@@ -519,6 +589,7 @@ body{font-feature-settings:"tnum" 1,"cv11" 1;letter-spacing:-.003em}
   <symbol id="i-news" viewBox="0 0 24 24"><path d="M4 5h13v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M17 9h3v10a2 2 0 0 1-2 2M8 9h5M8 13h5M8 17h3"/></symbol>
   <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></symbol>
   <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></symbol>
   <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11 12 4l9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/></symbol>
   <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/></symbol>
   <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
@@ -572,25 +643,40 @@ body{font-feature-settings:"tnum" 1,"cv11" 1;letter-spacing:-.003em}
 
   <main class="main">
     <header class="topbar"><div class="crumb"><span>Working Teamz</span><span>/</span><b id="tbPage">Home</b></div>
-      <div class="tb-right"><span class="pill" id="tbEnv"><i></i><span id="tbStat">Ready</span></span><span class="tb-clock" id="tbClock"></span></div></header>
+      <div class="tb-search"><svg class="i"><use href="#i-search"/></svg><input id="tbSearch" type="search" placeholder="Search news &amp; posts in the archive…" autocomplete="off"></div>
+      <div class="tb-right"><button class="tb-bell" id="tbBell" title="Checks that need attention"><svg class="i"><use href="#i-bell"/></svg><em id="tbBellN" hidden>0</em></button><span class="pill" id="tbEnv"><i></i><span id="tbStat">Ready</span></span><span class="tb-clock" id="tbClock"></span></div></header>
     <!-- HOME -->
     <section class="page on" id="p-home">
-      <div class="pagehead"><div><h1>Home</h1><p>Is everything set up and healthy? Today's numbers, and what to fix — at a glance.</p></div></div>
+      <div class="pagehead"><div><h1>Media Monitoring Overview</h1><p>News and social media in the report database · <span id="dRange">–</span><span id="dQ"></span></p></div>
+        <div class="actions"><div class="seg" id="dDays"><button data-d="7">7D</button><button data-d="14" class="on">14D</button><button data-d="30">30D</button><button data-d="90">90D</button></div>
+          <button class="btn" data-go="report"><svg class="i"><use href="#i-chart"/></svg>Create report</button></div></div>
       <div class="kpis">
-        <div class="kpi"><small>News articles today</small><svg class="i"><use href="#i-news"/></svg><b id="kA">–</b><span class="kpi-sub">saved to the report database</span></div>
-        <div class="kpi"><small>Social posts today</small><svg class="i"><use href="#i-link"/></svg><b id="kP">–</b><span class="kpi-sub">from every platform</span></div>
-        <div class="kpi"><small>API credits today</small><svg class="i"><use href="#i-pulse"/></svg><b id="kC">–</b><span class="kpi-sub" id="kCs">daily limit</span></div>
-        <div class="kpi"><small>Schedules running</small><svg class="i"><use href="#i-clock"/></svg><b id="kS">–</b><span class="kpi-sub" id="kN">–</span></div>
+        <div class="kpi"><small>News articles</small><b id="kA">–</b><span class="kpi-sub" id="kAd"></span></div>
+        <div class="kpi"><small>Social media posts</small><b id="kP">–</b><span class="kpi-sub" id="kPd"></span></div>
+        <div class="kpi"><small>Negative sentiment</small><b id="kNeg">–</b><span class="kpi-sub" id="kNegd"></span></div>
+        <div class="kpi"><small>Active media outlets</small><b id="kM">–</b><span class="kpi-sub" id="kMd"></span></div>
       </div>
-      <div class="home-grid">
-        <div class="card score"><div class="card-hd"><h3>System health</h3></div><div class="card-bd">
+      <div class="dgrid g-2-1">
+        <div class="card viz"><div class="card-hd"><h3>Coverage trend</h3><div class="legend-row" id="trLegend"></div></div>
+          <div class="card-bd"><div class="chart" id="chTrend"></div></div></div>
+        <div class="card viz"><div class="card-hd"><h3>Sentiment</h3></div><div class="card-bd" id="chSent"></div></div>
+      </div>
+      <div class="dgrid g-3">
+        <div class="card viz"><div class="card-hd"><h3>Top news media</h3><span class="hd-note">articles</span></div><div class="card-bd" id="chMedia"></div></div>
+        <div class="card viz"><div class="card-hd"><h3>Top keywords</h3><span class="hd-note">news + posts</span></div><div class="card-bd" id="chKw"></div></div>
+        <div class="card score" id="hHealth"><div class="card-hd"><h3>System health</h3><button class="btn sm" id="hOpen" style="margin-left:auto">View checklist</button></div><div class="card-bd">
           <span class="lbl">Checks passed</span><b id="hPassed">–</b>
           <div class="segbar" id="hSeg"></div>
           <div class="legend"><div><i style="background:var(--ok)"></i>Passed<b id="hOk">0</b></div><div><i style="background:#e0a100"></i>Needs review<b id="hWarn">0</b></div><div><i style="background:var(--bad)"></i>Action needed<b id="hBad">0</b></div></div>
+          <div class="hs-foot"><span>API credits today</span><b id="kC">–</b></div><div class="hs-foot"><span>Schedules running</span><b id="kS">–</b></div><div class="hs-foot"><span>Next run</span><b id="kN">–</b></div>
         </div></div>
-        <div class="card"><div class="card-hd"><h3>Checklist</h3><span class="hint" style="margin-left:auto;font-size:12px" id="hTime"></span></div><div class="card-bd" style="padding-top:4px;padding-bottom:4px">
-          <div class="ck-list" id="hChecks"></div></div></div>
       </div>
+      <div class="card"><div class="card-hd"><h3>Latest coverage</h3><div class="tabs mini" id="ltTabs"><button data-k="online" class="on">News</button><button data-k="medsos">Social media</button></div>
+        <button class="btn sm" data-go="nwlinks" style="margin-left:auto" id="ltAll">View all</button></div>
+        <div class="tbl-wrap"><table class="tbl dtbl"><thead><tr><th style="width:110px">Published</th><th>Title / text</th><th style="width:190px" id="ltSrcH">Media</th><th style="width:130px">Sentiment</th></tr></thead><tbody id="ltBody"></tbody></table></div></div>
+      <details class="card ck-card" id="hCkCard"><summary class="card-hd"><h3>System checklist</h3><span class="hd-note" id="hTime"></span></summary><div class="card-bd" style="padding-top:4px;padding-bottom:4px">
+        <div class="ck-list" id="hChecks"></div></div></details>
+      <div class="vtip" id="vTip" hidden></div>
     </section>
 
     <!-- COLLECT -->
@@ -2193,25 +2279,120 @@ document.querySelectorAll('#setTabs button').forEach(b => b.onclick = () => {
   try { localStorage.setItem('wt_settab', b.dataset.tab); } catch (e) {}
 });
 try { const t = localStorage.getItem('wt_settab'); const b = t && document.querySelector(`#setTabs button[data-tab="${t}"]`); if (b) b.click(); } catch (e) {}
+let D_DAYS = +(ls.get('ddays', 14)) || 14, D_Q = '', D_LT = 'online', D_DATA = null;
+const svgNS = 'http://www.w3.org/2000/svg';
+const dShort = d => new Date(d + 'T00:00:00').toLocaleDateString([], {day: '2-digit', month: 'short'});
+function delta(now, prev, unit, invert){
+  if (!prev && !now) return '<span class="dl">no data in the previous period</span>';
+  if (!prev) return '<span class="dl">new this period</span>';
+  const ch = unit === 'pt' ? now - prev : Math.round((now - prev) * 100 / prev);
+  const up = ch > 0, good = invert ? !up : up, cls = ch === 0 ? '' : good ? 'up' : 'down';
+  return `<span class="dl ${cls}">${ch === 0 ? '—' : (up ? '▲ ' : '▼ ') + Math.abs(ch) + (unit === 'pt' ? ' pt' : '%')}</span> vs previous ${D_DAYS} days`;
+}
+function tip(e, html){ const t = $('vTip'); if (!html){ t.hidden = true; return; } t.innerHTML = html; t.hidden = false;
+  const w = t.offsetWidth, h = t.offsetHeight; let x = e.clientX + 14, y = e.clientY - h - 10;
+  if (x + w > innerWidth - 8) x = e.clientX - w - 14; if (y < 8) y = e.clientY + 16; t.style.left = x + 'px'; t.style.top = y + 'px'; }
+function el(tag, attrs, parent){ const n = document.createElementNS(svgNS, tag); for (const k in attrs) n.setAttribute(k, attrs[k]); if (parent) parent.appendChild(n); return n; }
+function niceMax(v){ const raw = Math.max(1, v / 4), p = Math.pow(10, Math.floor(Math.log10(raw))); const step = [1, 2, 5, 10].map(m => m * p).find(x => x >= raw); return Math.max(4, step * 4); }
+function drawTrend(d){
+  const box = $('chTrend'); box.innerHTML = '';
+  const series = [{k: 'online', name: 'News', c: 'var(--s1)'}, {k: 'medsos', name: 'Social media', c: 'var(--s2)'}];
+  $('trLegend').innerHTML = series.map(s => `<span><i style="background:${s.c}"></i>${s.name}</span>`).join('');
+  const W = box.clientWidth || 600, H = box.clientHeight || 260, L = 40, R = 16, T = 10, B = 26, n = d.trend.length;
+  const max = niceMax(Math.max(1, ...d.trend.map(t => Math.max(t.online, t.medsos))));
+  const x = i => L + (n === 1 ? (W - L - R) / 2 : i * (W - L - R) / (n - 1)), y = v => T + (H - T - B) * (1 - v / max);
+  const svg = el('svg', {width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'News and social media items per day'}, box);
+  for (let g = 0; g <= 4; g++){ const v = max * g / 4, yy = y(v);
+    el('line', {x1: L, x2: W - R, y1: yy, y2: yy, class: g ? 'grid' : 'base'}, svg);
+    el('text', {x: L - 8, y: yy + 4, 'text-anchor': 'end', class: 'ax'}, svg).textContent = fmt(Math.round(v)); }
+  const every = Math.ceil(n / Math.max(2, Math.floor((W - L - R) / 64)));
+  d.trend.forEach((t, i) => { if (i % every === 0 || i === n - 1 && (n - 1) % every > every / 2)
+    el('text', {x: x(i), y: H - 6, 'text-anchor': 'middle', class: 'ax'}, svg).textContent = dShort(t.day); });
+  series.forEach(s => {
+    const pts = d.trend.map((t, i) => `${x(i)},${y(t[s.k])}`).join(' ');
+    el('polyline', {points: pts, fill: 'none', stroke: s.c, 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round'}, svg);
+  });
+  const cross = el('line', {y1: T, y2: H - B, class: 'cross', visibility: 'hidden'}, svg);
+  const dots = series.map(s => el('circle', {r: 4.5, fill: s.c, stroke: 'var(--panel)', 'stroke-width': 2, visibility: 'hidden'}, svg));
+  const hit = el('rect', {x: L, y: T, width: W - L - R, height: H - T - B, fill: 'transparent'}, svg);
+  hit.addEventListener('mousemove', e => {
+    const r = svg.getBoundingClientRect(), i = Math.max(0, Math.min(n - 1, Math.round((e.clientX - r.left - L) / ((W - L - R) / Math.max(1, n - 1)))));
+    const t = d.trend[i]; cross.setAttribute('x1', x(i)); cross.setAttribute('x2', x(i)); cross.setAttribute('visibility', 'visible');
+    dots.forEach((c, k) => { c.setAttribute('cx', x(i)); c.setAttribute('cy', y(t[series[k].k])); c.setAttribute('visibility', 'visible'); });
+    tip(e, `<b>${new Date(t.day + 'T00:00:00').toLocaleDateString([], {weekday: 'short', day: '2-digit', month: 'short', year: 'numeric'})}</b>` +
+      series.map(s => `<div><i style="background:${s.c}"></i>${s.name}<span>${fmt(t[s.k])}</span></div>`).join(''));
+  });
+  hit.addEventListener('mouseleave', () => { cross.setAttribute('visibility', 'hidden'); dots.forEach(c => c.setAttribute('visibility', 'hidden')); tip(); });
+}
+function drawSent(d){
+  const parts = [['negative', 'Negative', 'var(--neg)'], ['neutral', 'Neutral', 'var(--neu)'], ['positive', 'Positive', 'var(--pos)']];
+  const row = (label, s) => { const tot = parts.reduce((a, p) => a + s[p[0]], 0);
+    const bar = tot ? parts.filter(p => s[p[0]]).map(p => `<span style="flex:${s[p[0]]};background:${p[2]}" data-tip="<b>${label}</b><div><i style='background:${p[2]}'></i>${p[1]}<span>${fmt(s[p[0]])} · ${Math.round(s[p[0]] * 100 / tot)}%</span></div>"></span>`).join('') : '<span style="flex:1;background:var(--soft)"></span>';
+    return `<div class="sb-row"><div class="sb-hd"><b>${label}</b><span>${fmt(tot)} items</span></div><div class="sbar">${bar}</div>
+      <div class="sb-pct">${parts.map(p => `<span><i style="background:${p[2]}"></i>${p[1]} <b>${tot ? Math.round(s[p[0]] * 100 / tot) : 0}%</b></span>`).join('')}</div></div>`; };
+  $('chSent').innerHTML = row('News', d.sentiment.online) + row('Social media', d.sentiment.medsos) +
+    '<div class="sub-hd">Posts by platform</div><div id="chPlat"></div>';
+  drawBars('chPlat', d.top_platforms, 'posts');
+}
+function drawBars(id, items, unit, label){
+  const max = Math.max(1, ...items.map(i => i[1]));
+  $(id).innerHTML = items.length ? items.map(([name, v]) => `<div class="hb" data-tip="<b>${esc(esc(label ? label(name) : name))}</b><div>${fmt(v)} ${unit}</div>">
+    <span class="hb-l" title="${esc(name)}">${esc(label ? label(name) : name)}</span><span class="hb-t"><span style="width:${Math.max(2, v * 100 / max)}%"></span></span><span class="hb-v">${fmt(v)}</span></div>`).join('')
+    : '<p class="empty-s">Nothing in this period yet.</p>';
+}
+function drawLatest(){
+  const d = D_DATA; if (!d) return;
+  const rows = d.latest[D_LT] || [], S = {negative: ['b-bad', '▼', 'Negative'], neutral: ['b-neu', '●', 'Neutral'], positive: ['b-ok', '▲', 'Positive']};
+  $('ltSrcH').textContent = D_LT === 'online' ? 'Media' : 'Account'; $('ltAll').dataset.go = D_LT === 'online' ? 'nwlinks' : 'kwlinks';
+  $('ltBody').innerHTML = rows.length ? rows.map(r => `<tr><td class="nowrap"><b>${r.day ? dShort(r.day) : '–'}</b><small>${esc(r.time || '')}</small></td>
+    <td><a href="${esc(r.url)}" target="_blank" rel="noopener" class="lt-t">${esc(r.title || r.url)}</a></td>
+    <td class="nowrap">${esc(r.source)}${r.platform ? `<small>${esc(r.platform)}</small>` : ''}</td>
+    <td><span class="badge ${S[r.sentiment][0]}">${S[r.sentiment][1]} ${S[r.sentiment][2]}</span></td></tr>`).join('')
+    : `<tr><td colspan="4" class="empty-s">No ${D_LT === 'online' ? 'news' : 'posts'} in this period${D_Q ? ' for “' + esc(D_Q) + '”' : ''}. Run a search or a schedule — results land here automatically.</td></tr>`;
+}
+async function loadDash(){
+  const d = await api(`/api/dashboard?days=${D_DAYS}&q=${encodeURIComponent(D_Q)}`);
+  if (!d || !d.trend) return;
+  D_DATA = d; const k = d.kpi;
+  $('dRange').textContent = `${dShort(d.start)} – ${dShort(d.end)}`;
+  $('dQ').innerHTML = D_Q ? ` · filtered by <span class="qchip">“${esc(D_Q)}” <button id="dQx" title="Clear">×</button></span>` : '';
+  if (D_Q) $('dQx').onclick = () => { D_Q = ''; $('tbSearch').value = ''; loadDash(); };
+  $('kA').textContent = fmt(k.articles); $('kAd').innerHTML = delta(k.articles, k.articles_prev);
+  $('kP').textContent = fmt(k.posts); $('kPd').innerHTML = delta(k.posts, k.posts_prev);
+  $('kNeg').textContent = k.negative_pct + '%'; $('kNegd').innerHTML = delta(k.negative_pct, k.negative_pct_prev, 'pt', true);
+  $('kM').textContent = fmt(k.media); $('kMd').innerHTML = delta(k.media, k.media_prev);
+  drawTrend(d); drawSent(d);
+  drawBars('chMedia', d.top_media, 'articles');
+  drawBars('chKw', d.top_keywords, 'items');
+  drawLatest();
+}
 async function loadHome(){
+  loadDash();
   const d = await api('/api/overview');
   if (!d || !d.checks) return;
   const st = d.stats || {};
-  $('kA').textContent = fmt(st.articles_today || 0); $('kP').textContent = fmt(st.posts_today || 0);
-  $('kC').textContent = fmt(st.credits_today || 0);
+  $('kC').textContent = fmt(st.credits_today || 0) + (st.credits_cap ? ' / ' + fmt(st.credits_cap) : '');
   $('kS').textContent = fmt(st.schedules || 0);
-  $('kN').textContent = st.next_run ? 'Next run ' + new Date(st.next_run * 1000).toLocaleString([], {day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'}) : 'none scheduled';
+  $('kN').textContent = st.next_run ? new Date(st.next_run * 1000).toLocaleString([], {day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'}) : '—';
   $('hPassed').textContent = `${d.passed} of ${d.total}`;
-  const n = st => d.checks.filter(c => c.state === st).length;
+  const n = s => d.checks.filter(c => c.state === s).length;
   $('hOk').textContent = n('ok'); $('hWarn').textContent = n('warn'); $('hBad').textContent = n('bad');
   $('hSeg').innerHTML = ['ok', 'warn', 'bad'].flatMap(k => Array(n(k)).fill(`<span class="s-${k}"></span>`)).join('');
-  $('kCs').textContent = st.credits_cap ? `of ${fmt(st.credits_cap)} daily limit` : 'no daily limit set';
-  $('hTime').textContent = 'Updated ' + new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+  $('hTime').textContent = `${d.passed} of ${d.total} passed · updated ` + new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
   const ic = {ok: ['ck-ok', '✓', 'b-ok', 'Passed'], warn: ['ck-warn', '!', 'b-warn', 'Review'], bad: ['ck-bad', '✕', 'b-bad', 'Action needed']};
   $('hChecks').innerHTML = d.checks.map(c => `<div class="ck-row"><span class="ck-ic ${ic[c.state][0]}">${ic[c.state][1]}</span>
     <div><b>${esc(c.title)}</b>${c.detail ? `<small>${esc(c.detail)}</small>` : ''}</div><span class="badge ${ic[c.state][2]}">${ic[c.state][3]}</span></div>`).join('');
+  const att = d.total - d.passed; $('tbBellN').hidden = !att; $('tbBellN').textContent = att;
   updateMe(st);
 }
+document.querySelectorAll('#dDays button').forEach(b => { b.classList.toggle('on', +b.dataset.d === D_DAYS);
+  b.onclick = () => { D_DAYS = +b.dataset.d; ls.set('ddays', D_DAYS); document.querySelectorAll('#dDays button').forEach(x => x.classList.toggle('on', x === b)); loadDash(); }; });
+document.querySelectorAll('#ltTabs button').forEach(b => b.onclick = () => { D_LT = b.dataset.k; document.querySelectorAll('#ltTabs button').forEach(x => x.classList.toggle('on', x === b)); drawLatest(); });
+$('tbSearch').addEventListener('keydown', e => { if (e.key === 'Enter'){ D_Q = $('tbSearch').value.trim(); go('home'); } if (e.key === 'Escape' && D_Q){ $('tbSearch').value = ''; D_Q = ''; loadDash(); } });
+const openChecks = () => { go('home'); $('hCkCard').open = true; setTimeout(() => $('hCkCard').scrollIntoView({behavior: 'smooth', block: 'start'}), 50); };
+$('tbBell').onclick = openChecks; $('hOpen').onclick = openChecks;
+document.addEventListener('mousemove', e => { const t = e.target.closest && e.target.closest('#p-home [data-tip]'); if (t) tip(e, t.dataset.tip); else if (!e.target.closest('#chTrend')) tip(); });
+let _rz; addEventListener('resize', () => { clearTimeout(_rz); _rz = setTimeout(() => { if (D_DATA && $('p-home').classList.contains('on')) drawTrend(D_DATA); }, 150); });
 function updateMe(st){
   const name = (ME && ME.who && ME.who !== 'local' && ME.who) || 'Working Teamz';
   $('sbName').textContent = name + (ME && ME.who !== 'local' ? ' · ' + ROLE : '');

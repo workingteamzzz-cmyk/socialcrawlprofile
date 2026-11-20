@@ -96,6 +96,14 @@ class Handler(BaseHTTPRequestHandler):
 
             from .schedule import get
             return self._json({"schedules": get().list(), "now": int(_time.time())})
+        if u.path == "/api/dashboard":
+            from . import dashboard as dsh
+            qs = parse_qs(u.query)
+            try:
+                days = int(qs.get("days", ["14"])[0] or 14)
+            except ValueError:
+                days = 14
+            return self._json(dsh.build(days, qs.get("q", [""])[0]))
         if u.path == "/api/overview":
             from . import overview as ov
             from .paths import SERVER_MODE

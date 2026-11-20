@@ -64,7 +64,7 @@ A platform can still sign you out on its own after a while — then use *Log in 
 
 | Page | What it does |
 | --- | --- |
-| **Home** | Is everything set up? A checklist (HTTPS, platform sign-ins, API key and credit limit, Telegram, safe mode, resting sites, schedules) and today's numbers (articles, posts, API credits). **New search** (top left) opens any search in one click |
+| **Home** | Monitoring overview from the report database: news / posts / negative sentiment / active media (vs the previous period), coverage trend per day, sentiment, top media, top keywords, posts per platform, latest coverage; period 7 / 14 / 30 / 90 days; the search box on top filters it all. System health (checklist of HTTPS, sign-ins, API, Telegram, safe mode, schedules) with the bell showing what needs attention. **New search** (top left) opens any search in one click |
 | **Collect** | Pick the period (presets or any dates, WIB/WITA/WIT), toggle platforms, start/stop, live progress |
 | **Accounts** | Several **account lists** (per client, project or topic): switch, create or delete lists; accounts grouped by **group** (organisation, brand, person); search, filter, select per account or group; **Add profiles** (any platform, `URL | Group`, or two columns pasted from Excel); remove accounts |
 | **Post Links** | Every link found, filterable by platform/search, plus Excel/CSV download |

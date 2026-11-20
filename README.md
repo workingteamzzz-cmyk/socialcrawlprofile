@@ -306,6 +306,9 @@ running (also after a restart) and reads every new article from the registered m
 
   A new outlet is checked once right away; an outlet that publishes again is promoted at once. All numbers can be
   changed under Live Stream → Stream settings.
+- **Every link not yet in the database** — when an outlet is visited, every article link seen (RSS, sitemaps and
+  its front page) that is not in the database yet is taken, whatever its date: today's news first, older links behind
+  them, up to 1,000 older links per visit (the rest on the next visits). "Recent only" can be switched back on.
 - **Site check** — when the stream starts and every Sunday 02:00 WIB (adjustable) every registered site is checked:
   does it answer, does it list sitemaps. Sites that are down are not crawled at all (no feed, no sitemap) until the
   next check; a site that is back is put in the rotation at once. A site that looks down gets a second try; if most

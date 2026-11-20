@@ -32,9 +32,10 @@ DEFAULTS = {"enabled": False, "threads": 16, "discovery_threads": 12, "rss_minut
             "catchup_days": 2, "catchup_hour": 1, "weekly_report": True, "report_weekday": 0, "report_hour": 7,
             "health_on_start": True, "health_weekday": 6, "health_hour": 2,
             "top_n": 1000, "semi_hours": 4, "rare_hours": 24, "inactive_days": 3, "dead_days": 7,
-            "retention_days": 7, "max_age_hours": 48, "domain_gap": 1.5, "rss": True, "sitemaps": True,
+            "retention_days": 7, "max_age_hours": 48, "all_links": True, "old_per_check": 1000, "homepage": True, "domain_gap": 1.5, "rss": True, "sitemaps": True,
             "keywords": [], "robots": True, "exclude_domains": []}
 LIMITS = {"threads": (2, 64), "discovery_threads": (2, 48), "rss_minutes": (2, 240), "sitemap_minutes": (10, 720),
+          "old_per_check": (0, 20000),
           "catchup_days": (0, 7), "catchup_hour": (0, 23), "health_weekday": (0, 6), "health_hour": (0, 23), "report_weekday": (0, 6), "report_hour": (0, 23),
           "top_n": (50, 20000), "semi_hours": (1, 48), "rare_hours": (2, 168), "inactive_days": (1, 30),
           "dead_days": (1, 60),
@@ -114,7 +115,7 @@ def save_settings(data: dict) -> dict:
                 raise ValueError(f"{k}: a number from {lo} to {hi}.")
         elif k == "domain_gap":
             v = max(0.5, min(30.0, float(v)))
-        elif k in ("rss", "sitemaps", "robots", "weekly_report", "health_on_start"):
+        elif k in ("rss", "sitemaps", "robots", "weekly_report", "health_on_start", "all_links", "homepage"):
             v = bool(v)
         elif k == "exclude_domains":
             items = v if isinstance(v, list) else re.split(r"[\n,\s]+", str(v or ""))
@@ -342,37 +343,45 @@ class Stream:
         Only articles, only from the days the stream covers."""
         from .medmas.filters import is_article_link
         cutoff = self.cutoff()
+        take_all = bool(self.cfg.get("all_links", True))
+        room_old = int(self.cfg.get("old_per_check", 1000)) if take_all else 0
         now, rows = time.time(), []
         for it in items:
             url = (it.get("url") or "").strip()
             if not url.startswith("http") or not is_article_link(url):
                 continue
             d = (it.get("date") or "")[:10]
-            if d and d < cutoff:
+            old = bool(d and d < cutoff) or bool(it.get("old"))
+            if old and not take_all:
                 continue
-            rows.append((norm_key(url), url, it.get("domain") or "", (it.get("title") or "")[:500], source, d,
-                         (it.get("time") or "")[:5], now))
+            rows.append(((norm_key(url), url, it.get("domain") or "", (it.get("title") or "")[:500], source, d,
+                          (it.get("time") or "")[:5], now), old))
         if not rows:
             return 0
         fresh = []
         with self.lock:
-            for row in rows:
+            for row, old in rows:
+                if old and room_old <= 0:
+                    continue                                   # older links: a share per visit, the rest next time
                 cur = self._db.execute("INSERT OR IGNORE INTO articles(key, url, domain, title, source, feed_date, "
                                        "feed_time, discovered) VALUES (?,?,?,?,?,?,?,?)", row)
                 if cur.rowcount:
-                    fresh.append(row)
+                    if old:
+                        room_old -= 1
+                    fresh.append((row, old))
             per_dom: dict = {}
-            for row in fresh:
-                per_dom[row[2]] = per_dom.get(row[2], 0) + 1
+            for row, old in fresh:
+                if not old:                                   # activity = new articles, not the back catalogue
+                    per_dom[row[2]] = per_dom.get(row[2], 0) + 1
             day = datetime.now(WIB).strftime("%Y-%m-%d")
             self._db.executemany("INSERT INTO domain_days(domain, day, n) VALUES (?,?,?) ON CONFLICT(domain, day) "
                                  "DO UPDATE SET n = n + excluded.n", [(d, day, n) for d, n in per_dom.items() if d])
             self._db.commit()
             self.counts["found"] += len(fresh)
             if self.running:                     # straight to the readers, at the front: newest first, no waiting
-                for key, url, dom, title, _src, fd, ft, _t in fresh:
+                for (key, url, dom, title, _src, fd, ft, _t), old in fresh:
                     self._enqueue({"key": key, "url": url, "domain": dom, "title": title, "feed_date": fd,
-                                   "feed_time": ft}, front=front)
+                                   "feed_time": ft}, front=front and not old)       # older ones wait behind the news
         return len(fresh)
 
     def _enqueue(self, job: dict, front: bool = False) -> None:
@@ -455,13 +464,39 @@ class Stream:
                 continue
             news = "news" in u.lower() or "berita" in u.lower()
             for e in data:
-                if e.get("date") or news:                    # undated entries only from news sitemaps (48 h by rule)
+                if e.get("date") or news:                    # undated entries of a news sitemap: the last 48 h by rule
                     items.append({**e, "domain": dom})
+                else:                                        # undated elsewhere: taken too, behind the news
+                    items.append({**e, "domain": dom, "old": True})
+        if self.cfg.get("homepage", True) and not catchup:   # the front page: articles not (yet) in any sitemap
+            got = self.homepage_links(dom)
+            if got is not None:
+                ok_any = True
+                items += got
         if not ok_any:
             if roots and src["url"]:                         # known sitemaps all failed: look for them again next time
                 extra["url"] = ""
             return 0, True, extra
         return self.add_found(items, "catchup" if catchup else "sitemap", front=not catchup), False, extra
+
+    def homepage_links(self, dom: str) -> list | None:
+        """The article links on an outlet's front page (same site only). None = the page did not answer."""
+        from urllib.parse import urljoin, urlparse
+        from .medmas.discovery import sitemaps as sm
+        try:
+            html = sm._fetch(f"https://{dom}/", timeout=10).decode("utf-8", "ignore")
+        except Exception:  # noqa: BLE001
+            return None
+        out, seen = [], set()
+        for m in re.finditer(r"""<a\b[^>]*href=["']([^"'#]+)["'][^>]*>(.*?)</a>""", html[:3_000_000], re.I | re.S):
+            u = urljoin(f"https://{dom}/", m.group(1).strip())
+            host = (urlparse(u).hostname or "").lower()
+            if not (host == dom or host.endswith("." + dom)) or u in seen:
+                continue
+            seen.add(u)
+            title = re.sub(r"<[^>]+>|\s+", " ", m.group(2)).strip()[:300]
+            out.append({"url": u, "title": title, "domain": dom})
+        return out
 
     def check_source(self, src) -> int:
         if self.excluded("https://" + (src["domain"] or "")):           # an excluded outlet: not even its feed
@@ -563,7 +598,8 @@ class Stream:
         status = "success" if res.get("content") and res.get("is_article", True) and not res.get("is_index") else \
             ("failed" if not res.get("content") else "filtered")
         cutoff = self.cutoff()
-        if status == "success" and re.match(r"\d{4}-\d{2}-\d{2}$", d) and d < cutoff:
+        if status == "success" and not self.cfg.get("all_links", True) and \
+                re.match(r"\d{4}-\d{2}-\d{2}$", d) and d < cutoff:
             status = "old"
         matched = []
         if status == "success":

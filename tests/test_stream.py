@@ -50,6 +50,7 @@ def test_rss_to_queue_to_reader_to_reports(st, monkeypatch):
             return Resp(304)
         return Resp(200, RSS, {"ETag": '"v1"'})
     monkeypatch.setattr(requests, "get", get)
+    st.cfg["all_links"] = False                                       # "recent only" mode
     st.x("INSERT INTO sources(id, kind, domain, url, next_check, interval) VALUES ('rss:f','rss','contoh.id',"
          "'https://www.contoh.id/rss',0,600)")
     src = st.q("SELECT * FROM sources")[0]
@@ -198,7 +199,7 @@ def test_robots_exclude_and_all_articles_export(st, monkeypatch, tmp_path):
 def test_catchup_sweep_takes_the_last_two_days_late_articles(st, monkeypatch):
     from crawler import stream
     from crawler.medmas.discovery import sitemaps as sm
-    st.cfg = stream.save_settings({"catchup_days": 2})
+    st.cfg = stream.save_settings({"catchup_days": 2, "all_links": False})
     now = datetime.now(WIB)
     day = {k: (now - timedelta(days=k)).strftime("%Y-%m-%d") for k in (0, 1, 2, 10)}
     idx = "".join(f"<sitemap><loc>https://x.id/sitemap-{day[k]}.xml</loc></sitemap>" for k in (10, 2, 1, 0))
@@ -257,3 +258,33 @@ def test_site_check_marks_down_sites_and_brings_back_living_ones(st, monkeypatch
     monkeypatch.setattr(st, "check_site", lambda d: (False, []))
     out = st.run_health()
     assert "nothing was marked" in out["error"] and st.q("SELECT tier FROM sources WHERE id='sm:hidup.id'")[0]["tier"] == "active"
+
+
+
+def test_every_link_not_yet_known_is_taken_old_ones_behind_the_news(st, monkeypatch):
+    from crawler.medmas.discovery import sitemaps as sm
+    st.cfg.update(all_links=True, old_per_check=2, homepage=True)
+    today = datetime.now(WIB).strftime("%Y-%m-%d")
+    urlset = ('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+              f"<url><loc>https://y.id/berita/{today}/kabar-terbaru-hari-ini</loc><lastmod>{today}</lastmod></url>"
+              + "".join(f"<url><loc>https://y.id/berita/2019/01/0{i}/kabar-lama-nomor-{i}</loc><lastmod>2019-01-0{i}</lastmod></url>"
+                        for i in range(1, 6))
+              + "<url><loc>https://y.id/berita/tanpa-tanggal-sama-sekali</loc></url></urlset>")
+    home = ('<html><a href="/nasional/2026/berita-di-beranda-saja">Berita di beranda</a>'
+            '<a href="https://lain.com/berita/bukan-situs-ini">x</a><a href="/tag/politik">tag</a></html>')
+    pages = {"https://y.id/sitemap.xml": urlset, "https://y.id/": home}
+    monkeypatch.setattr(sm, "_fetch", lambda u, timeout=8: pages[u].encode())
+    st.x("INSERT INTO sources(id, kind, domain, url, next_check, interval) VALUES ('sm:y.id','sitemap','y.id',?,0,3600)",
+         ('["https://y.id/sitemap.xml"]',))
+    st.running = True
+    try:
+        assert st.check_source(st.q("SELECT * FROM sources")[0]) == 4    # today + 2 old (share per visit) + front page
+        urls = [r["url"] for r in st.q("SELECT url FROM articles")]
+        assert "https://y.id/nasional/2026/berita-di-beranda-saja" in urls and not any("lain.com" in u for u in urls)
+        first = [st.next_job()[1]["url"]]
+        assert first[0].endswith(("kabar-terbaru-hari-ini", "berita-di-beranda-saja"))     # news first
+        st.check_source(st.q("SELECT * FROM sources")[0])                 # next visit: the next share of old links
+        assert st.q("SELECT COUNT(*) n FROM articles")[0]["n"] == 6
+        assert st.q("SELECT SUM(n) n FROM domain_days")[0]["n"] == 2     # activity counts new articles only
+    finally:
+        st.running = False

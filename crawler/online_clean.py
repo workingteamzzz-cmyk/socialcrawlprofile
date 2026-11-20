@@ -221,10 +221,26 @@ _JUNK_TITLE = re.compile(r"^\s*(privacy policy|kebijakan privasi|terms of (use|s
                          r"(local|latest|breaking) news, .*|berita terkini( dan| &)? terbaru.*|portal berita .*)\s*[.…!]*\s*"
                          r"([|\-–—:].{0,60})?$", re.I)
 
+# a page title that names no news at all: a banner, a section / index page, a placeholder ("Banner Link",
+# "Berita Terkini", "Video", "Indeks Berita"); a site name may follow after | or - (never ":" — "Video: banjir …"
+# is an article)
+_GENERIC_TITLE = re.compile(
+    r"^\s*(banner( link)?|link( banner)?|links?|headlines?|top news|breaking news|berita|news|artikel|articles?|"
+    r"berita (terkini|terbaru|hari ini|utama|populer|terpopuler|pilihan)|terkini|terbaru|terpopuler|populer|"
+    r"most popular|trending|pilihan editor|editor'?s? (choice|pick)|beranda|home( ?page)?|index|indeks( berita)?|"
+    r"index berita|arsip( berita)?|archives?|kategori|category|tags?|topik|topics?|search( results?)?|pencarian|"
+    r"hasil pencarian|videos?|foto|photos?|galeri( foto)?|gallery|infografis|advertisement|advertorial|iklan|"
+    r"sponsored|ads|untitled|no title|tanpa judul|rss|sitemap|live( streaming)?|e-?paper|newsletter|"
+    r"loading\.*|redirect(ing)?\.*)\s*[.…!]*\s*([|\-–—]\s*\S+(\s+\S+){0,3}\s*)?$", re.I)   # + a site name
+
+_PLACEHOLDER_TITLE = re.compile(r"^\s*(banner( link)?|link banner|untitled|no title|tanpa judul|advertisement|"
+                                r"sponsored|loading\.*|redirect(ing)?\.*)\s*([|\-–—:].{0,80})?$", re.I)
+
 
 def is_junk_page(title: str, url: str = "") -> bool:
     """A site page, not a news article: privacy / terms / about / contact / login / an error page, or a front page
-    whose title is the site's tagline ("Local news, breaking news, weather and traffic")."""
+    whose title is the site's tagline ("Local news, breaking news, weather and traffic"), or a title that names no
+    news at all ("Banner Link", "Berita Terkini", "Indeks Berita", "Video")."""
     from urllib.parse import urlparse
     try:
         path = urlparse(url or "").path
@@ -232,7 +248,8 @@ def is_junk_page(title: str, url: str = "") -> bool:
         path = ""
     if path and _JUNK_URL.search(path.rstrip("/") or "/"):
         return True
-    return bool(_JUNK_TITLE.match(str(title or "")))
+    t = str(title or "")
+    return bool(_JUNK_TITLE.match(t) or _GENERIC_TITLE.match(t) or _PLACEHOLDER_TITLE.match(t))
 
 
 def safe_cell(v, column: str = ""):

@@ -150,6 +150,7 @@ def _sent(v: str) -> str:
 def index_reports(limit: int = 5000) -> int:
     """Online rows of the reporting database added / changed since the last call -> the reader's index."""
     from urllib.parse import urlparse
+    from .online_clean import is_junk_page
     from .stream import norm_key
     src = _archive_ro()
     if src is None:
@@ -173,7 +174,7 @@ def index_reports(limit: int = 5000) -> int:
             except ValueError:
                 continue
             url = str(row.get("URL") or "")
-            if not url.startswith("http"):
+            if not url.startswith("http") or is_junk_page(str(row.get("TITLE") or ""), url):
                 continue
             t = str(row.get("TIME") or "")[:5]
             host = re.sub(r"^(www\.|m\.|amp\.)", "", (urlparse(url).hostname or "").lower())
@@ -210,6 +211,12 @@ def prune_reports() -> int:
             db.execute("ATTACH DATABASE ? AS a", (p,))
             n = db.execute("DELETE FROM rep WHERE NOT EXISTS (SELECT 1 FROM a.items i WHERE i.kind='online' "
                            "AND i.key = rep.akey)").rowcount
+            from .online_clean import is_junk_page          # pages the filter learned since they were indexed
+            junk = [r["skey"] for r in db.execute("SELECT skey, title, url FROM rep WHERE length(COALESCE(title,'')) "
+                                                  "<= 90").fetchall() if is_junk_page(r["title"], r["url"])]
+            for i in range(0, len(junk), 500):
+                part = junk[i:i + 500]
+                n += db.execute(f"DELETE FROM rep WHERE skey IN ({','.join('?' * len(part))})", part).rowcount
             if n:
                 db.execute("DELETE FROM rdocs WHERE skey NOT IN (SELECT skey FROM rep)")
         db.commit()

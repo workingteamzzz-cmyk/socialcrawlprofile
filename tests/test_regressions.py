@@ -702,3 +702,26 @@ def test_verification_close_up_for_phones(tmp_path):
         page.set_content("<html><body><h1>Normal page</h1></body></html>")
         assert _find_check(page, 1280, 900) is None
         b.close()
+
+
+def test_titles_that_name_no_news_are_skipped(tmp_path):
+    """'Banner Link', 'Berita Terkini', section pages: never in the Online file, News Stream or the search."""
+    import time as _t
+
+    from crawler import stream
+    from crawler.online_clean import is_junk_page
+    for t in ("Banner Link", "Berita Terkini", "Berita Terkini | Kompas.com", "Indeks Berita - CNN Indonesia", "Video",
+              "Home", "Foto - Antara News", "Banner Link | Radar Bogor Online Terkini Hari Ini"):
+        assert is_junk_page(t), t
+    for t in ("Video: Banjir rendam Jakarta", "Berita Terkini Banjir Bekasi", "PLN Tingkatkan Layanan Listrik",
+              "Siasati Efisiensi Dana Desa", "Live: Debat Capres", "Kategori Ekonomi Naik"):
+        assert not is_junk_page(t), t
+    s = stream.Stream(str(tmp_path / "s"))
+    with s.lock:
+        s._db.executemany("INSERT INTO articles(key, url, domain, title, status, discovered, fetched) VALUES "
+                          "(?,?,?,?, 'success', ?, ?)",
+                          [("a/1", "https://a.id/1", "a.id", "Banner Link", _t.time(), _t.time()),
+                           ("a/2", "https://a.id/2", "a.id", "PLN Amankan Pembiayaan", _t.time(), _t.time())])
+        s._db.commit()
+    assert s.drop_junk_titles() == 1 and s.drop_junk_titles() == 0          # once per filter version
+    assert [r["title"] for r in s.rq("SELECT title FROM articles WHERE status='success'")] == ["PLN Amankan Pembiayaan"]

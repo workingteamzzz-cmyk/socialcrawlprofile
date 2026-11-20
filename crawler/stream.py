@@ -153,6 +153,9 @@ def _write_settings(cur: dict) -> None:
     os.replace(tmp, os.path.join(_dir(), "settings.json"))
 
 
+JUNK_VERSION = "v42"                       # bump when online_clean's page filter learns new titles
+
+
 # ---------- the engine ----------
 class Stream:
     def __init__(self, folder: str | None = None):
@@ -757,9 +760,31 @@ class Stream:
             with self.lock:
                 self.inflight_sources.discard(src["id"])
 
+    def drop_junk_titles(self) -> int:
+        """Articles read before the filter knew their title was no news ("Banner Link", "Berita Terkini"…): taken out
+        of News Stream, the search and the exports (status 'filtered'). Once per filter version."""
+        from .online_clean import is_junk_page
+        if (self.rq("SELECT v FROM meta WHERE k='junk_titles'") or [{"v": ""}])[0]["v"] == JUNK_VERSION:
+            return 0
+        bad = [r["key"] for r in self.rq("SELECT key, title, url FROM articles WHERE status='success' AND "
+                                          "length(COALESCE(title,'')) <= 90") if is_junk_page(r["title"], r["url"])]
+        with self.lock:
+            for i in range(0, len(bad), 500):
+                part = bad[i:i + 500]
+                self._db.execute(f"UPDATE articles SET status='filtered', error='not a news article' WHERE key IN "
+                                 f"({','.join('?' * len(part))})", part)
+            self._db.execute("INSERT INTO meta(k, v) VALUES ('junk_titles', ?) ON CONFLICT(k) DO UPDATE SET "
+                             "v=excluded.v", (JUNK_VERSION,))
+            self._db.commit()
+        return len(bad)
+
     def house_loop(self) -> None:
         ev = self.stop_event
         last_purge = last_tiers = 0.0
+        try:
+            self.drop_junk_titles()
+        except Exception as e:  # noqa: BLE001
+            self.last_error = f"junk titles: {str(e)[:120]}"
         while not ev.is_set():
             for name, step in (("counts", self.flush_counts), ("queue", self.refill), ("sentiment", self.fill_sentiment)):
                 try:

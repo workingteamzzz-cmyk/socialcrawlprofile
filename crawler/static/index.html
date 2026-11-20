@@ -559,6 +559,32 @@ mark{background:rgba(250,178,25,.35);color:inherit;border-radius:2px;padding:0 1
 .ck-card[open] summary::after{transform:rotate(90deg)}
 .ck-card:not([open]) summary{border-bottom:0}
 @media (max-width:860px){.tb-search{margin-left:0}.crumb{display:none}}
+/* ================= Widget polish ================= */
+.search{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238a92a3' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:12px 50%;padding-left:36px!important}
+.empty,.empty-s{padding:40px 16px!important;color:var(--muted)}
+.empty svg.i{width:22px;height:22px;color:var(--accent);background:var(--accent-soft);box-sizing:content-box;padding:12px;border-radius:50%;margin:0 auto 12px}
+td.empty-s::before,p.empty-s::before{content:"";display:block;width:44px;height:44px;margin:0 auto 12px;border-radius:50%;background:var(--accent-soft) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%232f5bea' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 5h16v14H4z'/%3E%3Cpath d='M8 9h8M8 13h5'/%3E%3C/svg%3E") no-repeat center}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:12px 14px;box-shadow:var(--shadow)}
+.stat b{font-size:24px;font-weight:650;letter-spacing:-.02em}
+.stat small{display:block;text-transform:uppercase;letter-spacing:.07em;font-size:10.5px;font-weight:600;color:var(--faint);margin-top:2px}
+input[type=file]{font-size:13px;color:var(--muted)}
+input[type=file]::file-selector-button{font:inherit;font-weight:600;border:1px solid var(--line);background:var(--panel);color:var(--text);border-radius:7px;padding:7px 12px;margin-right:10px;cursor:pointer;box-shadow:var(--shadow)}
+input[type=file]::file-selector-button:hover{background:var(--hover)}
+.tbl select{border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--text);padding:4px 8px;font-size:12.5px}
+.kpi{overflow:hidden}
+.kpi .spark{position:absolute;right:16px;top:40px;opacity:.95}
+.pill.sm{font-size:11px;padding:1px 8px;margin-top:4px}
+.pill.off i{background:var(--faint)}
+#log:empty::before{content:"No job running — the live log of the next search or stream run appears here.";color:#64748b;font-family:Inter,system-ui,sans-serif}
+#log .ll{padding:1px 0;border-left:2px solid transparent;padding-left:8px;margin-left:-10px}
+#log .lt{color:#64748b;margin-right:10px;font-variant-numeric:tabular-nums}
+#log .l-ok{color:#86efac}#log .l-warn{color:#fcd34d;border-left-color:#f59e0b}#log .l-bad{color:#fca5a5;border-left-color:#ef4444}
+#log .l-head{color:#e2e8f0;font-weight:600}
+.toast{box-shadow:0 10px 30px rgba(16,24,40,.25);font-weight:500}
+.btn{transition:background .12s,border-color .12s,filter .12s,transform .06s}
+.btn:active{transform:translateY(1px)}
+.card{transition:box-shadow .15s}
+.kpi:hover,.dgrid > .card:hover{box-shadow:0 4px 14px rgba(16,24,40,.07)}
 </style>
 </head>
 <body>
@@ -2434,6 +2460,14 @@ function tip(e, html){ const t = $('vTip'); if (!html){ t.hidden = true; return;
   if (x + w > innerWidth - 8) x = e.clientX - w - 14; if (y < 8) y = e.clientY + 16; t.style.left = x + 'px'; t.style.top = y + 'px'; }
 function el(tag, attrs, parent){ const n = document.createElementNS(svgNS, tag); for (const k in attrs) n.setAttribute(k, attrs[k]); if (parent) parent.appendChild(n); return n; }
 function niceMax(v){ const raw = Math.max(1, v / 4), p = Math.pow(10, Math.floor(Math.log10(raw))); const step = [1, 2, 5, 10].map(m => m * p).find(x => x >= raw); return Math.max(4, step * 4); }
+function spark(id, vals, color){
+  const kpi = $(id).closest('.kpi'); let box = kpi.querySelector('.spark');
+  if (!box){ box = document.createElement('div'); box.className = 'spark viz'; kpi.append(box); }
+  const W = 96, H = 30, max = Math.max(1, ...vals), n = vals.length;
+  if (n < 2){ box.innerHTML = ''; return; }
+  const pts = vals.map((v, i) => `${(i * W / (n - 1)).toFixed(1)},${(H - 2 - v / max * (H - 4)).toFixed(1)}`);
+  box.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true"><polygon points="0,${H} ${pts.join(' ')} ${W},${H}" fill="${color}" opacity=".12"/><polyline points="${pts.join(' ')}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+}
 function drawTrend(d){
   const box = $('chTrend'); box.innerHTML = '';
   const series = [{k: 'online', name: 'News', c: 'var(--s1)'}, {k: 'medsos', name: 'Social media', c: 'var(--s2)'}];
@@ -2450,6 +2484,7 @@ function drawTrend(d){
     el('text', {x: x(i), y: H - 6, 'text-anchor': 'middle', class: 'ax'}, svg).textContent = dShort(t.day); });
   series.forEach(s => {
     const pts = d.trend.map((t, i) => `${x(i)},${y(t[s.k])}`).join(' ');
+    el('polygon', {points: `${x(0)},${y(0)} ${pts} ${x(n - 1)},${y(0)}`, fill: s.c, opacity: 0.07}, svg);
     el('polyline', {points: pts, fill: 'none', stroke: s.c, 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round'}, svg);
   });
   const cross = el('line', {y1: T, y2: H - B, class: 'cross', visibility: 'hidden'}, svg);
@@ -2498,6 +2533,7 @@ async function loadDash(){
   $('dQ').innerHTML = D_Q ? ` · filtered by <span class="qchip">“${esc(D_Q)}” <button id="dQx" title="Clear">×</button></span>` : '';
   if (D_Q) $('dQx').onclick = () => { D_Q = ''; $('tbSearch').value = ''; loadDash(); };
   $('kA').textContent = fmt(k.articles); $('kAd').innerHTML = delta(k.articles, k.articles_prev);
+  spark('kA', d.trend.map(t => t.online), 'var(--s1)'); spark('kP', d.trend.map(t => t.medsos), 'var(--s2)');
   $('kP').textContent = fmt(k.posts); $('kPd').innerHTML = delta(k.posts, k.posts_prev);
   $('kNeg').textContent = k.negative_pct + '%'; $('kNegd').innerHTML = delta(k.negative_pct, k.negative_pct_prev, 'pt', true);
   $('kM').textContent = fmt(k.media); $('kMd').innerHTML = delta(k.media, k.media_prev);
@@ -2880,6 +2916,8 @@ $('nBtnSched').onclick = () => {
 };
 const KIND_LABEL = {news: 'News', keywords: 'Keyword search', profiles: 'Accounts', apiscrape: 'API scraper'};
 const when = t => t ? new Date(t * 1000).toLocaleString('en-GB', {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'}) : '—';
+const rel = t => { if (!t) return ''; const m = Math.round((t * 1000 - Date.now()) / 60000);
+  return m <= 0 ? 'due now' : m < 60 ? `in ${m} min` : m < 1440 ? `in ${Math.floor(m / 60)} h ${m % 60 ? (m % 60) + ' min' : ''}` : `in ${Math.round(m / 1440)} day(s)`; };
 let schList = [];
 async function loadSchedules(){
   const d = await api('/api/schedules');
@@ -2887,9 +2925,9 @@ async function loadSchedules(){
   $('navSch').textContent = schList.length;
   $('schTbl').querySelector('tbody').innerHTML = schList.map((s, i) => {
     const p = s.payload || {}, what = s.kind === 'profiles' ? `${(p.ids || []).length} accounts` : (p.keywords || []).join(', ');
-    return `<tr><td><b>${esc(s.name)}</b>${s.enabled ? '' : ' <span class="hint">(paused)</span>'}</td>
+    return `<tr><td><b>${esc(s.name)}</b><br><span class="pill sm ${s.running ? 'run' : ''} ${s.enabled ? '' : 'off'}"><i></i>${s.running ? 'Running now' : s.enabled ? 'Active' : 'Paused'}</span></td>
       <td>${esc(KIND_LABEL[s.kind])}<br><small class="hint">${esc(what)}</small></td><td>${esc(s.describe)}${s.webhook ? '<br><small class="hint">→ results sent to ' + esc(new URL(s.webhook).host) + '</small>' : ''}</td>
-      <td>${s.enabled ? when(s.next_run) : '—'}</td>
+      <td>${s.enabled ? `${when(s.next_run)}<br><small class="hint">${rel(s.next_run)}</small>` : '—'}</td>
       <td>${s.running ? '<b>running now</b>' : when(s.last_run)}<br><small class="hint">${esc(s.last_result || '')}</small></td>
       <td style="white-space:nowrap"><button class="btn sm" data-run="${i}">Run now</button>
         <button class="btn sm" data-tog="${i}">${s.enabled ? 'Pause' : 'Resume'}</button>
@@ -3012,7 +3050,16 @@ async function poll(){
     if (s.captcha) capUpdate(s.captcha);
     if (s.log_count < logCount){ $('log').textContent = ''; logCount = 0; }
     if (s.logs.length){ const box = $('log'), bottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
-      box.textContent += s.logs.join('\n') + '\n'; logCount = s.log_count; if (bottom) box.scrollTop = box.scrollHeight; }
+      const frag = document.createDocumentFragment();
+      for (const line of s.logs){
+        const el = document.createElement('div'), m = /^\[(\d\d:\d\d:\d\d)\]\s?/.exec(line);
+        el.className = 'll ' + (/⛔|❌|✗|error|failed|Error/.test(line) ? 'l-bad' : /⚠|warn|🚨/.test(line) ? 'l-warn' : /✅|✓|🟢|Done|saved|🎉/.test(line) ? 'l-ok' : /^\s*$/.test(line) ? '' : /🔎|🚀|⚡|🛰|⏰|📥/.test(line) ? 'l-head' : '');
+        if (m){ const t = document.createElement('span'); t.className = 'lt'; t.textContent = m[1]; el.append(t, line.slice(m[0].length)); }
+        else el.textContent = line;
+        frag.append(el);
+      }
+      box.append(frag); while (box.childElementCount > 4000) box.firstElementChild.remove();
+      logCount = s.log_count; if (bottom) box.scrollTop = box.scrollHeight; }
     const was = running; running = s.running;
     const isProf = s.kind === 'profiles', isKw = s.kind === 'keywords', isNews = s.kind === 'news';
     $('btnStart').style.display = $('kBtnStart').style.display = $('nBtnStart').style.display = running ? 'none' : '';

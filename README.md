@@ -329,6 +329,16 @@ Measured on a 4-CPU test machine with local test sites: ~37 articles/second (≈
 core. On the real internet the pace is set by how many articles the media publish and how fast their sites answer; the
 page shows the live pace and the "per day at this pace" figure.
 
+## Keyword Search with the API
+
+Keyword Search → **Search engine**: *Browser (no API)* — free, uses the signed-in accounts — or *API (uses credits)* —
+fast, no browser, the file in the client's Medsos format (sentiment, emotion, user ID…). With the API:
+**Output** *Links only* (cheapest: no account look-ups) or *Links + content & engagement* (+ optional follower counts and
+comments, extra credits); **Max credits for this run** (the run stops there; 0 = up to today's limit set under API
+settings); **Max posts per keyword per platform**. Exclude words, X language and the Instagram choices apply too. X needs
+the Twitter API key. Results: Keyword Links, the Excel in Exports and the reporting database; *Schedule it* works the
+same way.
+
 ## Bulk links (read the articles of your own links)
 
 News Search → **Bulk links**: paste article links (one per line, thousands are fine) → **Process links**. Every link is

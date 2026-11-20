@@ -290,3 +290,37 @@ def test_api_stop_does_not_break_the_rest_of_the_app(tmp_path, fake_api):
         assert r.status_code == 200                            # … other hosts pass straight through
     finally:
         eng.STOP["on"] = False
+
+
+def test_keyword_search_with_the_api_engine(tmp_path, fake_api, monkeypatch):
+    """Keyword Search → engine API: credit cap, links only vs content, the client's Medsos file, Keyword Links rows."""
+    from crawler import archive, job, paths
+    monkeypatch.setattr(job, "OUTPUT_DIR", str(tmp_path / "out"))
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    cfg, notes = job.Job.api_cfg(["listrik"], ["tiktok", "x", "instagram"],
+                                 {"exclude": "promo, -giveaway", "ig_keyword": False,
+                                  "api": {"detail": "links", "budget": 15, "limit": 5, "comments": True}},
+                                 "2026-11-01", "2026-11-02", twitter_key=False)
+    assert cfg["platforms"] == ["TikTok (keyword)", "Instagram (hashtag)"] and notes and "Twitter" in notes[0]
+    assert cfg["budget"] == 15 and cfg["limit"] == 5 and cfg["neg_kw"] == "promo, giveaway"
+    assert cfg["fillid"] is False and cfg["comments"] is False                 # links only: no extra look-ups
+    assert cfg["time_from"] == "2026-11-01 00:00" and cfg["time_to"] == "2026-11-02 23:59"
+    j = job.Job()
+    assert "API key" in j.start_keywords(["listrik"], "2026-11-01", "2026-11-02", "WIB", ["tiktok"], {"engine": "api"})
+    settings.save(api_key="test-key-123")
+    day = time.strftime("%Y-%m-%d")
+    err = j.start_keywords(["listrik"], day, day, "WIB", ["tiktok"],
+                           {"engine": "api", "api": {"detail": "full", "budget": 20, "limit": 10}})
+    assert err is None
+    t = time.time()
+    while j.running and time.time() - t < 60:
+        time.sleep(0.1)
+    st = j.state()
+    assert not st["error"], st["logs"]
+    kw = st["modes"]["keywords"]
+    assert kw["count"] == 2 and any(f.endswith(".xlsx") for f in kw["files"])
+    rows = j.results_view("keywords")["links"]
+    assert {r["platform"] for r in rows} == {"tiktok"} and {r["author"] for r in rows} == {"kaltimpostnews", "warga_bahagia"}
+    assert all(r["keyword"] == "listrik" and r["url"].startswith("https://") for r in rows)
+    assert archive.stats()["medsos"]["items"] == 2
+    assert any("credit cap 20" in x for x in st["logs"])

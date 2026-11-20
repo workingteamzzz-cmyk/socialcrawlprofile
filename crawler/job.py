@@ -52,6 +52,46 @@ def _captcha_info() -> dict:
     return CAPTCHA.info()
 
 
+def _api_rows(path: str, kws: list[str]) -> list[dict]:
+    """The API scraper's file (the client's Medsos layout) -> rows for the Keyword Links page."""
+    from openpyxl import load_workbook
+    plat_key = {"twitter": "x", "x": "x", "youtube": "youtube", "threads": "threads", "instagram": "instagram",
+                "tiktok": "tiktok", "facebook": "facebook"}
+    out = []
+    try:
+        wb = load_workbook(path, read_only=True, data_only=True)
+    except Exception:  # noqa: BLE001
+        return out
+    try:
+        ws = wb["Sheet1"] if "Sheet1" in wb.sheetnames else wb.worksheets[0]
+        it = ws.iter_rows(values_only=True)
+        head = [str(h or "").strip() for h in next(it, [])]
+        lower = {k.lower(): k for k in kws}
+        for vals in it:
+            r = dict(zip(head, vals))
+            url = str(r.get("Url") or "").strip()
+            if not url:
+                continue
+            p = str(r.get("Platform") or "").lower()
+            q = str(r.get("Query") or "").replace("(comment)", "").strip()
+            kw = lower.get(q.lower()) or next((k for k in kws if k.lower() in q.lower()), q or (kws[0] if kws else ""))
+            d, t = r.get("Date"), r.get("Time")
+            d = d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d or "")[:10]
+            t = t.strftime("%H:%M") if hasattr(t, "strftime") else str(t or "")[:5]
+            try:
+                ts = datetime.strptime(f"{d} {t or '00:00'}", "%Y-%m-%d %H:%M").timestamp()
+            except ValueError:
+                ts = 0
+            out.append({"platform": next((v for k, v in plat_key.items() if k in p), p or "other"), "url": url,
+                        "author": str(r.get("Username") or ""), "date": d, "time": t, "ts": ts, "keyword": kw,
+                        "keywords": [kw], "caption": str(r.get("Text") or ""), "likes": r.get("Likes"),
+                        "comments": r.get("Reply"), "shares": r.get("Shares"), "views": r.get("Views Count"),
+                        "sub_type": str(r.get("Sub Type") or "")})
+    finally:
+        wb.close()
+    return out
+
+
 class Job:
     def __init__(self):
         self.lock = threading.Lock()
@@ -562,11 +602,111 @@ class Job:
         plats = [p for p in KEYWORD_PLATFORMS if p in platforms]
         if not plats:
             return "Choose at least one platform."
+        if (options or {}).get("engine") == "api":
+            from .apiscraper import settings
+            if not settings.load().get("api_key"):
+                return "No API key set yet — an admin sets it under API settings (or choose the Browser engine)."
+            return self._start("keywords", self._keywords_api, kws, plats, dict(options), d_start, d_end, tz_name)
         try:
             opt = SearchOptions.from_dict(options)
         except (TypeError, ValueError, AttributeError):
             return "Invalid search options."
         return self._start("keywords", self._keywords, kws, plats, opt, d_start, d_end, tz_name)
+
+    # ---------- keyword search through the scraping API (credits; the client's Medsos layout) ----------
+    API_PLATFORMS = {"x": ["Twitter (keyword)"], "youtube": ["YouTube (keyword)"], "threads": ["Threads (keyword)"],
+                     "tiktok": ["TikTok (keyword)"], "facebook": ["Facebook (Google)"],
+                     "instagram": ["Instagram (hashtag)", "Instagram (Google keyword)"]}
+
+    @staticmethod
+    def api_cfg(kws, plats, options: dict, start: str, end: str, twitter_key: bool = True) -> tuple[dict, list[str]]:
+        """Keyword Search's choices -> the API scraper's form. Returns (cfg, notes)."""
+        a = dict(options.get("api") or {})
+        notes = []
+        names = []
+        for p in plats:
+            got = list(Job.API_PLATFORMS.get(p, []))
+            if p == "instagram":
+                got = [g for g, on in zip(got, (options.get("ig_hashtag", True), options.get("ig_keyword", True))) if on]\
+                    or got[:1]
+            if p == "x" and not twitter_key:
+                notes.append("X / Twitter skipped: no Twitter API key (an admin adds it under API settings).")
+                continue
+            names += got
+        full = a.get("detail", "full") != "links"
+        excl = options.get("exclude") or []
+        excl = [w.strip().lstrip("-") for w in (re.split(r"[,\n]+", excl) if isinstance(excl, str) else excl)
+                if str(w).strip()]
+
+        def num(k, d, lo, hi):
+            try:
+                return max(lo, min(hi, int(a.get(k, d))))
+            except (TypeError, ValueError):
+                return d
+        cfg = {"mode": "keyword", "platforms": names, "queries": "\n".join(kws),
+               "limit": num("limit", 30, 1, 1000), "budget": num("budget", 200, 0, 1_000_000),
+               "time_from": f"{start} 00:00", "time_to": f"{end} 23:59", "strict": True,
+               "lang": options.get("x_lang") if options.get("x_lang") in ("id", "en") else "",
+               "neg_use": bool(excl), "neg_kw": ", ".join(excl), "dedup": True,
+               "fillid": full,                                   # account IDs / pictures: extra look-ups
+               "foll": full and bool(a.get("followers")),        # follower counts: extra credits
+               "comments": full and bool(a.get("comments")),     # comments of the top posts: extra credits
+               "cmt_top": num("cmt_top", 20, 1, 500), "cmt_max": num("cmt_max", 30, 1, 1000)}
+        return cfg, notes
+
+    def _keywords_api(self, kws, plats, options, d_start, d_end, tz_name):
+        from .apiscraper import runner, settings
+        from .paths import APP_DATA
+        b = self.data["keywords"]
+        a = dict(options.get("api") or {})
+        full = a.get("detail", "full") != "links"
+        b["period"] = {"start": f"{d_start:%Y-%m-%d}", "end": f"{d_end:%Y-%m-%d}", "tz": tz_name}
+        b["meta"] = {"keywords": kws, "platforms": plats, "details": full, "engine": "api"}
+        cfg, notes = self.api_cfg(kws, plats, options, f"{d_start:%Y-%m-%d}", f"{d_end:%Y-%m-%d}",
+                                  bool(settings.load().get("twitter_api_key")))
+        for n in notes:
+            self.log("⚠ " + n)
+        if not cfg["platforms"]:
+            raise RuntimeError("None of the chosen platforms can be searched with the API.")
+        left = settings.credits_left()
+        self.log(f"🔑 Keyword search with the API — {', '.join(kws)} · {', '.join(cfg['platforms'])} · "
+                 f"{d_start:%Y-%m-%d} to {d_end:%Y-%m-%d} · max {cfg['limit']} posts per keyword per platform · "
+                 f"credit cap {cfg['budget'] or 'none'}" + (f" ({left} left today)" if left is not None else "")
+                 + (" · output: links only (no account look-ups)" if not full else
+                    " · output: links + content & engagement" + (" + followers" if cfg["foll"] else "")
+                    + (" + comments" if cfg["comments"] else "")))
+
+        def progress(done, total, label):
+            if total:
+                self.total, self.done = total, min(done or 0, total)
+            if label:
+                self.current = label[:160]
+        self._quiet = True
+        try:
+            files = runner.run(cfg, self.log, progress, self.stop_flag, OUTPUT_DIR, APP_DATA)
+        finally:
+            self._quiet = False
+        b["files"] = files
+        rows = []
+        for f in files:
+            if f.endswith(".xlsx"):
+                rows += _api_rows(os.path.join(OUTPUT_DIR, f), kws)
+        with self.lock:
+            b["links"][:] = rows
+            for kw in kws:
+                st = {"keyword": kw, "platform": "api", "status": "ok",
+                      "count": sum(1 for r in rows if r["keyword"] == kw), "note": "API"}
+                b["statuses"].append(st)
+            b["version"] += 1
+        if files:
+            try:
+                from . import archive
+                n = sum(archive.import_file(os.path.join(OUTPUT_DIR, f))[1] for f in files if f.endswith(".xlsx"))
+                self.log(f"🗄 Reporting database: {n} new")
+            except Exception as e:  # noqa: BLE001
+                self.log(f"⚠ Reporting database not updated: {str(e)[:120]}")
+        self.log(("⏹ Stopped. " if self.stop_flag.is_set() else "✅ Done. ") + f"{len(rows)} posts"
+                 + (f" → {', '.join(x for x in files if x.endswith('.xlsx'))}" if files else " — no file (nothing found)"))
 
     def _keywords(self, kws, plats, opt, d_start, d_end, tz_name):
         from .keywords import KeywordCrawler

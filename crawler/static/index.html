@@ -212,7 +212,7 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
 .opt-row .t{flex:1;min-width:0}
 .opt-row .t b{display:block;font-weight:600;font-size:13.5px}
 .opt-row .t small{color:var(--muted);font-size:12px}
-.opt-row select,.opt-row input[type=text]{border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--panel);max-width:220px}
+.opt-row select,.opt-row input[type=text],.opt-row input[type=number]{border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--panel);max-width:220px}
 .opt-group{font-size:11.5px;letter-spacing:.5px;text-transform:uppercase;color:var(--faint);font-weight:600;margin:14px 0 2px;display:flex;align-items:center;gap:8px}
 .switch{position:relative;width:38px;height:22px;flex:none}
 .switch input{opacity:0;width:0;height:0;position:absolute}
@@ -606,7 +606,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
 .rd-face.pos{background:var(--ok-soft);color:var(--ok)}.rd-face.neg{background:var(--bad-soft);color:var(--bad)}.rd-face.neu{background:var(--soft);color:var(--muted)}
 .rd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px}
 .rd-filters input[type=date]{min-width:0;width:100%;padding-left:8px;padding-right:6px;font-size:13px}
-.rd-new[hidden],.card[hidden],.btn[hidden]{display:none}
+.rd-new[hidden],.card[hidden],.btn[hidden],.tag[hidden],#kApiOpts[hidden]{display:none}
 .rd-grid.list{grid-template-columns:minmax(0,1fr)}
 .rd-card{display:flex;gap:14px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;cursor:pointer;box-shadow:var(--shadow);transition:border-color .12s,box-shadow .12s}
 .rd-card:hover{box-shadow:0 4px 14px rgba(16,24,40,.08)}
@@ -892,7 +892,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
 
     <!-- KEYWORD SEARCH -->
     <section class="page" id="p-kwsearch">
-      <div class="pagehead"><div><h1>Keyword Search</h1><p>Collect post links that each platform's own search shows for your keywords, limited to the period. No API.</p></div></div>
+      <div class="pagehead"><div><h1>Keyword Search</h1><p>Collect the posts each platform shows for your keywords, limited to the period — with the <b>Browser</b> (free, no API) or the <b>API</b> (credits, the client's Medsos format).</p></div></div>
       <div class="collect">
         <div style="display:flex;flex-direction:column;gap:16px">
           <div class="card"><div class="card-hd"><h3>Keywords</h3><div class="tools"><button class="btn sm" id="kwClear">Clear</button></div></div>
@@ -936,6 +936,26 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
                 <div class="now" id="kProgNow">Preparing…</div>
               </div>
             </div></div>
+          <div class="card" id="kEngineCard"><div class="card-hd"><h3>Search engine</h3><div class="tools"><span class="tag likely" id="kaLeft" hidden></span></div></div>
+            <div class="card-bd"><div class="choices">
+              <label class="choice"><input type="radio" name="kEngine" value="browser" checked><span><b>Browser (no API)</b><small>Free. Searches each platform like a person, with the signed-in accounts. Slower; Instagram and TikTok show only top posts.</small></span></label>
+              <label class="choice"><input type="radio" name="kEngine" value="api"><span><b>API (uses credits)</b><small>Fast, no browser, no signed-in account at risk. The file comes in the client's Medsos format (sentiment, emotion, user ID…).</small></span></label>
+            </div>
+            <div id="kApiOpts" hidden style="margin-top:12px">
+              <div class="opt-row"><div class="t"><b>Output</b><small>Links only skips the account look-ups (user ID, picture) — fewer credits. The post text comes with the search either way.</small></div>
+                <select id="kaDetail"><option value="links">Links only (cheapest)</option><option value="full" selected>Links + content &amp; engagement</option></select></div>
+              <div class="opt-row"><div class="t"><b>Max credits for this run</b><small>The run stops when it reaches this — 0 = up to today's limit</small></div>
+                <input type="number" id="kaBudget" min="0" step="10" value="200" style="width:110px" aria-label="Max credits for this run"></div>
+              <div class="opt-row"><div class="t"><b>Max posts per keyword per platform</b></div>
+                <input type="number" id="kaLimit" min="1" max="1000" value="30" style="width:110px" aria-label="Max posts per keyword per platform"></div>
+              <div class="opt-row ka-full"><div class="t"><b>Follower counts</b><small>One more look-up per account — extra credits</small></div>
+                <label class="switch"><input type="checkbox" id="kaFoll"><span></span></label></div>
+              <div class="opt-row ka-full"><div class="t"><b>Comments</b><small>The comments of the top posts — extra credits</small></div>
+                <label class="switch"><input type="checkbox" id="kaCmt"><span></span></label></div>
+              <div class="opt-row ka-full ka-cmt"><div class="t"><b>Comments: top posts / max per post</b></div>
+                <span style="display:flex;gap:6px"><input type="number" id="kaCmtTop" min="1" max="500" value="20" style="width:70px" aria-label="Top posts"><input type="number" id="kaCmtMax" min="1" max="1000" value="30" style="width:70px" aria-label="Comments per post"></span></div>
+              <p class="hint" id="kaNote" style="margin:8px 0 0">Exclude words, X language and the Instagram choices below apply to the API too.</p>
+            </div></div></div>
           <div class="card"><div class="card-hd"><h3>Advanced options</h3></div>
             <div class="card-bd">
               <div class="opt-row"><div class="t"><b>Output</b><small>Caption &amp; engagement opens every post — slower</small></div>
@@ -2121,11 +2141,40 @@ function kwOptions(){
   return { detail: $('oDetail').value, cap: +$('oCap').value, exact: $('oExact').checked, must_mention: $('oMention').checked,
     exclude: $('oExclude').value.split(',').map(w => w.trim().replace(/^-/, '')).filter(Boolean),
     x_lang: $('oLang').value, x_no_replies: $('oNoReplies').checked, x_no_reposts: $('oNoReposts').checked,
-    ig_hashtag: $('oIgTag').checked, ig_keyword: $('oIgKw').checked, template: $('oTemplate').value, layout_v2: true };
+    ig_hashtag: $('oIgTag').checked, ig_keyword: $('oIgKw').checked, template: $('oTemplate').value, layout_v2: true,
+    engine: document.querySelector('input[name=kEngine]:checked').value,
+    api: {detail: $('kaDetail').value, budget: +$('kaBudget').value || 0, limit: +$('kaLimit').value || 30,
+          followers: $('kaFoll').checked, comments: $('kaCmt').checked, cmt_top: +$('kaCmtTop').value || 20, cmt_max: +$('kaCmtMax').value || 30} };
+}
+function kaShow(){                                        // API engine: its own options; the browser-only rows hide
+  const api = document.querySelector('input[name=kEngine]:checked').value === 'api';
+  $('kApiOpts').hidden = !api; $('kaLeft').hidden = !api;
+  ['oDetail', 'oTemplate', 'oCap', 'oExact', 'oMention', 'oNoReplies', 'oNoReposts'].forEach(id => { const r = $(id).closest('.opt-row'); if (r) r.style.display = api ? 'none' : ''; });
+  $('qPrev').style.display = api ? 'none' : '';
+  const full = $('kaDetail').value === 'full';
+  document.querySelectorAll('#kApiOpts .ka-full').forEach(r => r.style.display = full ? '' : 'none');
+  document.querySelector('#kApiOpts .ka-cmt').style.display = full && $('kaCmt').checked ? '' : 'none';
+  $('kBtnStart').innerHTML = `<svg class="i"><use href="#i-search"/></svg>Start keyword search${api ? ' (API)' : ''}`;
+  if (api && !kaShow.info){ kaShow.info = true;
+    api_get_info(); }
+}
+async function api_get_info(){
+  const inf = await api('/api/apiscraper/info');
+  if (!inf || inf.ready === false){ $('kaLeft').textContent = 'No API key'; $('kaLeft').className = 'tag bad'; return; }
+  $('kaLeft').textContent = inf.left === null || inf.left === undefined ? 'No credit limit' : `${fmt(inf.left)} credits left today`;
+  if (!ls.get('kw_opts', null)?.api && inf.default_budget !== undefined) $('kaBudget').value = inf.default_budget;
+  if (!inf.twitter) $('kaNote').textContent = 'X / Twitter needs its own API key (API settings) — without it X is skipped. Exclude words, X language and the Instagram choices below apply to the API too.';
 }
 (function(){ const o = ls.get('kw_opts', null); if (o){ $('oDetail').value = o.detail || 'links'; $('oTemplate').value = o.layout_v2 ? (o.template || 'medsos') : 'medsos'; $('oMention').checked = o.must_mention !== false; $('oCap').value = o.cap; $('oExact').checked = o.exact; $('oExclude').value = (o.exclude || []).join(', ');
   $('oLang').value = o.x_lang || ''; $('oNoReplies').checked = o.x_no_replies; $('oNoReposts').checked = o.x_no_reposts;
-  $('oIgTag').checked = o.ig_hashtag; $('oIgKw').checked = o.ig_keyword; } })();
+  $('oIgTag').checked = o.ig_hashtag; $('oIgKw').checked = o.ig_keyword;
+  const eng = document.querySelector(`input[name=kEngine][value="${o.engine === 'api' ? 'api' : 'browser'}"]`); if (eng) eng.checked = true;
+  const a = o.api || {}; if (a.detail) $('kaDetail').value = a.detail; if (a.budget !== undefined) $('kaBudget').value = a.budget;
+  if (a.limit) $('kaLimit').value = a.limit; $('kaFoll').checked = !!a.followers; $('kaCmt').checked = !!a.comments;
+  if (a.cmt_top) $('kaCmtTop').value = a.cmt_top; if (a.cmt_max) $('kaCmtMax').value = a.cmt_max; } })();
+document.querySelectorAll('input[name=kEngine]').forEach(r => r.addEventListener('change', () => { ls.set('kw_opts', kwOptions()); kaShow(); }));
+['kaDetail', 'kaBudget', 'kaLimit', 'kaFoll', 'kaCmt', 'kaCmtTop', 'kaCmtMax'].forEach(id => $(id).addEventListener('change', () => { ls.set('kw_opts', kwOptions()); kaShow(); }));
+kaShow();
 ['oDetail','oTemplate','oCap','oExact','oMention','oExclude','oLang','oNoReplies','oNoReposts','oIgTag','oIgKw'].forEach(id =>
   $(id).addEventListener(id === 'oExclude' ? 'input' : 'change', () => { ls.set('kw_opts', kwOptions()); kwRender(); }));
 $('kwInput').addEventListener('keydown', e => {

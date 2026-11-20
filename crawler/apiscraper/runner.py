@@ -117,8 +117,14 @@ def run(cfg: dict, log, progress, stop_event: threading.Event, out_dir: str, dat
 
     mode = cfg.get("mode", "keyword")
     plat = MODES.get(mode) or cfg.get("platform") or "ALL platforms"
+    subset = [p for p in (cfg.get("platforms") or []) if p in platforms()[1:]]    # several chosen platforms
+    if mode == "keyword" and subset:
+        plat = subset[0] if len(subset) == 1 else "ALL platforms"
     if plat not in platforms() + [m for m in MODES.values() if m]:
         raise RuntimeError(f"Unknown platform: {plat}")
+    all_before = eng.ALL_PLATFORMS
+    if mode == "keyword" and len(subset) > 1:
+        eng.ALL_PLATFORMS = subset                                 # "ALL platforms" = the chosen ones, this run
     f = eng                                                        # the form widgets live in the engine module
     f.platform_w.value = plat
     f.queries_w.value = cfg.get("queries", "")
@@ -190,6 +196,7 @@ def run(cfg: dict, log, progress, stop_event: threading.Event, out_dir: str, dat
         done.set()
         colab_shim.HOOK["fn"] = None
         settings.record_usage(eng._REQN["other"], eng._REQN["twitter"])
+        eng.ALL_PLATFORMS = all_before
         eng.STOP["on"] = False                  # a Stop ends this run only
         try:
             _save_profiles(eng, prof_path)

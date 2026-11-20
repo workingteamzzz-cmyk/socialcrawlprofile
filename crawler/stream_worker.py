@@ -73,6 +73,9 @@ def main() -> None:
                     s.remove_outlets(json.loads(arg or "[]"))
                 elif cmd == "subs":
                     media_db.install()
+                elif cmd == "archive_export":
+                    from crawler import backfill
+                    threading.Thread(target=stream._quiet, args=(backfill.export, s, arg, OUTPUT_DIR), daemon=True).start()
             stream.write_live(s.live_state())
         except Exception as e:  # noqa: BLE001  the loop keeps going; the error shows on the dashboard
             s.last_error = f"worker: {str(e)[:150]}"

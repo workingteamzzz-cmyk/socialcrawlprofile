@@ -156,6 +156,8 @@ class Stream:
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA synchronous=NORMAL")
         self._db.executescript(SCHEMA)
+        from .backfill import SCHEMA as ARCHIVE_SCHEMA
+        self._db.executescript(ARCHIVE_SCHEMA)
         for sql in ("ALTER TABLE hourly ADD COLUMN skipped INTEGER DEFAULT 0",          # databases from v23
                     "ALTER TABLE sources ADD COLUMN tier TEXT DEFAULT 'new'",
                     "ALTER TABLE articles ADD COLUMN sentiment TEXT DEFAULT ''"):            # databases before v33
@@ -168,6 +170,7 @@ class Stream:
         self._ctl = threading.Lock()           # start / stop never overlap
         self._local = threading.local()        # per-thread read-only connections (reads without the lock)
         self.qn = 0                            # articles waiting in the in-memory queue
+        self.gap_override: dict = {}           # outlet -> its own pause (a media-archive job's setting)
         self.stop_event = threading.Event()
         self.threads: list[threading.Thread] = []
         self.running = False
@@ -549,7 +552,7 @@ class Stream:
         with self.lock:
             if self.qn > 4000:
                 return
-            rows = self._db.execute("SELECT key, url, domain, title, feed_date, feed_time FROM articles "
+            rows = self._db.execute("SELECT key, url, domain, title, feed_date, feed_time, source FROM articles "
                                     "WHERE status='new' ORDER BY discovered DESC LIMIT 3000").fetchall()
             for r in rows:                       # left-overs (e.g. after a restart), newest first
                 self._enqueue(dict(r))
@@ -636,7 +639,13 @@ class Stream:
         if status == "success" and is_junk_page(res.get("title") or job.get("title") or "", job["url"]):
             status = "filtered"                              # privacy / terms / a front page: not an article
         cutoff = self.cutoff()
-        if status == "success" and not self.cfg.get("all_links", True) and \
+        archive_job = (job.get("source") or "").startswith("backfill:")
+        if archive_job and status == "success":               # a media-archive job: its own period decides
+            bj = self.rq("SELECT start, end, status FROM backfill WHERE id=?", (job["source"][9:],))
+            if not bj or bj[0]["status"] == "cancelled" or (re.match(r"\d{4}-\d{2}-\d{2}$", d)
+                                                           and not bj[0]["start"] <= d <= bj[0]["end"]):
+                status = "filtered"
+        if status == "success" and not archive_job and not self.cfg.get("all_links", True) and \
                 re.match(r"\d{4}-\d{2}-\d{2}$", d) and d < cutoff:
             status = "old"
         matched = []
@@ -710,7 +719,7 @@ class Stream:
             finally:
                 with self.lock:
                     self.busy_domains.discard(dom)
-                    self.next_ok[dom] = time.time() + float(self.cfg["domain_gap"])
+                    self.next_ok[dom] = time.time() + float(self.gap_override.get(dom) or self.cfg["domain_gap"])
                     self.queued.discard(job["key"])
 
     # ----- discovery + housekeeping -----
@@ -768,6 +777,17 @@ class Stream:
         except Exception:  # noqa: BLE001
             pass
 
+    def _backfill_loop(self) -> None:
+        from . import backfill
+        ev = self.stop_event
+        backfill.ensure(self)
+        while not ev.is_set():
+            try:
+                backfill.step(self, ev)
+            except Exception as e:  # noqa: BLE001
+                self.last_error = f"media archive: {str(e)[:120]}"
+            ev.wait(3)
+
     def _feeds_loop(self) -> None:
         from . import feeds
         feeds.sender_loop(self)
@@ -798,7 +818,8 @@ class Stream:
         n = 0
         while not (ev and ev.is_set()):
             with self.lock:
-                rows = self._db.execute("SELECT rowid, key, discovered FROM articles WHERE discovered < ? LIMIT 5000",
+                rows = self._db.execute("SELECT rowid, key, discovered FROM articles WHERE discovered < ? AND "
+                                        "(source IS NULL OR source NOT LIKE 'backfill:%') LIMIT 5000",
                                         (cut,)).fetchall()
                 if not rows:
                     break
@@ -1073,7 +1094,8 @@ class Stream:
                             threading.Thread(target=self.catchup_loop, daemon=True, name="stream-catchup"),
                             threading.Thread(target=self.health_loop, daemon=True, name="stream-health"),
                             threading.Thread(target=self.house_loop, daemon=True, name="stream-house"),
-                            threading.Thread(target=self._feeds_loop, daemon=True, name="stream-feeds")]
+                            threading.Thread(target=self._feeds_loop, daemon=True, name="stream-feeds"),
+                            threading.Thread(target=self._backfill_loop, daemon=True, name="stream-archive")]
             self.threads += [threading.Thread(target=self.reader_loop, daemon=True, name=f"stream-reader-{i}")
                              for i in range(self.cfg["threads"])]
             for t in self.threads:

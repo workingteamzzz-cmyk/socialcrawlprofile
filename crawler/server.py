@@ -129,6 +129,11 @@ class Handler(BaseHTTPRequestHandler):
             from . import overview as ov
             from .paths import SERVER_MODE
             return self._json(ov.build(SERVER_MODE))
+        if u.path == "/api/archive":
+            from . import backfill, stream
+            return self._json({"jobs": backfill.jobs(stream.get()),
+                               "running": bool((stream.read_live() or {}).get("running")) if stream._WORKER_PARENT
+                               else stream.get().running})
         if u.path == "/api/feeds":
             from . import feeds, stream
             wait = feeds.waiting(stream.get())
@@ -288,6 +293,30 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True, "file": r["file"], "access": r["access"], "tiers": r["tiers"]})
             except ValueError as e:
                 return self._json({"ok": False, "error": str(e)})
+        elif u.path.startswith("/api/archive/"):
+            from . import backfill, stream
+            from .paths import OUTPUT_DIR as OUT
+            s, action, jid = stream.get(), u.path.rsplit("/", 1)[-1], str(data.get("id") or "")
+            try:
+                if action == "start":
+                    return self._json({"ok": True, "job": backfill.start(s, str(data.get("domain") or ""),
+                                                                         str(data.get("start") or ""),
+                                                                         str(data.get("end") or ""), data.get("gap") or 1.5)})
+                if action == "cancel":
+                    return self._json({"ok": backfill.cancel(s, jid)})
+                if action == "delete":
+                    return self._json({"ok": backfill.delete(s, jid)})
+                if action == "export":
+                    s.x("UPDATE backfill SET file='' WHERE id=?", (jid,))
+                    if stream._WORKER_PARENT:
+                        stream.command("archive_export", jid)
+                    else:
+                        import threading as _th
+                        _th.Thread(target=stream._quiet, args=(backfill.export, s, jid, OUT), daemon=True).start()
+                    return self._json({"ok": True})
+            except ValueError as e:
+                return self._json({"ok": False, "error": str(e)})
+            return self._json({"ok": False, "error": "unknown action"})
         elif u.path in ("/api/feeds/save", "/api/feeds/delete", "/api/feeds/test"):
             from . import feeds
             try:

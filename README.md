@@ -377,6 +377,17 @@ With a token: `Authorization: Bearer <token>` and `X-Collector-Signature: sha256
 answer counts as delivered; otherwise the articles wait in an outbox and are sent again (30 s, 2 min, 10 min, 30 min,
 then hourly for a day). *Test* sends one sample now; the table shows sent / waiting / last error per client.
 
+## Media archive (every article of one outlet over months or years)
+
+Media Database → **Media archive** (or *Archive* on an outlet's row): an outlet, a period (e.g. two years) and a speed.
+The worker walks every sitemap of that outlet (dated archives outside the period are skipped), queues every article
+link of the period and the stream's readers read them behind fresh news, one page at a time for that outlet (polite
+≈ 50,000 articles a day, faster ≈ 100,000). Archive articles are **kept for good** (the stream's 7-day clean-up skips
+them), are searchable in News Stream and Explore, and *Make Excel* writes them all as one Online file. The table shows
+sitemaps read, links found, read / waiting / not readable; *Cancel* stops a job (what was read stays), *Delete*
+removes its articles. Needs the Live Stream running. How far back it reaches depends on the outlet: most list every
+article in their sitemaps; one without sitemaps for older years cannot be read back this way.
+
 ## Explore (search everything, top stories, spike alerts)
 
 - **Search** every article the live stream read (title + summary, SQLite full-text index, kept as long as the stream

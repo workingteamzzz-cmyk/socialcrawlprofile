@@ -296,6 +296,13 @@ class FeedIn(BaseModel):
     enabled: bool = True
 
 
+class ArchiveIn(BaseModel):
+    domain: str = Field(..., description="the outlet, e.g. detik.com")
+    start: str = Field(..., description="YYYY-MM-DD")
+    end: str = Field(..., description="YYYY-MM-DD")
+    gap: float = Field(1.5, description="seconds between two pages of this outlet (polite: 1.5)")
+
+
 class FeedRef(BaseModel):
     id: str
 
@@ -813,6 +820,44 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
             daily_cap=body.daily_cap, monthly_cap=body.monthly_cap,
             cleared=[k for k, v in (("api", body.clear_api_key), ("twitter", body.clear_twitter)) if v])
         return {"ok": True, **pub}
+
+    # ---------- media archive: one outlet over months / years ----------
+    @app.get("/api/archive", tags=["media archive"], dependencies=op, summary="Media archive jobs and their progress")
+    def archive_jobs():
+        from . import backfill, stream
+        return {"jobs": backfill.jobs(stream.get()), "running": bool((stream.read_live() or {}).get("running"))
+                if stream._WORKER_PARENT else stream.get().running}
+
+    @app.post("/api/archive/start", tags=["media archive"], dependencies=admin_only,
+              summary="Take every article of one outlet over a period (from its sitemaps)")
+    def archive_start(body: ArchiveIn, request: Request):
+        from . import backfill, stream
+        try:
+            j = backfill.start(stream.get(), body.domain, body.start, body.end, body.gap)
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        log(request, "started a media archive", domain=j["domain"], period=f"{j['start']}..{j['end']}")
+        return {"ok": True, "job": j}
+
+    @app.post("/api/archive/{action}", tags=["media archive"], dependencies=admin_only,
+              summary="cancel / delete / export (Excel) an archive job")
+    def archive_action(action: str, body: FeedRef, request: Request):
+        from . import backfill, stream
+        from .paths import OUTPUT_DIR
+        s = stream.get()
+        if action == "cancel":
+            return {"ok": backfill.cancel(s, body.id)}
+        if action == "delete":
+            log(request, "deleted a media archive", id=body.id)
+            return {"ok": backfill.delete(s, body.id)}
+        if action == "export":
+            s.x("UPDATE backfill SET file='' WHERE id=?", (body.id,))
+            if stream._WORKER_PARENT:
+                stream.command("archive_export", body.id)
+            else:
+                threading.Thread(target=stream._quiet, args=(backfill.export, s, body.id, OUTPUT_DIR), daemon=True).start()
+            return {"ok": True}
+        raise HTTPException(404, "unknown action")
 
     # ---------- client feeds: realtime push per article ----------
     @app.get("/api/feeds", tags=["client API"], dependencies=admin_only, summary="Client feeds (realtime webhooks)")

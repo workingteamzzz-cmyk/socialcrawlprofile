@@ -560,7 +560,7 @@ mark{background:rgba(250,178,25,.35);color:inherit;border-radius:2px;padding:0 1
 .ck-card summary::after{content:"▸";margin-left:12px;color:var(--faint);transition:transform .15s}
 .ck-card[open] summary::after{transform:rotate(90deg)}
 .ck-card:not([open]) summary{border-bottom:0}
-@media (max-width:860px){.tb-search{margin-left:0}.crumb{display:none}}
+@media (max-width:860px){.tb-search{margin-left:0}.crumb{display:none}#arCard .card-bd.need-admin{grid-template-columns:1fr 1fr}}
 /* ================= Widget polish ================= */
 .search{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238a92a3' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:12px 50%;padding-left:36px!important}
 .empty,.empty-s{padding:40px 16px!important;color:var(--muted)}
@@ -1305,6 +1305,16 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
         <div class="tbl-wrap"><table class="tbl dtbl"><thead><tr><th>Outlet</th><th style="width:130px">Activity</th><th style="width:110px">Articles / day</th><th style="width:170px">Access</th><th style="width:110px">Read / failed</th><th style="width:150px">Last article</th><th style="width:170px"></th></tr></thead><tbody id="mdBody"></tbody></table></div>
         <div class="card-bd" style="display:flex;align-items:center;gap:10px;padding-top:12px"><span class="hint" id="mdPageInfo"></span>
           <button class="btn sm" id="mdPrev" style="margin-left:auto">Previous</button><button class="btn sm" id="mdNext">Next</button></div></div>
+      <div class="card" style="margin-top:16px" id="arCard"><div class="card-hd"><h3>Media archive</h3><span class="hd-note">every article of one outlet over months or years</span></div>
+        <div class="card-bd need-admin" style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr auto;gap:10px;align-items:end">
+          <div class="field" style="margin:0"><label for="arDom">Outlet</label><input id="arDom" placeholder="e.g. detik.com"></div>
+          <div class="field" style="margin:0"><label for="arStart">From</label><input type="date" id="arStart"></div>
+          <div class="field" style="margin:0"><label for="arEnd">To</label><input type="date" id="arEnd"></div>
+          <div class="field" style="margin:0"><label for="arGap">Speed</label><select id="arGap"><option value="1.5">Polite (≈ 50k/day)</option><option value="0.8">Faster (≈ 100k/day)</option><option value="3">Gentle (≈ 25k/day)</option></select></div>
+          <button class="btn primary" id="arGo" style="height:40px">Start</button></div>
+        <div class="card-bd" style="padding-top:0"><span class="hint" id="arMsg"></span></div>
+        <div class="tbl-wrap"><table class="tbl dtbl"><thead><tr><th>Outlet</th><th>Period</th><th style="width:150px">Status</th><th>Progress</th><th style="width:240px"></th></tr></thead><tbody id="arBody"></tbody></table></div>
+        <div class="card-bd"><p class="hint" style="margin:0">The outlet's sitemaps are walked year by year; its articles are read behind fresh news, one page at a time (the speed above), and kept for good — in News Stream, Explore and one Excel. How far back it reaches depends on the outlet: most list every article in their sitemaps. Needs the Live Stream running.</p></div></div>
       <div class="dgrid g-3 need-admin" style="margin-top:16px">
         <div class="card"><div class="card-hd"><h3>Add outlets</h3></div><div class="card-bd">
           <div class="field"><label for="mdAdd">One per line: domain, or domain, name (URLs are fine)</label><textarea id="mdAdd" rows="5" placeholder="radarbogor.id, Radar Bogor&#10;https://www.contohmedia.com/"></textarea></div>
@@ -1735,7 +1745,7 @@ function go(p){
   if (p === 'home') loadHome();
   if (p === 'stream'){ loadStream(); loadFeeds(); }
   if (p === 'reader') initReader();
-  if (p === 'media') loadMedia();
+  if (p === 'media'){ loadMedia(); loadArchive(); }
   if (p === 'explore') loadExplore();
   if (p === 'apikeys'){ loadApKeys(); loadTg(); loadSafety(); }
 }
@@ -2845,7 +2855,7 @@ async function loadMedia(){
     <td><span class="badge ${ACCL[r.access][1]}">${ACCL[r.access][0]}</span>${r.error && r.access !== 'ok' ? `<small>${esc(r.error)}</small>` : ''}</td>
     <td>${fmt(r.read)} / ${fmt(r.failed + r.short)}${r.robots ? `<small>${fmt(r.robots)} refused</small>` : ''}</td>
     <td>${r.last_day ? dShort(r.last_day) : '–'}<small>${r.rss ? 'RSS + ' : ''}${r.sitemap ? 'sitemap' : r.rss ? '' : 'no feed found yet'}</small></td>
-    <td class="nowrap">${admin ? `<button class="btn sm" data-mdlogin="${i}">Login</button> <button class="btn sm" data-mdrm="${i}">Remove</button>` : ''}</td></tr>`).join('')
+    <td class="nowrap">${admin ? `<button class="btn sm" data-mdarch="${i}" title="Every article of this outlet over a period">Archive</button> <button class="btn sm" data-mdlogin="${i}">Login</button> <button class="btn sm" data-mdrm="${i}">Remove</button>` : ''}</td></tr>`).join('')
     : '<tr><td colspan="7" class="empty-s">No outlet matches.</td></tr>';
   const from = (d.page - 1) * d.size;
   $('mdPageInfo').textContent = d.total ? `${fmt(from + 1)}–${fmt(Math.min(d.total, from + d.size))} of ${fmt(d.total)}` : '';
@@ -2862,7 +2872,8 @@ $('mdAddBtn').onclick = async () => { const r = await api('/api/media/add', {tex
   $('mdAddMsg').textContent = `${r.added.length} added` + (r.already.length ? `, ${r.already.length} already registered` : '') + (r.invalid.length ? `, ${r.invalid.length} not a domain` : '');
   if (r.added.length) $('mdAdd').value = ''; loadMedia(); };
 $('mdBody').addEventListener('click', async e => {
-  const rm = e.target.closest('[data-mdrm]'), lg = e.target.closest('[data-mdlogin]');
+  const rm = e.target.closest('[data-mdrm]'), lg = e.target.closest('[data-mdlogin]'), ar = e.target.closest('[data-mdarch]');
+  if (ar){ $('arDom').value = MDROWS[+ar.dataset.mdarch].domain; $('arCard').scrollIntoView({behavior: 'smooth', block: 'start'}); $('arStart').focus(); }
   if (rm){ const r = MDROWS[+rm.dataset.mdrm]; if (!confirm(`Remove ${r.domain} from the registered media? The stream stops reading it.`)) return;
     const x = await api('/api/media/remove', {domains: [r.domain]}); toast(x && x.ok ? `${r.domain} removed` : 'Not removed'); loadMedia(); }
   if (lg){ const r = MDROWS[+lg.dataset.mdlogin]; $('mdMDom').textContent = r.domain; $('mdMSet').style.display = r.subscribed ? '' : 'none';
@@ -3069,6 +3080,38 @@ $('fdBody').addEventListener('click', async e => {
   if ('fdp' in b.dataset){ await api('/api/feeds/save', {id: f.id, name: f.name, query: f.query, all: !!f.all, url: f.url, enabled: !f.enabled}); loadFeeds(); }
   if ('fdd' in b.dataset && confirm(`Delete the feed “${f.name}”? Articles still waiting for it are dropped.`)){ await api('/api/feeds/delete', {id: f.id}); loadFeeds(); }
 });
+
+/* ---------- media archive ---------- */
+const AR_ST = {queued: ['b-neu', 'Queued'], discovering: ['b-warn', 'Finding sitemaps'], reading: ['b-warn', 'Reading articles'],
+  done: ['b-ok', 'Done'], cancelled: ['b-neu', 'Cancelled'], failed: ['b-bad', 'Failed']};
+let AR = [];
+async function loadArchive(){
+  const d = await api('/api/archive'); if (!d || !d.jobs) return; AR = d.jobs;
+  if (!$('arStart').value){ const t = new Date(), a = new Date(t); a.setFullYear(t.getFullYear() - 2); $('arStart').value = a.toISOString().slice(0, 10); $('arEnd').value = t.toISOString().slice(0, 10); }
+  $('arMsg').innerHTML = d.running ? '' : '<b style="color:var(--warn)">The Live Stream is stopped</b> — start it (Live Stream page) so archive jobs run.';
+  const admin = ROLE === 'admin';
+  $('arBody').innerHTML = AR.length ? AR.map((j, i) => {
+    const st = AR_ST[j.status] || ['b-neu', j.status], all = j.read + j.waiting + j.not_read, pct = all ? Math.round((j.read + j.not_read) * 100 / all) : 0;
+    return `<tr><td><b>${esc(j.domain)}</b></td><td class="nowrap">${dShort(j.start)} ${j.start.slice(0, 4)} – ${dShort(j.end)} ${j.end.slice(0, 4)}</td>
+      <td><span class="badge ${st[0]}">${st[1]}</span>${j.error ? `<small style="color:var(--bad)">${esc(j.error)}</small>` : ''}</td>
+      <td>${fmt(j.read)} read · ${fmt(j.waiting)} waiting${j.not_read ? ` · ${fmt(j.not_read)} not readable` : ''}
+        <div class="me-bar" style="background:var(--soft);margin:5px 0 3px;max-width:240px"><span style="width:${pct}%;background:var(--accent)"></span></div>
+        <small>${fmt(j.found)} links found in ${fmt(j.maps_done)} of ${fmt(j.maps_total)} sitemaps</small></td>
+      <td class="nowrap">${j.file ? `<a class="btn sm" href="/download/${encodeURIComponent(j.file)}">Download</a> ` : ''}${j.read ? `<button class="btn sm need-op" data-arx="${i}">${j.file ? 'Remake' : 'Make'} Excel</button> ` : ''}
+        ${admin && !['done', 'cancelled', 'failed'].includes(j.status) ? `<button class="btn sm" data-arc="${i}">Cancel</button> ` : ''}${admin ? `<button class="btn sm ghost" data-ard="${i}" style="color:var(--bad)">Delete</button>` : ''}</td></tr>`; }).join('')
+    : '<tr><td colspan="5" class="empty-s">No archive job yet — pick an outlet and a period above (or “Archive” on its row).</td></tr>';
+}
+$('arGo').onclick = async () => {
+  const r = await api('/api/archive/start', {domain: $('arDom').value, start: $('arStart').value, end: $('arEnd').value, gap: +$('arGap').value});
+  if (!r || r.ok === false) return $('arMsg').textContent = (r && r.error) || 'Not started';
+  toast(`Archive of ${r.job.domain} started`); $('arDom').value = ''; loadArchive(); };
+$('arBody').addEventListener('click', async e => {
+  const b = e.target.closest('button'); if (!b) return; const i = +(b.dataset.arx ?? b.dataset.arc ?? b.dataset.ard), j = AR[i]; if (!j) return;
+  if ('arx' in b.dataset){ await api('/api/archive/export', {id: j.id}); toast('Making the Excel — it appears here and in Exports'); setTimeout(loadArchive, 3000); }
+  if ('arc' in b.dataset && confirm(`Stop the archive of ${j.domain}? What was read stays.`)){ await api('/api/archive/cancel', {id: j.id}); loadArchive(); }
+  if ('ard' in b.dataset && confirm(`Delete the archive of ${j.domain} and its ${fmt(j.read)} articles? Excel files already made stay in Exports.`)){ await api('/api/archive/delete', {id: j.id}); loadArchive(); }
+});
+setInterval(() => { if (document.visibilityState === 'visible' && $('p-media').classList.contains('on')) loadArchive(); }, 15000);
 
 /* ---------- reports ---------- */
 let TOPICS = [];

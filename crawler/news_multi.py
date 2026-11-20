@@ -351,6 +351,8 @@ def run(keywords: list[str], start: str, end: str, opt, tz, log, stop_event: thr
         media_db.install()                            # paid media: articles read with their logins
     except Exception:  # noqa: BLE001
         pass
+    from . import fetch_policy
+    fetch_policy.apply_settings()                     # Googlebot / cloudscraper steps: the admin's choice
     undo_p = _priority_first(pipeline, Database, list(opt.priority_media))
     undo_r = _shared_reads()
     undo_f = _fast_first(pipeline, cfg, log) if len(keywords) and getattr(opt, "quick_first", True) else (lambda: None)
@@ -467,6 +469,8 @@ def import_links(links: list[str], tz, log, stop_event: threading.Event, data_di
         media_db.install()                            # paid media: articles read with their logins
     except Exception:  # noqa: BLE001
         pass
+    from . import fetch_policy
+    fetch_policy.apply_settings()                     # Googlebot / cloudscraper steps: the admin's choice
 
     def hit(h):
         r = _row(h, tz)

@@ -1007,6 +1007,14 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
         if origin and c.get("origins") and origin not in c["origins"]:
             raise HTTPException(403, "This website may not use this key (ask for it to be added).")
 
+    @app.get("/client-docs", include_in_schema=False)
+    def client_docs(request: Request):
+        """The guide for a client's IT team — public (it holds no data; every data call needs the key)."""
+        if not ip_allowed(client_ip(request)):
+            raise HTTPException(403, "This address may not use the server.")
+        return FileResponse(os.path.join(STATIC, "client-docs.html"), media_type="text/html",
+                            headers={"Cache-Control": "no-cache"})
+
     @app.get("/api/client/me", tags=["client API"], summary="What this client key gives")
     def client_me(request: Request):
         c = _client(request)
@@ -1026,6 +1034,25 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
         try:
             return {"ok": True, **client_api.articles(c, q[:500], start[:20], end[:20], sentiment, sort, page, size,
                                                       last_hours, received_since[:40])}
+        except PermissionError as e:
+            raise HTTPException(403, str(e))
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+
+    @app.get("/api/client/posts", tags=["client API"],
+             summary="This client's social media posts and comments (X-Client-Key) — the same filters as articles, "
+                     "plus platform (instagram, tiktok, x, youtube, threads, facebook)")
+    def client_posts(request: Request, q: str = "", platform: str = "", start: str = "", end: str = "",
+                     sentiment: str = "", sort: str = "newest", page: int = 1, size: int = 24, last_hours: float = 0,
+                     received_since: str = ""):
+        c = _client(request)
+        _origin_ok(request, c)
+        plat = {"x": "twitter", "twitter": "twitter"}.get(platform.strip().lower(), platform.strip().lower())
+        try:
+            return {"ok": True, **client_api.posts(c, q[:500], start[:20], end[:20], plat[:20], sentiment, sort, page,
+                                                   size, last_hours, received_since[:40])}
+        except PermissionError as e:
+            raise HTTPException(403, str(e))
         except ValueError as e:
             return {"ok": False, "error": str(e)}
 
@@ -1035,6 +1062,8 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
         _origin_ok(request, c)
         try:
             return {"ok": True, **client_api.article(c, key[:600])}
+        except PermissionError as e:
+            raise HTTPException(403, str(e))
         except ValueError as e:
             return {"ok": False, "error": str(e)}
 

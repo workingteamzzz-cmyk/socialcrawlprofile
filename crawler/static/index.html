@@ -1312,6 +1312,13 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
         <div class="field" style="margin-top:12px"><label for="lsSfKw">Stream keywords (one per line; every report topic is added automatically)</label><textarea id="lsSfKw" rows="4" placeholder="banjir&#10;pemadaman listrik&#10;&quot;air bersih&quot; NOT iklan"></textarea></div>
         <div class="field" style="margin-top:12px"><label for="lsSfEx">Never read these outlets (one per line, e.g. a media that forbids crawling without permission)</label><textarea id="lsSfEx" rows="3" placeholder="antaranews.com"></textarea></div>
         <div style="display:flex;gap:18px;margin:6px 0 14px;flex-wrap:wrap"><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfUseRss"> RSS engine</label><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfUseSm"> Sitemap engine</label><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfRobots"> Respect each outlet's robots.txt (recommended)</label><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfHStart"> Check every site when the stream starts</label><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfAll"> Take every link not yet in the database, whatever its date</label><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfHome"> Also read each outlet's front page</label></div>
+        <div style="border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:0 0 14px">
+          <b style="font-size:13.5px">When a site refuses the normal request</b>
+          <p class="hint" style="margin:4px 0 8px">The article reader then tries other ways. Two of them get round a site's own refusal — you choose. The numbers show what each brought in the last 7 days, so you can see what turning one off would cost.</p>
+          <label class="opt-row" style="border:0;padding:4px 0"><span class="t"><b>Ask again as "Googlebot"</b><small>Claims to be Google's crawler. Sites that check can block this server's address for good. Off: a plain second try instead.</small></span><span style="display:flex;align-items:center;gap:10px"><span class="tag gray" id="lsFmGb">–</span><span class="switch"><input type="checkbox" id="lsSfGb"><span></span></span></span></label>
+          <label class="opt-row" style="border:0;padding:4px 0"><span class="t"><b>Cloudflare workaround (cloudscraper)</b><small>Gets past Cloudflare's bot check — against the wishes of sites that turned it on. Off: the page's AMP version is tried next.</small></span><span style="display:flex;align-items:center;gap:10px"><span class="tag gray" id="lsFmCs">–</span><span class="switch"><input type="checkbox" id="lsSfCs"><span></span></span></span></label>
+          <p class="hint" id="lsFmAll" style="margin:6px 0 0"></p>
+        </div>
         <button class="btn primary" id="lsSfSave">Save settings</button> <span class="hint" id="lsSfMsg"></span>
         <p class="hint">Outlets are ranked every 10 minutes by the new articles they published in the last 7 days: the top ones are checked most often, quiet ones less, unreachable ones rarely — and an outlet that starts publishing again is promoted at once. RSS feeds of active outlets are checked more often (an unchanged feed costs almost nothing). One page at a time per outlet, with the pause above — nobody is hammered. More readers = faster, as long as the server has CPU to spare.</p>
       </div></div>
@@ -1593,6 +1600,9 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
                 <textarea id="clQuery" rows="3" placeholder='pln AND (padam OR gangguan) — or a list: pln, listrik padam, pemadaman'></textarea>
                 <small class="hint">AND · OR · NOT · "exact phrase" · ( ) · prefix*. A plain list (comma / one per line) means any of them.</small></div>
               <div class="field"><label for="clTopic">…or a report topic</label><select id="clTopic"><option value="">— none —</option></select></div>
+              <div class="field"><label>What the key gives</label>
+                <div style="display:flex;gap:18px;flex-wrap:wrap"><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="clNews" checked> News articles</label>
+                <label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="clSocial"> Social media posts &amp; comments <small class="hint">(from Keyword Search, Collect and the API scraper)</small></label></div></div>
               <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px">
                 <div class="field"><label for="clSource">Databases</label><select id="clSource"><option value="all">All (Live Stream + News Search)</option><option value="stream">Live Stream only</option><option value="reports">News Search &amp; reports only</option></select></div>
                 <div class="field"><label for="clSince">Data from (optional)</label><input type="date" id="clSince"></div>
@@ -1607,18 +1617,19 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
           <div class="card" id="clKeyCard" hidden><div class="card-hd"><h3>Key for <span id="clKeyFor"></span></h3><span class="tag bad">shown once — copy it now</span></div>
             <div class="card-bd">
               <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><code id="clKey" style="font-size:13px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel-2);word-break:break-all;flex:1;min-width:0"></code><button class="btn" id="clCopy">Copy</button></div>
-              <p class="hint" style="margin-top:10px">Send it to the client's IT team privately (not in a group chat). Example for them:</p>
+              <p class="hint" style="margin-top:10px">Send it to the client's IT team privately (not in a group chat), with the guide: <a id="clDocLink" href="/client-docs" target="_blank" rel="noopener"></a>. Example for them:</p>
               <pre id="clEx" style="white-space:pre-wrap;word-break:break-all;font-size:12px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:10px;margin:0"></pre>
               <div style="display:flex;justify-content:flex-end;margin-top:10px"><button class="btn" id="clKeyDone">I have saved it</button></div>
             </div></div>
         </div>
         <div style="display:flex;flex-direction:column;gap:16px">
-          <div class="card"><div class="card-hd"><h3>How the client uses it</h3></div>
+          <div class="card"><div class="card-hd"><h3>How the client uses it</h3><a class="btn sm" href="/client-docs" target="_blank" rel="noopener" style="margin-left:auto">Guide for the client's IT team</a></div>
             <div class="card-bd" style="font-size:13.5px">
               <p style="margin:0 0 8px">Every call sends the key in the <code>X-Client-Key</code> header (or <code>Authorization: Bearer …</code>):</p>
               <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px">
                 <li><code>GET /api/client/articles</code> — their articles, newest first. Optional: <code>q</code> (narrows further, AND / OR / NOT), <code>start</code> / <code>end</code> (YYYY-MM-DD or YYYY-MM-DD HH:MM, WIB), <code>last_hours</code>, <code>received_since</code>, <code>sentiment</code>, <code>sort</code> (newest / oldest / received), <code>page</code>, <code>size</code> (≤ 100). Also the positive / negative / neutral shares.</li>
                 <li><code>GET /api/client/articles/one?key=…</code> — one article in full (paragraphs, author, spokespersons, people).</li>
+                <li><code>GET /api/client/posts</code> — their social media posts &amp; comments (when the key includes them): the same filters, plus <code>platform</code> (instagram, tiktok, x, youtube, threads, facebook). Each post: platform, username, link, date, time, text, sentiment, emotion, likes, replies, shares, views, followers.</li>
                 <li><code>GET /api/client/me</code> — what the key gives.</li>
               </ul>
               <div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px">
@@ -2948,6 +2959,9 @@ async function loadStream(){
   const d = await api('/api/stream?q=' + encodeURIComponent(($('lsStQ').value || '').trim()));
   if (!d || !d.hourly) return;
   ST = d; const cfg = d.settings || {};
+  const fm = d.fetch_methods || {total: 0, methods: {}}, fmt1 = m => { const x = (fm.methods || {})[m]; return x ? `${fmt(x.n)} · ${x.pct}%` : '0'; };
+  $('lsFmGb').textContent = fmt1('googlebot'); $('lsFmCs').textContent = fmt1('cloudscraper');
+  $('lsFmAll').textContent = fm.total ? `Last 7 days: ${fmt(fm.total)} articles read — normal ${fmt1('normal')}, AMP ${fmt1('amp')}, Googlebot ${fmt1('googlebot')}, cloudscraper ${fmt1('cloudscraper')}.` : 'Counted from now on (per method, per day).';
   $('lsStPill').classList.toggle('run', d.running); $('lsStState').textContent = d.running ? 'Running' : 'Stopped';
   $('lsStToggle').textContent = d.running ? 'Stop stream' : 'Start stream'; $('lsStToggle').classList.toggle('primary', !d.running);
   $('navStream').textContent = d.running ? '●' : '';
@@ -2996,6 +3010,7 @@ async function loadStream(){
     $('lsSfTop').value = cfg.top_n; $('lsSfTop2').value = cfg.top2_n; $('lsSfA2').value = cfg.active2_hours; $('lsSfSemi').value = cfg.semi_hours; $('lsSfRare').value = cfg.rare_hours; $('lsSfIn').value = cfg.inactive_days; $('lsSfDead').value = cfg.dead_days; $('lsSfAge').value = cfg.max_age_hours;
     $('lsSfRet').value = cfg.retention_days; $('lsSfGap').value = cfg.domain_gap; $('lsSfKw').value = (cfg.keywords || []).join('\n');
     $('lsSfUseRss').checked = !!cfg.rss; $('lsSfUseSm').checked = !!cfg.sitemaps; $('lsSfRobots').checked = cfg.robots !== false;
+    $('lsSfGb').checked = cfg.fetch_googlebot !== false; $('lsSfCs').checked = cfg.fetch_cloudscraper !== false;
     $('lsSfEx').value = (cfg.exclude_domains || []).join('\n'); }
   const days = d.days || [], cur = $('lsDay').value;
   $('lsDay').innerHTML = days.length ? days.map(x => `<option value="${x}">${new Date(x + 'T00:00:00').toLocaleDateString([], {weekday: 'short', day: '2-digit', month: 'short', year: 'numeric'})}</option>`).join('') : '<option value="">No articles yet</option>';
@@ -3015,7 +3030,8 @@ $('lsSfSave').onclick = async () => {
     health_weekday: +$('lsSfHDay').value, health_hour: +$('lsSfHHour').value, health_on_start: $('lsSfHStart').checked,
     catchup_days: +$('lsSfCuD').value, catchup_hour: +$('lsSfCuH').value,
     top_n: +$('lsSfTop').value, top2_n: +$('lsSfTop2').value, active2_hours: +$('lsSfA2').value, semi_hours: +$('lsSfSemi').value, rare_hours: +$('lsSfRare').value, inactive_days: +$('lsSfIn').value, dead_days: +$('lsSfDead').value,
-    rss: $('lsSfUseRss').checked, sitemaps: $('lsSfUseSm').checked, robots: $('lsSfRobots').checked, exclude_domains: $('lsSfEx').value});
+    rss: $('lsSfUseRss').checked, sitemaps: $('lsSfUseSm').checked, robots: $('lsSfRobots').checked, exclude_domains: $('lsSfEx').value,
+    fetch_googlebot: $('lsSfGb').checked, fetch_cloudscraper: $('lsSfCs').checked});
   $('lsSfMsg').textContent = r && r.ok ? 'Saved.' : (r && r.error) || 'Not saved'; loadStream.filled = false; loadStream(); };
 $('lsExport').onclick = async () => { const r = await api('/api/stream/export', {day: $('lsDay').value});
   if (r && r.ok === false) return toast(r.error || 'Not started'); toast('Making the Excel…'); setTimeout(loadStream, 800);
@@ -3538,7 +3554,7 @@ async function loadClients(){
   const topicName = id => (CLK.topics.find(t => t.id === id) || {}).name || 'topic';
   $('clTbl').querySelector('tbody').innerHTML = CLK.list.map((c, i) => `<tr>
       <td><b>${esc(c.name)}</b><br><span class="pill sm ${c.enabled && !c.expired ? '' : 'off'}"><i></i>${c.expired ? 'Expired' : c.enabled ? 'Active' : 'Paused'}</span> <small class="hint">…${esc(c.key_tail || '')}</small></td>
-      <td><small>${c.query ? esc(c.query) : 'Topic: ' + esc(topicName(c.topic))}</small><br><small class="hint">${{all: 'All databases', stream: 'Live Stream', reports: 'News Search'}[c.source] || ''}${c.since ? ' · from ' + esc(c.since) : ''}${c.expires ? ' · until ' + esc(c.expires) : ''} · ${c.rate}/min${(c.origins || []).length ? ' · ' + c.origins.map(o => esc(new URL(o).host)).join(', ') : ''}</small></td>
+      <td><small>${c.query ? esc(c.query) : 'Topic: ' + esc(topicName(c.topic))}</small><br><small class="hint">${[c.news !== false ? 'News' : '', c.social ? 'Social media' : ''].filter(Boolean).join(' + ')} · ${{all: 'All databases', stream: 'Live Stream', reports: 'News Search'}[c.source] || ''}${c.since ? ' · from ' + esc(c.since) : ''}${c.expires ? ' · until ' + esc(c.expires) : ''} · ${c.rate}/min${(c.origins || []).length ? ' · ' + c.origins.map(o => esc(new URL(o).host)).join(', ') : ''}</small></td>
       <td class="num">${fmt(c.calls || 0)}</td><td><small>${clDate(c.last_used)}</small></td>
       <td style="white-space:nowrap"><button class="btn sm" data-cle="${i}">Edit</button> <button class="btn sm" data-clk="${i}">New key</button>
         <button class="btn sm" data-clp="${i}">${c.enabled ? 'Pause' : 'Resume'}</button> <button class="btn sm ghost" data-cld="${i}" style="color:var(--bad)">Delete</button></td></tr>`).join('')
@@ -3559,11 +3575,13 @@ function clFill(c){
   $('clName').value = c ? c.name : ''; $('clQuery').value = c ? c.query : ''; $('clTopic').value = c ? c.topic : '';
   $('clSource').value = c ? c.source : 'all'; $('clSince').value = c ? c.since : ''; $('clExpires').value = c ? c.expires : '';
   $('clRate').value = c ? c.rate : 60; $('clOrigins').value = c ? (c.origins || []).join(', ') : ''; $('clMsg').className = 'alert';
+  $('clNews').checked = c ? c.news !== false : true; $('clSocial').checked = c ? !!c.social : false;
   if (c) $('clName').focus();
 }
 function clShowKey(name, key){
   const host = location.origin;
   $('clKeyFor').textContent = name; $('clKey').textContent = key; $('clKeyCard').hidden = false;
+  $('clDocLink').textContent = host + '/client-docs';
   $('clEx').textContent = `curl -H "X-Client-Key: ${key}" "${host}/api/client/articles?start=${new Date().toISOString().slice(0, 10)}&size=50"\n\n// JavaScript (browser or Node)\nfetch("${host}/api/client/articles?size=50", {headers: {"X-Client-Key": "${key}"}}).then(r => r.json())`;
   $('clKeyCard').scrollIntoView({behavior: 'smooth', block: 'nearest'});
 }
@@ -3574,7 +3592,8 @@ $('clNew').onclick = () => clFill(null);
 $('clSave').onclick = async () => {
   const body = {id: CLK.edit ? CLK.edit.id : '', name: $('clName').value.trim(), query: $('clQuery').value.trim(), topic: $('clTopic').value,
     source: $('clSource').value, since: $('clSince').value, expires: $('clExpires').value, rate: +$('clRate').value || 60,
-    origins: $('clOrigins').value.trim(), enabled: CLK.edit ? CLK.edit.enabled : true};
+    origins: $('clOrigins').value.trim(), enabled: CLK.edit ? CLK.edit.enabled : true,
+    news: $('clNews').checked, social: $('clSocial').checked};
   const r = await api('/api/clients/save', body), m = $('clMsg');
   if (!r.ok){ m.textContent = r.error || 'Not saved'; m.className = 'alert show err'; return; }
   m.className = 'alert';

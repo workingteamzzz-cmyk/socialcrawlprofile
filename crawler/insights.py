@@ -91,6 +91,13 @@ def _search_db() -> sqlite3.Connection:
         pass
     c.execute("CREATE VIRTUAL TABLE IF NOT EXISTS rdocs USING fts5(skey UNINDEXED, title, summary, "
               "tokenize='unicode61 remove_diacritics 2')")
+    # social media posts of the reporting database (Keyword Search, Collect, API scraper) for the client API
+    c.execute("CREATE TABLE IF NOT EXISTS med(mkey TEXT PRIMARY KEY, platform TEXT, username TEXT, url TEXT, "
+              "pub_date TEXT, pub_time TEXT, text TEXT, sentiment TEXT, emotion TEXT, likes INTEGER, replies INTEGER, "
+              "shares INTEGER, views INTEGER, followers INTEGER, sub_type TEXT, keywords TEXT, seen TEXT, added REAL)")
+    c.execute("CREATE INDEX IF NOT EXISTS med_pub ON med(pub_date)")
+    c.execute("CREATE VIRTUAL TABLE IF NOT EXISTS mdocs USING fts5(mkey UNINDEXED, text, username, "
+              "tokenize='unicode61 remove_diacritics 2')")
     c.commit()
     return c
 
@@ -208,6 +215,74 @@ def index_reports(limit: int = 5000) -> int:
         src.close()
 
 
+def _int(v):
+    try:
+        return int(float(str(v).replace(",", "").strip())) if str(v or "").strip() else None
+    except ValueError:
+        return None
+
+
+def index_social(limit: int = 5000) -> int:
+    """Social media rows of the reporting database added / changed since the last call -> the client API's index."""
+    import hashlib
+    src = _archive_ro()
+    if src is None:
+        return 0
+    db = _search_db()
+    try:
+        r = db.execute("SELECT v FROM meta WHERE k='med_cursor'").fetchone()
+        seen, key = (json.loads(r["v"]) if r else ["", ""])
+        try:
+            rows = src.execute("SELECT key, row, day, sentiment, keywords, last_seen FROM items WHERE kind='medsos' AND "
+                               "(last_seen > ? OR (last_seen = ? AND key > ?)) ORDER BY last_seen, key LIMIT ?",
+                               (seen, seen, key, limit)).fetchall()
+        except sqlite3.Error:
+            return 0
+        if not rows:
+            return 0
+        out = []
+        for x in rows:
+            try:
+                row = json.loads(x["row"] or "{}")
+            except ValueError:
+                continue
+            url = str(row.get("Url") or "")
+            text = str(row.get("Text") or "")
+            if not (url.startswith("http") or text):
+                continue
+            t = str(row.get("Time") or "")[:5]
+            mkey = "m" + hashlib.sha1(x["key"].encode()).hexdigest()[:20]
+            out.append((mkey, str(row.get("Platform") or "")[:40], str(row.get("Username") or "")[:120], url,
+                        x["day"] or "", t if re.match(r"\d{2}:\d{2}$", t) else "", text[:5000],
+                        _sent(x["sentiment"] or row.get("Sentiment")), str(row.get("Emotion") or "")[:40],
+                        _int(row.get("Likes")), _int(row.get("Reply")), _int(row.get("Shares")),
+                        _int(row.get("Views Count")), _int(row.get("Follower")), str(row.get("Sub Type") or "")[:20],
+                        (x["keywords"] or "").strip("|").replace("|", ", "), x["last_seen"] or "", x["key"]))
+        now = time.time()
+        keys = [o[0] for o in out]
+        for i in range(0, len(keys), 500):
+            part = keys[i:i + 500]
+            db.execute(f"DELETE FROM mdocs WHERE mkey IN ({','.join('?' * len(part))})", part)
+        db.executemany("INSERT INTO med(mkey, platform, username, url, pub_date, pub_time, text, sentiment, emotion, "
+                       "likes, replies, shares, views, followers, sub_type, keywords, seen, added) VALUES "
+                       "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(mkey) DO UPDATE SET platform=excluded.platform, "
+                       "username=excluded.username, url=excluded.url, pub_date=excluded.pub_date, "
+                       "pub_time=excluded.pub_time, text=excluded.text, sentiment=excluded.sentiment, "
+                       "emotion=excluded.emotion, likes=excluded.likes, replies=excluded.replies, "
+                       "shares=excluded.shares, views=excluded.views, followers=excluded.followers, "
+                       "sub_type=excluded.sub_type, keywords=excluded.keywords, seen=excluded.seen",
+                       [(*o[:17], now) for o in out])
+        db.executemany("INSERT INTO mdocs(mkey, text, username) VALUES (?,?,?)", [(o[0], o[6], o[2]) for o in out])
+        db.executemany("INSERT OR REPLACE INTO meta(k, v) VALUES (?, ?)", [("medkey:" + o[0], o[17]) for o in out])
+        db.execute("INSERT INTO meta(k, v) VALUES ('med_cursor', ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+                   (json.dumps([rows[-1]["last_seen"] or "", rows[-1]["key"]]),))
+        db.commit()
+        return len(rows)
+    finally:
+        db.close()
+        src.close()
+
+
 def prune_reports() -> int:
     """Rows deleted from the reporting database (Exports > free up space) leave the reader's index too."""
     from .paths import APP_DATA
@@ -215,8 +290,10 @@ def prune_reports() -> int:
     db = _search_db()
     try:
         if not os.path.exists(p):
-            n = db.execute("DELETE FROM rep").rowcount
+            n = db.execute("DELETE FROM rep").rowcount + db.execute("DELETE FROM med").rowcount
             db.execute("DELETE FROM rdocs")
+            db.execute("DELETE FROM mdocs")
+            db.execute("DELETE FROM meta WHERE k LIKE 'medkey:%'")
         else:
             db.execute("ATTACH DATABASE ? AS a", (p,))
             n = db.execute("DELETE FROM rep WHERE NOT EXISTS (SELECT 1 FROM a.items i WHERE i.kind='online' "
@@ -229,6 +306,15 @@ def prune_reports() -> int:
                 n += db.execute(f"DELETE FROM rep WHERE skey IN ({','.join('?' * len(part))})", part).rowcount
             if n:
                 db.execute("DELETE FROM rdocs WHERE skey NOT IN (SELECT skey FROM rep)")
+            gone = [r[0] for r in db.execute(                 # social posts deleted from the reporting database
+                "SELECT substr(k, 8) FROM meta WHERE k LIKE 'medkey:%' AND NOT EXISTS (SELECT 1 FROM a.items i "
+                "WHERE i.kind='medsos' AND i.key = meta.v)").fetchall()]
+            for i in range(0, len(gone), 500):
+                part = gone[i:i + 500]
+                q = ','.join('?' * len(part))
+                n += db.execute(f"DELETE FROM med WHERE mkey IN ({q})", part).rowcount
+                db.execute(f"DELETE FROM mdocs WHERE mkey IN ({q})", part)
+                db.execute(f"DELETE FROM meta WHERE k IN ({q})", ["medkey:" + k for k in part])
         db.commit()
         return n
     finally:
@@ -517,6 +603,8 @@ def _loop() -> None:
             while index_new() >= 5000 and not _STATE["stop"].is_set():
                 pass
             while index_reports() >= 5000 and not _STATE["stop"].is_set():
+                pass
+            while index_social() >= 5000 and not _STATE["stop"].is_set():
                 pass
             if time.time() - last_prune > 3600:
                 last_prune = time.time()

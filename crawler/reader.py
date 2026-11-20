@@ -65,7 +65,7 @@ WIB = timezone(timedelta(hours=7))
 def _moment(v: str, what: str) -> tuple[str, str]:
     """'2026-11-20' or '2026-11-20 06:00' (also 2026-11-20T06:00) -> (date, time or '')."""
     v = (v or "").strip().replace("T", " ")
-    m = re.fullmatch(r"(\d{4}-\d{2}-\d{2})(?: (\d{2}:\d{2})(?::\d{2})?)?", v)
+    m = re.fullmatch(r"(\d{4}-\d{2}-\d{2})(?: (\d{2}:\d{2})(?::\d{2})?)?", v, flags=re.ASCII)
     if not m:
         raise ValueError(f"{what}: a date as YYYY-MM-DD, or a date and time as YYYY-MM-DD HH:MM (WIB).")
     return m.group(1), m.group(2) or ""
@@ -180,7 +180,7 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
             args += a
         counts: dict = {}
         rows: list = []
-        size, page = max(1, min(int(size or 24), 100)), max(1, int(page or 1))
+        size, page = max(1, min(int(size or 24), 100)), max(1, min(int(page or 1), 100000))
         if selects:
             u = " UNION ALL ".join(selects)
             try:
@@ -214,7 +214,7 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
         r["received_at"] = datetime.fromtimestamp(r["fetched"], WIB).isoformat(timespec="seconds") \
             if r.get("fetched") else ""
     return {"total": total, "matching": shown, "page": page, "size": size, "query": expr, "source": source,
-            "server_time": datetime.fromtimestamp(now, WIB).isoformat(timespec="seconds"),
+            "server_time": datetime.fromtimestamp(now, WIB).isoformat(timespec="milliseconds"),
             "pages": (shown + size - 1) // size,
             "sentiment": {k: {"n": counts.get(k, 0), "pct": round(counts.get(k, 0) * 100 / total, 1) if total else 0}
                           for k in SENTIMENTS},
@@ -271,3 +271,79 @@ def article(key: str) -> dict:
             "sentiment": (r["sentiment"] if "sentiment" in keys else "") or "neutral", "matched": r["matched"],
             "influencer": clean_names(r["influencer"]), "persons": clean_names(r["persons"]), "paragraphs": paras,
             "origin": "stream"}
+
+
+POST_FIELDS = ("key", "platform", "username", "url", "date", "time", "text", "sentiment", "emotion", "likes", "replies",
+               "shares", "views", "followers", "type", "received_at")
+
+
+def posts(q: str = "", start: str = "", end: str = "", platform: str = "", sentiment: str = "", sort: str = "newest",
+          page: int = 1, size: int = 24, scope: str = "", last_hours: float = 0, received_since="",
+          topic: str = "") -> dict:
+    """Social media posts and comments of the reporting database (Keyword Search, Collect, API scraper): the same
+    filters as articles(), plus the platform (Instagram, TikTok, X, YouTube, Threads, Facebook)."""
+    parts = [f"({fts_query(x)})" for x in (scope, q) if (x or "").strip()]
+    if topic:
+        parts.append(f"({_topic_query(topic)})")
+    expr = " AND ".join(parts)
+    try:
+        last_hours = float(last_hours or 0)
+    except (TypeError, ValueError):
+        raise ValueError("last_hours: a number of hours, e.g. 6 or 48.")
+    if last_hours > 0:
+        start = (datetime.now(WIB) - timedelta(hours=min(last_hours, 24 * 3650))).strftime("%Y-%m-%d %H:%M")
+    since = received_epoch(received_since)
+    now = time.time()
+    sp = os.path.join(_dir(), "search.db")
+    empty = {"total": 0, "matching": 0, "page": 1, "pages": 0, "size": max(1, min(int(size or 24), 100)),
+             "sentiment": {}, "rows": [],
+             "server_time": datetime.fromtimestamp(now, WIB).isoformat(timespec="milliseconds")}
+    if not os.path.exists(sp):
+        return empty
+    c = sqlite3.connect(f"file:{sp}?mode=ro", uri=True, timeout=30)
+    c.row_factory = sqlite3.Row
+    try:
+        if not c.execute("SELECT 1 FROM sqlite_master WHERE name='med'").fetchone():
+            return empty
+        w, a = _period_sql("m", start, end)
+        if since:
+            w.append("COALESCE(m.added, 0) >= ?")
+            a.append(since)
+        if platform:
+            w.append("lower(m.platform) LIKE ?")
+            a.append(platform.strip().lower()[:20] + "%")
+        join = ""
+        if expr:
+            join = "JOIN mdocs d ON d.mkey = m.mkey"
+            w.append("d.mdocs MATCH ?")
+            a.append(expr)
+        where = (" WHERE " + " AND ".join(w)) if w else ""
+        size, page = max(1, min(int(size or 24), 100)), max(1, min(int(page or 1), 100000))
+        try:
+            counts = {r["s"]: r["n"] for r in c.execute(
+                f"SELECT m.sentiment s, COUNT(*) n FROM med m {join}{where} GROUP BY s", a)}
+            sw, sa = where, list(a)
+            if sentiment in SENTIMENTS:
+                sw = (sw + " AND " if sw else " WHERE ") + "m.sentiment = ?"
+                sa.append(sentiment)
+            order = "ASC" if sort == "oldest" else "DESC"
+            by = "m.added DESC" if sort == "received" else f"m.pub_date {order}, m.pub_time {order}, m.added {order}"
+            rows = c.execute(f"SELECT m.* FROM med m {join}{sw} ORDER BY {by} LIMIT ? OFFSET ?",
+                             (*sa, size, (page - 1) * size)).fetchall()
+        except sqlite3.OperationalError as e:
+            raise ValueError(f"The query could not be read: {e}")
+    finally:
+        c.close()
+    total = sum(counts.values())
+    shown = counts.get(sentiment, 0) if sentiment in SENTIMENTS else total
+    out = [{"key": r["mkey"], "platform": r["platform"], "username": r["username"], "url": r["url"],
+            "date": r["pub_date"], "time": r["pub_time"], "text": r["text"], "sentiment": r["sentiment"] or "neutral",
+            "emotion": r["emotion"], "likes": r["likes"], "replies": r["replies"], "shares": r["shares"],
+            "views": r["views"], "followers": r["followers"], "type": r["sub_type"] or "post",
+            "received_at": datetime.fromtimestamp(r["added"], WIB).isoformat(timespec="seconds") if r["added"] else ""}
+           for r in rows]
+    return {"total": total, "matching": shown, "page": page, "pages": (shown + size - 1) // size, "size": size,
+            "server_time": datetime.fromtimestamp(now, WIB).isoformat(timespec="milliseconds"),
+            "sentiment": {k: {"n": counts.get(k, 0), "pct": round(counts.get(k, 0) * 100 / total, 1) if total else 0}
+                          for k in SENTIMENTS},
+            "rows": out}

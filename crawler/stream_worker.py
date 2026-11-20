@@ -43,9 +43,11 @@ def main() -> None:
     insights.start()
     path = os.path.join(stream._dir(), "settings.json")
     last_mt, prev = None, stream.settings()
+    from crawler import fetch_policy
     while not parent_gone.is_set():
         try:
             cfg = stream.settings()
+            fetch_policy.apply_settings(cfg)              # the admin's choice, within seconds
             try:
                 mt = os.path.getmtime(path)
             except OSError:

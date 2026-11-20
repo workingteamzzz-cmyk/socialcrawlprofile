@@ -7,6 +7,7 @@ and an expiry date. The key is shown once; only its SHA-256 is kept (APP_DATA/cl
 The client calls, with `X-Client-Key: <key>` (or `Authorization: Bearer <key>`):
   GET /api/client/articles?q=&start=&end=&sentiment=&sort=&page=&size=   their articles (q narrows further)
   GET /api/client/articles/one?key=…                                    one of their articles in full
+  GET /api/client/posts?q=&platform=&start=&end=&last_hours=&received_since=&…  their social media posts / comments
   GET /api/client/me                                                    what the key gives
 The key reaches nothing else: no files, no dashboard, no other client's data. Calls from a browser are allowed
 (CORS, no cookies) — from any website, or only the client's own addresses when set.
@@ -78,7 +79,9 @@ def _clean(data: dict) -> dict:
     name = str(data.get("name") or "").strip()[:80]
     if not name:
         raise ClientError("Give the client a name (e.g. PLN UID Jabar).")
-    query = normalize_query(str(data.get("query") or ""))[:1000]
+    query = normalize_query(str(data.get("query") or ""))
+    if len(query) > 1000:
+        raise ClientError("The query is too long (max. 1,000 characters) — use a report topic for long keyword lists.")
     topic = str(data.get("topic") or "").strip()[:100]
     if not query and not topic:
         raise ClientError("Type the client's query or keywords, or choose a report topic — the key shows only that.")
@@ -105,8 +108,12 @@ def _clean(data: dict) -> dict:
     for o in origins:
         if not re.fullmatch(r"https?://[^/\s]+", o):
             raise ClientError("Websites: addresses like https://dashboard.client.id (no path), comma separated.")
+    news, social = bool(data.get("news", True)), bool(data.get("social", False))
+    if not news and not social:
+        raise ClientError("Choose what the client gets: news articles, social media posts, or both.")
     return {"name": name, "query": query, "topic": topic, "source": source, "since": since, "expires": expires,
-            "rate": rate, "origins": origins[:10], "enabled": bool(data.get("enabled", True))}
+            "rate": rate, "origins": origins[:10], "enabled": bool(data.get("enabled", True)), "news": news,
+            "social": social}
 
 
 def save(data: dict) -> tuple[dict, str]:
@@ -201,16 +208,31 @@ _PENDING: dict[str, list] = {}
 
 
 def _scope(c: dict, start: str) -> tuple[str, str, str]:
-    """The client's fixed filter: (query, topic, start) — a start before the client's 'data from' is moved up."""
+    """The client's fixed filter: (query, topic, start) — a start before the client's 'data from' is moved up
+    (compared after parsing: no odd spacing gets round it). A client with no query and no existing topic sees
+    nothing (never everything)."""
+    from . import archive, reader
+    query, topic = c.get("query") or "", c.get("topic") or ""
+    if topic and not any(t.get("id") == topic for t in archive.topics()):
+        topic = ""                                    # deleted topic: by id only, never a same-named new one
+    if not query and not topic:
+        raise PermissionError("This key has no query or topic any more — ask for it to be set.")
     since = c.get("since") or ""
-    if since and (not start or start[:10] < since):
+    if start:
+        d, t = reader._moment(start, "start")
+        start = f"{d} {t}".strip()
+        if since and d < since:
+            start = since
+    elif since:
         start = since
-    return c.get("query") or "", c.get("topic") or "", start
+    return query, topic, start
 
 
 def articles(c: dict, q: str = "", start: str = "", end: str = "", sentiment: str = "", sort: str = "newest",
              page: int = 1, size: int = 24, last_hours: float = 0, received_since="") -> dict:
     from . import reader
+    if not c.get("news", True):
+        raise PermissionError("This key does not include news articles — ask for it to be added.")
     if last_hours and float(last_hours or 0) > 0:
         start = (datetime.now(WIB) - timedelta(hours=min(float(last_hours), 24 * 3650))).strftime("%Y-%m-%d %H:%M")
     query, topic, start = _scope(c, start)
@@ -221,9 +243,25 @@ def articles(c: dict, q: str = "", start: str = "", end: str = "", sentiment: st
             "rows": [{k: row.get(k) for k in PUBLIC_FIELDS} for row in r["rows"]]}
 
 
+def posts(c: dict, q: str = "", start: str = "", end: str = "", platform: str = "", sentiment: str = "",
+          sort: str = "newest", page: int = 1, size: int = 24, last_hours: float = 0, received_since="") -> dict:
+    """The client's social media posts and comments (Keyword Search, Collect, API scraper runs)."""
+    from . import reader
+    if not c.get("social"):
+        raise PermissionError("This key does not include social media — ask for it to be added.")
+    if last_hours and float(last_hours or 0) > 0:
+        start = (datetime.now(WIB) - timedelta(hours=min(float(last_hours), 24 * 3650))).strftime("%Y-%m-%d %H:%M")
+    query, topic, start = _scope(c, start)
+    r = reader.posts(q or "", start, end, platform, sentiment, sort, page, size, scope=query,
+                     received_since=received_since, topic=topic)
+    return {"client": c["name"], **r}
+
+
 def article(c: dict, key: str) -> dict:
     """One article — only when it is one of the client's (same filter as the list)."""
     from . import reader
+    if not c.get("news", True):
+        raise PermissionError("This key does not include news articles — ask for it to be added.")
     query, topic, start = _scope(c, "")
     if not reader.articles("", topic, start, "", "", "newest", 1, 1, c.get("source") or "all", scope=query,
                            only_key=key)["total"]:
@@ -236,4 +274,5 @@ def article(c: dict, key: str) -> dict:
 def me(c: dict) -> dict:
     return {"client": c["name"], "query": c.get("query") or "", "topic": c.get("topic") or "",
             "source": c.get("source") or "all", "data_from": c.get("since") or "", "expires": c.get("expires") or "",
+            "news": bool(c.get("news", True)), "social_media": bool(c.get("social")),
             "rate_per_minute": c.get("rate") or 60}

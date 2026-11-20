@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Media Monitoring API — client guide</title>
+<style>
+:root{--bg:#f4f6fb;--panel:#fff;--ink:#141b2e;--muted:#5b6478;--line:#dfe3ee;--accent:#2f5bd8;--code:#0f172a;--codeink:#e2e8f0}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1324;--panel:#151d33;--ink:#e8ecf6;--muted:#9aa4bd;--line:#26304b;--accent:#7d9bff;--code:#0a0f1d;--codeink:#e2e8f0;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 -apple-system,"Segoe UI",Inter,Roboto,sans-serif;padding:32px max(16px,env(safe-area-inset-left)) 64px}
+main{max-width:920px;margin:0 auto;display:flex;flex-direction:column;gap:22px}
+h1{font-size:30px;margin:0;line-height:1.2}h2{font-size:20px;margin:0 0 8px}h3{font-size:15.5px;margin:14px 0 4px}
+p{margin:0 0 8px}.lead{color:var(--muted);max-width:70ch}
+section{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px 22px}
+code{font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:1px 5px}
+pre{background:var(--code);color:var(--codeink);border-radius:10px;padding:14px 16px;overflow-x:auto;margin:8px 0;font:12.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace}
+pre code{background:none;border:0;padding:0;color:inherit}
+table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;padding:7px 8px;border-top:1px solid var(--line);vertical-align:top}
+th{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);border-top:0}
+.wrap{overflow-x:auto}.eyebrow{font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+.card{border:1px solid var(--line);border-radius:10px;padding:12px 14px}.card b{display:block}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">Media monitoring · client API</div>
+    <h1>Read your news and social media data</h1>
+    <p class="lead">Your organisation received a <b>client key</b> (it starts with <code>wtc_</code>). It gives your systems read access to the articles and posts collected for you — nothing else. No account or sign-in is needed. Keep the key secret, like a password; ask for a new one if it may have leaked.</p>
+  </header>
+
+  <section>
+    <h2>Authentication</h2>
+    <p>Send the key with every request, in one of these headers:</p>
+    <pre><code>X-Client-Key: wtc_your_key
+Authorization: Bearer wtc_your_key</code></pre>
+    <p>All endpoints are <code>GET</code>, answer JSON and are on the address you were given (below: <code id="base">https://app.example</code>). Calls from a browser are allowed (CORS) unless your key is limited to certain websites.</p>
+  </section>
+
+  <section>
+    <h2>Endpoints</h2>
+    <div class="wrap"><table>
+      <tr><th>Path</th><th>Returns</th></tr>
+      <tr><td><code>/api/client/me</code></td><td>What your key gives: query or topic, news / social media, data from, expiry, requests per minute.</td></tr>
+      <tr><td><code>/api/client/articles</code></td><td>News articles: title, link, media, publication date and time, image, summary, sentiment, arrival time.</td></tr>
+      <tr><td><code>/api/client/articles/one?key=…</code></td><td>One article in full: paragraphs, author, spokespersons, people mentioned.</td></tr>
+      <tr><td><code>/api/client/posts</code></td><td>Social media posts and comments (if your key includes them): platform, username, link, date, time, text, sentiment, emotion, likes, replies, shares, views, followers.</td></tr>
+    </table></div>
+    <h3>Parameters (articles and posts)</h3>
+    <div class="wrap"><table>
+      <tr><th>Name</th><th>Meaning</th></tr>
+      <tr><td><code>q</code></td><td>Narrow your data further: words, <code>"exact phrase"</code>, <code>AND</code>, <code>OR</code>, <code>NOT</code>, <code>( )</code>, <code>prefix*</code>.</td></tr>
+      <tr><td><code>start</code>, <code>end</code></td><td>Published from / to: <code>2026-11-20</code> or <code>2026-11-20 06:00</code> (Western Indonesia Time, UTC+7).</td></tr>
+      <tr><td><code>last_hours</code></td><td>Published in the last N hours, e.g. <code>6</code> or <code>48</code> (instead of <code>start</code>).</td></tr>
+      <tr><td><code>received_since</code></td><td>Everything that reached the server after this moment — fresh items <i>and</i> older ones that arrived late. Pass the <code>server_time</code> of your previous answer.</td></tr>
+      <tr><td><code>sentiment</code></td><td><code>positive</code>, <code>negative</code> or <code>neutral</code>.</td></tr>
+      <tr><td><code>platform</code></td><td>Posts only: <code>instagram</code>, <code>tiktok</code>, <code>x</code>, <code>youtube</code>, <code>threads</code>, <code>facebook</code>.</td></tr>
+      <tr><td><code>sort</code></td><td><code>newest</code> (default), <code>oldest</code>, or <code>received</code> (newest arrival first).</td></tr>
+      <tr><td><code>page</code>, <code>size</code></td><td>Up to 100 per page; the answer says how many <code>pages</code> there are.</td></tr>
+    </table></div>
+  </section>
+
+  <section>
+    <h2>Recommended schedule</h2>
+    <div class="grid">
+      <div class="card"><b>Every hour</b><code>?received_since=&lt;server_time&gt;</code><p style="margin-top:6px">Everything new since your last call, late arrivals included.</p></div>
+      <div class="card"><b>Every 6 hours</b><code>?last_hours=6</code><p style="margin-top:6px">A safety net for the last 6 hours.</p></div>
+      <div class="card"><b>Once a day</b><code>?last_hours=48</code><p style="margin-top:6px">Catches articles that were published earlier and arrived late.</p></div>
+    </div>
+    <p style="margin-top:10px">Every item has a fixed <code>key</code>. Store by key (insert or update): an item fetched twice is then never doubled.</p>
+  </section>
+
+  <section>
+    <h2>Examples</h2>
+    <h3>curl</h3>
+<pre><code>curl -H "X-Client-Key: wtc_your_key" "BASE/api/client/articles?last_hours=6&amp;size=100"</code></pre>
+    <h3>Python — hourly job</h3>
+<pre><code>import requests
+
+BASE, KEY = "BASE", "wtc_your_key"
+H = {"X-Client-Key": KEY}
+
+def pull(since):
+    page, items = 1, []
+    while True:
+        r = requests.get(f"{BASE}/api/client/articles", headers=H, timeout=60,
+                         params={"received_since": since, "size": 100, "page": page}).json()
+        items += r["rows"]
+        if page &gt;= r["pages"]:
+            return items, r["server_time"]          # keep server_time for the next run
+        page += 1</code></pre>
+    <h3>JavaScript</h3>
+<pre><code>const r = await fetch("BASE/api/client/posts?platform=tiktok&amp;last_hours=24", {
+  headers: {"X-Client-Key": "wtc_your_key"}
+}).then(r =&gt; r.json());</code></pre>
+  </section>
+
+  <section>
+    <h2>Answers and errors</h2>
+    <div class="wrap"><table>
+      <tr><th>Status</th><th>Meaning</th></tr>
+      <tr><td>200 <code>{"ok": true, …}</code></td><td>The data. <code>total</code>, <code>matching</code>, <code>pages</code>, <code>sentiment</code> shares, <code>server_time</code>, <code>rows</code>.</td></tr>
+      <tr><td>200 <code>{"ok": false, "error"}</code></td><td>A parameter could not be read (e.g. a date format) — the error says which.</td></tr>
+      <tr><td>401</td><td>Missing, wrong, paused or expired key.</td></tr>
+      <tr><td>403</td><td>Your key does not include this (e.g. social media), or this website may not use it.</td></tr>
+      <tr><td>429</td><td>Too many requests per minute — wait a minute. Too many wrong keys also block the address for a while.</td></tr>
+    </table></div>
+  </section>
+</main>
+<script>
+  // the examples show this server's own address
+  document.getElementById('base').textContent = location.origin;
+  document.querySelectorAll('pre code').forEach(c => { c.textContent = c.textContent.split('BASE').join(location.origin); });
+</script>
+</body>
+</html>

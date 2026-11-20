@@ -329,6 +329,15 @@ Measured on a 4-CPU test machine with local test sites: ~37 articles/second (≈
 core. On the real internet the pace is set by how many articles the media publish and how fast their sites answer; the
 page shows the live pace and the "per day at this pace" figure.
 
+## When a site refuses the normal request (Googlebot / cloudscraper)
+
+The article reader (the team's engine) tries a normal browser request, then — when refused — asks again as
+"Googlebot", then with cloudscraper (gets past Cloudflare's bot check), then the AMP page. Live Stream → Stream
+settings → *When a site refuses the normal request*: both steps can be switched off (on by default, as before). Off:
+the Googlebot step becomes a plain retry with the normal headers; the cloudscraper step is skipped. Next to each switch:
+how many articles that step brought in the last 7 days (and the share of all reads), so the cost of switching it off
+is known first. Applies to the stream and to News Search / Bulk links within seconds.
+
 ## Smart automation (skip what is already known)
 
 Schedules → **How often: Automatic** and **Period: Everything since the last run** (both the default for new schedules):
@@ -397,6 +406,11 @@ curl -H "X-Client-Key: wtc_…" "https://app.workingteamzzz.id/api/client/articl
   `GET /api/client/me` — what the key gives.
 - The key reaches nothing else: no files, no dashboard, no other client's articles or keywords. Wrong key → 401 (and
   too many wrong keys block the address for a while), too many calls → 429.
+- **Social media too**: tick *Social media posts & comments* — `GET /api/client/posts` gives the client's posts and
+  comments from Keyword Search, Collect and the API scraper (same filters, plus `platform`). A key can carry news,
+  social media or both.
+- **Guide for the client's IT team**: `https://<server>/client-docs` (public, holds no data): authentication,
+  parameters, the hourly / 6-hour / 2-day recipe, examples in curl, Python and JavaScript, error codes.
 - Browser dashboards work without changing `.env` (CORS for these paths, no cookies); "Only from these websites"
   limits it. **New key** replaces a leaked one at once; **Pause**, an expiry date or **Delete** end the access.
 

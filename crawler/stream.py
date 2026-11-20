@@ -33,7 +33,8 @@ DEFAULTS = {"enabled": False, "threads": 8, "discovery_threads": 8, "rss_minutes
             "health_on_start": True, "health_weekday": 6, "health_hour": 2,
             "top_n": 1000, "top2_n": 2000, "active2_hours": 2, "semi_hours": 4, "rare_hours": 24, "inactive_days": 3, "dead_days": 7,
             "retention_days": 0, "max_age_hours": 48, "all_links": True, "old_per_check": 1000, "homepage": True, "domain_gap": 1.5, "rss": True, "sitemaps": True,
-            "keywords": [], "robots": True, "exclude_domains": []}
+            "keywords": [], "robots": True, "exclude_domains": [],
+            "fetch_googlebot": True, "fetch_cloudscraper": True}     # refused pages: see fetch_policy.py
 LIMITS = {"threads": (2, 64), "discovery_threads": (2, 48), "rss_minutes": (2, 240), "sitemap_minutes": (10, 720),
           "old_per_check": (0, 20000),
           "catchup_days": (0, 7), "catchup_hour": (0, 23), "health_weekday": (0, 6), "health_hour": (0, 23), "report_weekday": (0, 6), "report_hour": (0, 23),
@@ -69,6 +70,7 @@ CREATE INDEX IF NOT EXISTS a_succ ON articles(status, fetched);
 CREATE INDEX IF NOT EXISTS a_pub ON articles(status, pub_date);
 CREATE INDEX IF NOT EXISTS a_disc ON articles(discovered);
 CREATE TABLE IF NOT EXISTS seen(key TEXT PRIMARY KEY, t REAL);
+CREATE TABLE IF NOT EXISTS fetch_methods(day TEXT, method TEXT, n INTEGER DEFAULT 0, PRIMARY KEY(day, method));
 CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS feed_outbox(id INTEGER PRIMARY KEY AUTOINCREMENT, feed_id TEXT, article TEXT, tries INTEGER,
   next_try REAL, created REAL);
@@ -132,7 +134,8 @@ def save_settings(data: dict) -> dict:
                 raise ValueError(f"{k}: a number from {lo} to {hi}.")
         elif k == "domain_gap":
             v = max(0.5, min(30.0, float(v)))
-        elif k in ("rss", "sitemaps", "robots", "weekly_report", "health_on_start", "all_links", "homepage"):
+        elif k in ("rss", "sitemaps", "robots", "weekly_report", "health_on_start", "all_links", "homepage",
+                   "fetch_googlebot", "fetch_cloudscraper"):
             v = bool(v)
         elif k == "exclude_domains":
             items = v if isinstance(v, list) else re.split(r"[\n,\s]+", str(v or ""))
@@ -683,6 +686,8 @@ class Stream:
         if status == "success":
             self.bump("read")
             self.recent.append(time.time())
+            self.x("INSERT INTO fetch_methods(day, method, n) VALUES (?,?,1) ON CONFLICT(day, method) DO UPDATE SET "
+                   "n = n + 1", (datetime.now(WIB).strftime("%Y-%m-%d"), res.get("method") or "normal"))
         elif status == "failed":
             self.bump("failed")
         if status == "success":
@@ -759,6 +764,15 @@ class Stream:
         finally:
             with self.lock:
                 self.inflight_sources.discard(src["id"])
+
+    def fetch_methods(self, days: int = 7) -> dict:
+        """Articles read per method over the last days: normal, amp, googlebot, cloudscraper (+ share in %)."""
+        since = (datetime.now(WIB) - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+        got = {r["method"]: r["n"] for r in self.rq("SELECT method, SUM(n) n FROM fetch_methods WHERE day >= ? "
+                                                     "GROUP BY method", (since,))}
+        total = sum(got.values())
+        return {"days": days, "total": total,
+                "methods": {m: {"n": n, "pct": round(n * 100 / total, 2) if total else 0} for m, n in got.items()}}
 
     def drop_junk_titles(self) -> int:
         """Articles read before the filter knew their title was no news ("Banner Link", "Berita Terkini"…): taken out
@@ -1235,7 +1249,7 @@ class Stream:
                             "last_result": json.loads(self.meta("catchup_result") or "{}")},
                 "disk": __import__("crawler.overview", fromlist=["disk"]).disk(),
                 "readers_busy": len(self.busy_domains), "last_error": self.last_error, "export": dict(self.export),
-                "days": self.days_with_articles(),
+                "days": self.days_with_articles(), "fetch_methods": self.fetch_methods(7),
                 "latest": [dict(r) for r in rows]}
         if live:                                             # the engine runs in its own process: its live state
             for k in ("running", "since", "per_minute", "per_day_pace", "readers_busy", "last_error", "export"):

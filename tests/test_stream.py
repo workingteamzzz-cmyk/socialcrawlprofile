@@ -330,3 +330,34 @@ def test_articles_kept_for_good_by_default(tmp_path, monkeypatch):
     s.x("INSERT INTO articles(key, url, discovered, status) VALUES ('a','u',?, 'success')", (time.time() - 400 * 86400,))
     assert s.purge() == 0 and s.q("SELECT COUNT(*) n FROM articles")[0]["n"] == 1
     s.stop()
+
+
+def test_fetch_fallbacks_can_be_switched_off_and_are_counted(tmp_path, monkeypatch):
+    """Googlebot / cloudscraper steps of the article reader: on by default, off from the settings (a plain retry /
+    skipped), and the stream counts which step got each article."""
+    import sys
+    from crawler import fetch_policy, paths, stream
+    from crawler.medmas import extract
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    assert "Googlebot" in extract.GOOGLEBOT["User-Agent"]
+    stream.save_settings({"fetch_googlebot": False, "fetch_cloudscraper": False})
+    fetch_policy.apply_settings()
+    try:
+        assert "Googlebot" not in extract.GOOGLEBOT["User-Agent"] and sys.modules.get("cloudscraper", 0) is None
+        sent = []
+
+        class R:
+            status_code, text = 403, "<html>blocked</html>"
+        monkeypatch.setattr(extract.requests, "get", lambda url, headers=None, timeout=0: sent.append(headers) or R())
+        _html, content, method, err = extract._fetch_html("https://x.id/a", 5)
+        assert err == "HTTP 403" and not content and len(sent) >= 2          # normal + a plain retry, no cloudscraper
+        assert all("Googlebot" not in (h or {}).get("User-Agent", "") for h in sent)
+    finally:
+        fetch_policy.apply(True, True)
+    assert "Googlebot" in extract.GOOGLEBOT["User-Agent"] and sys.modules.get("cloudscraper", 0) is not None
+    s = stream.Stream(str(tmp_path / "s"))
+    for m in ("normal", "normal", "googlebot"):
+        s.x("INSERT INTO fetch_methods(day, method, n) VALUES (date('now'), ?, 1) ON CONFLICT(day, method) DO UPDATE "
+            "SET n = n + 1", (m,))
+    fm = s.fetch_methods(7)
+    assert fm["total"] == 3 and fm["methods"]["googlebot"]["pct"] == 33.33

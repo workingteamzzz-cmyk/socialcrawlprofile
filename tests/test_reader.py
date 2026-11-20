@@ -175,3 +175,78 @@ def test_time_windows_and_late_arrivals(rd):
     assert rd.articles(sort="received")["rows"][0]["fetched"] == fetched[-1]
     assert rd.articles(last_hours=24 * 365 * 5)["total"] == 5 and rd.articles(last_hours=0.001)["total"] == 0
     assert rd.articles(received_since=_t.time() + 3600)["total"] == 0
+
+
+def test_client_api_social_media_posts(rd, tmp_path, monkeypatch):
+    """A key with social media: the client's posts and comments (Keyword Search / Collect / API runs), filtered by its
+    query, platform, time and arrival; a key without it gets 403; deleted rows leave the index."""
+    pytest.importorskip("fastapi")
+    from datetime import timedelta, timezone
+
+    from crawler import archive, insights
+    from tests.test_users import SITE, _app, _client
+    tz = timezone(timedelta(hours=7))
+    archive.add_rows("medsos", [
+        {"platform": "tiktok", "url": "https://www.tiktok.com/@warga/video/1", "author": "warga", "text":
+            "Listrik padam lagi, PLN kapan normal?", "date": "2026-11-20", "time": "08:15", "likes": 120,
+         "comments": 4, "views": 5000, "keyword": "pln"},
+        {"platform": "x", "url": "https://x.com/budi/status/2", "author": "budi", "text": "PLN cepat tanggap, mantap",
+         "date": "2026-11-20", "time": "21:40", "likes": 3, "keyword": "pln"},
+        {"platform": "instagram", "url": "https://www.instagram.com/p/abc/", "author": "kuliner", "text":
+            "Resep sambal enak", "date": "2026-11-20", "time": "10:00", "keyword": "sambal"}], tz)
+    assert insights.index_social() == 3
+    app, _ = _app(tmp_path, monkeypatch)
+    admin = _client(app, "ana")
+    news_only = admin.post("/api/clients/save", json={"name": "A", "query": "pln"}, headers=SITE).json()["key"]
+    both = admin.post("/api/clients/save", json={"name": "B", "query": "pln", "social": True}, headers=SITE).json()["key"]
+    social_only = admin.post("/api/clients/save", json={"name": "C", "query": "pln", "news": False, "social": True},
+                             headers=SITE).json()["key"]
+    assert not admin.post("/api/clients/save", json={"name": "D", "query": "pln", "news": False},
+                          headers=SITE).json()["ok"]
+    c = _client(app)
+    assert c.get("/api/client/posts", headers={"X-Client-Key": news_only}).status_code == 403
+    r = c.get("/api/client/posts", headers={"X-Client-Key": both}).json()
+    assert r["ok"] and r["total"] == 2 and {x["username"] for x in r["rows"]} == {"warga", "budi"}   # not the sambal one
+    p = r["rows"][-1]
+    assert p["url"] and p["text"] and p["sentiment"] in ("positive", "negative", "neutral") and p["received_at"]
+    assert c.get("/api/client/posts", params={"platform": "tiktok"}, headers={"X-Client-Key": both}).json()["total"] == 1
+    assert c.get("/api/client/posts", params={"platform": "x"}, headers={"X-Client-Key": both}).json()["total"] == 1
+    assert c.get("/api/client/posts", params={"start": "2026-11-20 12:00"},
+                 headers={"X-Client-Key": both}).json()["total"] == 1
+    assert c.get("/api/client/posts", params={"received_since": r["server_time"]},
+                 headers={"X-Client-Key": both}).json()["total"] == 0
+    assert c.get("/api/client/articles", headers={"X-Client-Key": social_only}).status_code == 403
+    assert c.get("/api/client/me", headers={"X-Client-Key": both}).json()["social_media"] is True
+    with archive._LOCK:
+        db = archive._db()
+        db.execute("DELETE FROM items WHERE kind='medsos'")
+        db.commit()
+        db.close()
+    insights.prune_reports()
+    assert c.get("/api/client/posts", headers={"X-Client-Key": both}).json()["total"] == 0
+
+
+def test_client_guide_page_is_public_and_holds_no_data(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from tests.test_users import _app, _client
+    app, _ = _app(tmp_path, monkeypatch)
+    r = _client(app).get("/client-docs")
+    assert r.status_code == 200 and "X-Client-Key" in r.text and "received_since" in r.text
+
+
+def test_client_key_limits_cannot_be_got_round(rd, tmp_path, monkeypatch):
+    """Found in review: odd spacing before start must not skip the client's 'data from'; a huge page is no error."""
+    pytest.importorskip("fastapi")
+    from tests.test_users import SITE, _app, _client
+    app, _ = _app(tmp_path, monkeypatch)
+    key = _client(app, "ana").post("/api/clients/save", json={"name": "A", "query": "pln", "since": "2026-11-20"},
+                                   headers=SITE).json()["key"]
+    c, h = _client(app), {"X-Client-Key": key}
+    base = c.get("/api/client/articles", headers=h).json()["total"]
+    assert base == 3                                                            # the 19 Nov article is before 'from'
+    for odd in (" 2020-01-01", "　2020-01-01", " 2020-01-01", "2020-01-01"):
+        assert c.get("/api/client/articles", params={"start": odd}, headers=h).json().get("total") == base, odd
+    assert c.get("/api/client/articles", params={"start": "２０２０-01-01"}, headers=h).json()["ok"] is False
+    r = c.get("/api/client/articles", params={"page": "10000000000000000000"}, headers=h)
+    assert r.status_code == 200 and r.json()["rows"] == []
+    assert c.get("/api/client/posts", params={"page": "10000000000000000000"}, headers=h).status_code == 403

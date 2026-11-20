@@ -306,6 +306,10 @@ running (also after a restart) and reads every new article from the registered m
 
   A new outlet is checked once right away; an outlet that publishes again is promoted at once. All numbers can be
   changed under Live Stream → Stream settings.
+- **Site check** — when the stream starts and every Sunday 02:00 WIB (adjustable) every registered site is checked:
+  does it answer, does it list sitemaps. Sites that are down are not crawled at all (no feed, no sitemap) until the
+  next check; a site that is back is put in the rotation at once. A site that looks down gets a second try; if most
+  sites look down at once, the server's own connection is the problem and nothing is marked.
 - **Late articles** — once a day (01:00 WIB) a sweep reads every reachable outlet's sitemaps for the last 2 days,
   including its dated archive sitemaps: articles listed late, or missed while an outlet was checked rarely, are taken
   then (known links are skipped; late links wait behind fresh news). So every outlet is looked at at least daily.

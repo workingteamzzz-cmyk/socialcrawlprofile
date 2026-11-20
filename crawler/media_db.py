@@ -272,6 +272,12 @@ def stats(force: bool = False) -> dict:
                 errs.setdefault(r["domain"], Counter())[r["error"]] += r["n"]
             for d, cnt in errs.items():
                 row(d)["error"] = cnt.most_common(1)[0][0]
+            try:
+                for r in c.execute("SELECT domain, alive, checked FROM site_health"):
+                    x = row(r["domain"])
+                    x["site"], x["site_checked"] = ("up" if r["alive"] else "down"), r["checked"]
+            except sqlite3.Error:
+                pass
             for r in c.execute("SELECT domain, kind, tier, fails, checked, url FROM sources"):
                 x = row(r["domain"])
                 if r["kind"] == "sitemap":
@@ -291,10 +297,12 @@ def stats(force: bool = False) -> dict:
 def access(x: dict | None, excluded: bool = False) -> str:
     if excluded:
         return "excluded"
-    if not x or not x.get("checked") and not x.get("found7"):
+    if not x or not x.get("checked") and not x.get("found7") and not x.get("site"):
         return "unknown"
     ok, bad, short, robots = x["success"], x["failed"], x["filtered"], x["skipped"]
     tried = ok + bad + short
+    if x.get("site") == "down" and not ok:
+        return "unreachable"
     if robots and not ok:
         return "robots"
     if x.get("tier") == "dead" and not ok:
@@ -327,7 +335,7 @@ def listing(q: str = "", tier: str = "", acc: str = "", page: int = 1, size: int
                      "per_day": round(x.get("found7", 0) / 7, 1), "last_day": x.get("last_day", ""),
                      "read": x.get("success", 0), "failed": x.get("failed", 0), "short": x.get("filtered", 0),
                      "robots": x.get("skipped", 0), "error": x.get("error", ""), "rss": x.get("rss", 0),
-                     "sitemap": x.get("has_sitemap", False), "subscribed": d in subs})
+                     "sitemap": x.get("has_sitemap", False), "subscribed": d in subs, "site": x.get("site", "")})
     counts = {"total": len(rows), "tiers": Counter(r["tier"] for r in rows), "access": Counter(r["access"] for r in rows)}
     ql = (q or "").strip().lower()
     if ql:

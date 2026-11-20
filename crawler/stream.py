@@ -30,11 +30,12 @@ from datetime import datetime, timedelta, timezone
 WIB = timezone(timedelta(hours=7))
 DEFAULTS = {"enabled": False, "threads": 16, "discovery_threads": 12, "rss_minutes": 10, "sitemap_minutes": 60,
             "catchup_days": 2, "catchup_hour": 1, "weekly_report": True, "report_weekday": 0, "report_hour": 7,
+            "health_on_start": True, "health_weekday": 6, "health_hour": 2,
             "top_n": 1000, "semi_hours": 4, "rare_hours": 24, "inactive_days": 3, "dead_days": 7,
             "retention_days": 7, "max_age_hours": 48, "domain_gap": 1.5, "rss": True, "sitemaps": True,
             "keywords": [], "robots": True, "exclude_domains": []}
 LIMITS = {"threads": (2, 64), "discovery_threads": (2, 48), "rss_minutes": (2, 240), "sitemap_minutes": (10, 720),
-          "catchup_days": (0, 7), "catchup_hour": (0, 23), "report_weekday": (0, 6), "report_hour": (0, 23),
+          "catchup_days": (0, 7), "catchup_hour": (0, 23), "health_weekday": (0, 6), "health_hour": (0, 23), "report_weekday": (0, 6), "report_hour": (0, 23),
           "top_n": (50, 20000), "semi_hours": (1, 48), "rare_hours": (2, 168), "inactive_days": (1, 30),
           "dead_days": (1, 60),
           "retention_days": (1, 90), "max_age_hours": (6, 168)}
@@ -63,6 +64,7 @@ CREATE TABLE IF NOT EXISTS sources(
   hits INTEGER DEFAULT 0, fails INTEGER DEFAULT 0, etag TEXT DEFAULT '', modified TEXT DEFAULT '', checked REAL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS s_next ON sources(next_check);
 CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
+CREATE TABLE IF NOT EXISTS site_health(domain TEXT PRIMARY KEY, checked REAL, alive INTEGER, sitemaps INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS domain_days(domain TEXT, day TEXT, n INTEGER DEFAULT 0, PRIMARY KEY(domain, day));
 CREATE TABLE IF NOT EXISTS hourly(
   hour TEXT PRIMARY KEY, found INTEGER DEFAULT 0, read INTEGER DEFAULT 0, failed INTEGER DEFAULT 0,
@@ -112,7 +114,7 @@ def save_settings(data: dict) -> dict:
                 raise ValueError(f"{k}: a number from {lo} to {hi}.")
         elif k == "domain_gap":
             v = max(0.5, min(30.0, float(v)))
-        elif k in ("rss", "sitemaps", "robots", "weekly_report"):
+        elif k in ("rss", "sitemaps", "robots", "weekly_report", "health_on_start"):
             v = bool(v)
         elif k == "exclude_domains":
             items = v if isinstance(v, list) else re.split(r"[\n,\s]+", str(v or ""))
@@ -161,6 +163,8 @@ class Stream:
         self.tiers: dict = {}                  # domain -> tier (recomputed every 10 minutes)
         self.catchup = {"running": False, "done": 0, "total": 0, "found": 0, "started": 0, "finished": 0}
         self.catchup_now = threading.Event()
+        self.health = {"running": False, "done": 0, "total": 0, "alive": 0, "down": 0, "started": 0, "finished": 0}
+        self.health_now = threading.Event()
         self.export = {"running": False, "done": 0, "total": 0, "file": "", "error": ""}
         self.recent = deque(maxlen=50000)       # timestamps of articles read (rate per minute)
         self.inflight_sources: set = set()
@@ -703,6 +707,108 @@ class Stream:
         self.meta("catchup_result", json.dumps({k: out[k] for k in ("total", "found", "started", "finished")}))
         return out
 
+    # ----- site check: is every registered outlet up? (at start + weekly) -----
+    def check_site(self, domain: str) -> tuple[bool, list]:
+        from .medmas.discovery import sitemaps as sm
+        roots, alive = sm._sitemaps_from_robots(domain)
+        return alive, roots
+
+    def run_health(self) -> dict:
+        """Every registered outlet once: does it answer, does it list sitemaps. A site that is down is not crawled
+        (no feed, no sitemap) until the next site check; one that came back is put back in the rotation at once."""
+        doms = sorted({r["domain"] for r in self.q("SELECT DISTINCT domain FROM sources WHERE kind='sitemap'")})
+        doms = [d for d in doms if not self.excluded("https://" + d)]
+        with self.lock:
+            self.health = {"running": True, "done": 0, "total": len(doms), "alive": 0, "down": 0,
+                           "started": time.time(), "finished": 0}
+        next_check = self._next_health_time()
+
+        results: dict = {}
+
+        def probe(d):
+            if self.stop_event.is_set():
+                return
+            try:
+                alive, roots = self.check_site(d)
+            except Exception:  # noqa: BLE001
+                alive, roots = False, []
+            with self.lock:
+                results[d] = (alive, roots)
+                self.health["done"] += 1
+                self.health["alive" if alive else "down"] += 1
+        workers = max(4, self.cfg["discovery_threads"])
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            list(ex.map(probe, doms))
+        down = [d for d, (a, _r) in results.items() if not a]
+        if down and not self.stop_event.is_set():           # a site that looked down gets a second chance
+            self.stop_event.wait(60)
+            with self.lock:
+                self.health["down"] -= len(down)
+                self.health["done"] -= len(down)
+            with ThreadPoolExecutor(max_workers=workers) as ex:
+                list(ex.map(probe, down))
+        down = [d for d, (a, _r) in results.items() if not a]
+        if results and len(down) > 0.6 * len(results):
+            # most of the internet "down" at once is this server's connection, not the sites: change nothing
+            with self.lock:
+                self.health.update(running=False, finished=time.time(), error="most sites did not answer — "
+                                   "the server's internet connection looks down; nothing was marked")
+                out = dict(self.health)
+            self.last_error = "site check: " + out["error"]
+            return out
+        now = time.time()
+        with self.lock:
+            for d, (alive, roots) in results.items():
+                self._db.execute("INSERT INTO site_health(domain, checked, alive, sitemaps) VALUES (?,?,?,?) "
+                                 "ON CONFLICT(domain) DO UPDATE SET checked=excluded.checked, alive=excluded.alive, "
+                                 "sitemaps=excluded.sitemaps", (d, now, int(alive), len(roots)))
+                if not alive:                                 # down: left alone until the next site check
+                    self._db.execute("UPDATE sources SET fails=MAX(fails, 3), tier='dead', next_check=? WHERE domain=?",
+                                     (next_check, d))
+                    self.tiers[d] = "dead"
+                    continue
+                self._db.execute("UPDATE sources SET fails=0, tier='inactive', next_check=? "
+                                 "WHERE domain=? AND tier='dead'", (now, d))             # back: checked right away
+                if roots:
+                    self._db.execute("UPDATE sources SET url=? WHERE domain=? AND kind='sitemap' AND url=''",
+                                     (json.dumps(roots[:6]), d))
+                if self.tiers.get(d) == "dead":
+                    self.tiers[d] = "inactive"
+            self._db.commit()
+            self.health.update(running=False, finished=time.time())
+            out = dict(self.health)
+        self.meta("health_last", str(int(time.time())))
+        self.meta("health_result", json.dumps({k: out[k] for k in ("total", "alive", "down", "started", "finished")}))
+        return out
+
+    def _next_health_time(self) -> float:
+        now = datetime.now(WIB)
+        days = (self.cfg.get("health_weekday", 6) - now.weekday()) % 7 or 7
+        nxt = (now + timedelta(days=days)).replace(hour=self.cfg.get("health_hour", 2), minute=30, second=0)
+        return nxt.timestamp()
+
+    def health_loop(self) -> None:
+        first = True
+        while not self.stop_event.is_set():
+            now = datetime.now(WIB)
+            week = now.strftime("%G-W%V")
+            last = float(self.meta("health_last") or 0)
+            at_start = first and self.cfg.get("health_on_start", True) and time.time() - last > 20 * 3600
+            weekly = (now.weekday() == self.cfg.get("health_weekday", 6) and now.hour >= self.cfg.get("health_hour", 2)
+                      and self.meta("health_week") != week)
+            first = False
+            if at_start or weekly or self.health_now.is_set():
+                self.health_now.clear()
+                if weekly:
+                    self.meta("health_week", week)
+                try:
+                    self.run_health()
+                except Exception as e:  # noqa: BLE001
+                    self.last_error = f"site check: {str(e)[:120]}"
+                    with self.lock:
+                        self.health["running"] = False
+            self.stop_event.wait(30)
+
     def catchup_loop(self) -> None:
         while not self.stop_event.is_set():
             now = datetime.now(WIB)
@@ -809,6 +915,7 @@ class Stream:
             f"{self.cfg['threads']} readers")
         self.threads = [threading.Thread(target=self.discovery_loop, daemon=True, name="stream-discovery"),
                         threading.Thread(target=self.catchup_loop, daemon=True, name="stream-catchup"),
+                        threading.Thread(target=self.health_loop, daemon=True, name="stream-health"),
                         threading.Thread(target=self.house_loop, daemon=True, name="stream-house")]
         self.threads += [threading.Thread(target=self.reader_loop, daemon=True, name=f"stream-reader-{i}")
                          for i in range(self.cfg["threads"])]
@@ -866,6 +973,7 @@ class Stream:
                 "hourly": series, "sources": src, "keywords": len(self.keywords()), "db_mb": round(size / 1e6, 1),
                 "tiers": {r["tier"] or "new": r["n"] for r in self.q(
                     "SELECT tier, COUNT(DISTINCT domain) n FROM sources GROUP BY tier")},
+                "health": {**dict(self.health), "last_result": json.loads(self.meta("health_result") or "{}")},
                 "catchup": {**dict(self.catchup), "last": self.meta("catchup_last"),
                             "last_result": json.loads(self.meta("catchup_result") or "{}")},
                 "readers_busy": len(self.busy_domains), "last_error": self.last_error, "export": dict(self.export),
@@ -922,6 +1030,11 @@ def apply(data: dict, log=print) -> dict:
             threading.Thread(target=again, daemon=True).start()
     if isinstance(data.get("enabled"), bool):
         out = set_enabled(data["enabled"], log)
+    if data.get("health_now"):
+        if not s.running:
+            raise ValueError("Start the stream first.")
+        s.health_now.set()
+        out["health"] = "started"
     if data.get("catchup_now"):
         if not s.running:
             raise ValueError("Start the stream first.")

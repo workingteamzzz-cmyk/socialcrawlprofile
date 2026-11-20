@@ -1101,6 +1101,8 @@ body{font-feature-settings:"tnum" 1,"cv11" 1;letter-spacing:-.003em}
           <div class="field"><label for="lsSfRare">Rare (nothing in 7 days): every (hours)</label><input id="lsSfRare" type="number" min="2" max="168"></div>
           <div class="field"><label for="lsSfIn">Inactive (nothing in 30 days): every (days)</label><input id="lsSfIn" type="number" min="1" max="30"></div>
           <div class="field"><label for="lsSfDead">Unreachable: every (days)</label><input id="lsSfDead" type="number" min="1" max="60"></div>
+          <div class="field"><label for="lsSfHDay">Site check (every registered site): day</label><select id="lsSfHDay"><option value="0">Monday</option><option value="1">Tuesday</option><option value="2">Wednesday</option><option value="3">Thursday</option><option value="4">Friday</option><option value="5">Saturday</option><option value="6">Sunday</option></select></div>
+          <div class="field"><label for="lsSfHHour">Site check: hour (WIB)</label><input id="lsSfHHour" type="number" min="0" max="23"></div>
           <div class="field"><label for="lsSfCuD">Late articles: sweep the last … days (0 = off)</label><input id="lsSfCuD" type="number" min="0" max="7"></div>
           <div class="field"><label for="lsSfCuH">Late-article sweep runs daily at (hour, WIB)</label><input id="lsSfCuH" type="number" min="0" max="23"></div>
           <div class="field"><label for="lsSfAge">Only articles from the last (hours)</label><input id="lsSfAge" type="number" min="6" max="168"></div>
@@ -1109,7 +1111,7 @@ body{font-feature-settings:"tnum" 1,"cv11" 1;letter-spacing:-.003em}
         </div>
         <div class="field" style="margin-top:12px"><label for="lsSfKw">Stream keywords (one per line; every report topic is added automatically)</label><textarea id="lsSfKw" rows="4" placeholder="banjir&#10;pemadaman listrik&#10;&quot;air bersih&quot; NOT iklan"></textarea></div>
         <div class="field" style="margin-top:12px"><label for="lsSfEx">Never read these outlets (one per line, e.g. a media that forbids crawling without permission)</label><textarea id="lsSfEx" rows="3" placeholder="antaranews.com"></textarea></div>
-        <div style="display:flex;gap:18px;margin:6px 0 14px;flex-wrap:wrap"><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfUseRss"> RSS engine</label><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfUseSm"> Sitemap engine</label><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfRobots"> Respect each outlet's robots.txt (recommended)</label></div>
+        <div style="display:flex;gap:18px;margin:6px 0 14px;flex-wrap:wrap"><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfUseRss"> RSS engine</label><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfUseSm"> Sitemap engine</label><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfRobots"> Respect each outlet's robots.txt (recommended)</label><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfHStart"> Check every site when the stream starts</label></div>
         <button class="btn primary" id="lsSfSave">Save settings</button> <span class="hint" id="lsSfMsg"></span>
         <p class="hint">Outlets are ranked every 10 minutes by the new articles they published in the last 7 days: the top ones are checked most often, quiet ones less, unreachable ones rarely — and an outlet that starts publishing again is promoted at once. RSS feeds of active outlets are checked more often (an unchanged feed costs almost nothing). One page at a time per outlet, with the pause above — nobody is hammered. More readers = faster, as long as the server has CPU to spare.</p>
       </div></div>
@@ -2540,6 +2542,11 @@ async function loadStream(){
     ['dead', 'Unreachable', every(cfg.dead_days * 1440), '#d03b3b'], ['new', 'Not checked yet', 'first check soon', '#c3c2b7']];
   $('lsStEngines').innerHTML = `<div class="sub-hd" style="margin-top:0;padding-top:0;border:0">Outlets by activity</div>` +
     tiers.map(([k, l, e, c]) => `<div class="hs-foot"><span style="display:flex;align-items:center;gap:7px"><i style="width:8px;height:8px;border-radius:2px;background:${c}"></i>${l} <small style="color:var(--faint)">· ${e}</small></span><b>${fmt(tr[k] || 0)}</b></div>`).join('') +
+    (() => { const h = d.health || {}, lr = h.last_result || {}, days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+      const st = h.running ? `checking — ${fmt(h.done)} of ${fmt(h.total)} sites · ${fmt(h.alive)} up · ${fmt(h.down)} down`
+        : h.error ? esc(h.error) : lr.finished ? `last check ${new Date(lr.finished * 1000).toLocaleString([], {weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'})}: <b>${fmt(lr.alive)}</b> up · <b>${fmt(lr.down)}</b> down (not crawled until the next check)` : 'not run yet';
+      return `<div class="sub-hd">Site check (every ${days[cfg.health_weekday]} ${String(cfg.health_hour).padStart(2, '0')}:00${cfg.health_on_start !== false ? ' + at start' : ''})</div><p class="hint" style="margin:4px 0 6px">${st}</p>` +
+        (d.running && !h.running ? '<button class="btn sm need-admin" id="lsHealth">Check every site now</button>' : ''); })() +
     (() => { const c = d.catchup || {}, lr = c.last_result || {};
       const st = c.running ? `running — ${fmt(c.done)} of ${fmt(c.total)} outlets, ${fmt(c.found)} late articles so far`
         : lr.finished ? `last run ${new Date(lr.finished * 1000).toLocaleString([], {day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'})}: ${fmt(lr.found)} late articles from ${fmt(lr.total)} outlets` : 'not run yet';
@@ -2548,6 +2555,8 @@ async function loadStream(){
     '<div style="height:14px"></div>' + row('rss', 'RSS feeds') + '<div style="height:14px"></div>' + row('sitemap', 'Outlet sitemaps') +
     `<div class="hs-foot" style="margin-top:14px"><span>Readers busy</span><b>${d.readers_busy} / ${cfg.threads}</b></div><div class="hs-foot"><span>Stream database</span><b>${fmt(d.db_mb)} MB</b></div>` +
     (d.last_error ? `<p class="hint" style="margin-top:10px">Last problem: ${esc(d.last_error)}</p>` : '');
+  if ($('lsHealth')) $('lsHealth').onclick = async () => { const r = await api('/api/stream', {health_now: true});
+    toast(r && r.ok ? 'Checking every site…' : (r && r.error) || 'Not started'); setTimeout(loadStream, 1500); };
   if ($('lsCatchup')) $('lsCatchup').onclick = async () => { const r = await api('/api/stream', {catchup_now: true});
     toast(r && r.ok ? 'Late-article sweep started' : (r && r.error) || 'Not started'); setTimeout(loadStream, 1500); };
   drawStream(d);
@@ -2557,6 +2566,7 @@ async function loadStream(){
     : `<tr><td colspan="4" class="empty-s">${d.running ? 'Starting up — the first articles arrive within minutes.' : 'Start the stream to read every new article from the registered media.'}</td></tr>`;
   if (!loadStream.filled){ loadStream.filled = true;
     $('lsSfThreads').value = cfg.threads; $('lsSfRss').value = cfg.rss_minutes; $('lsSfSm').value = cfg.sitemap_minutes;
+    $('lsSfHDay').value = cfg.health_weekday; $('lsSfHHour').value = cfg.health_hour; $('lsSfHStart').checked = cfg.health_on_start !== false;
     $('lsSfCuD').value = cfg.catchup_days; $('lsSfCuH').value = cfg.catchup_hour;
     $('lsSfTop').value = cfg.top_n; $('lsSfSemi').value = cfg.semi_hours; $('lsSfRare').value = cfg.rare_hours; $('lsSfIn').value = cfg.inactive_days; $('lsSfDead').value = cfg.dead_days; $('lsSfAge').value = cfg.max_age_hours;
     $('lsSfRet').value = cfg.retention_days; $('lsSfGap').value = cfg.domain_gap; $('lsSfKw').value = (cfg.keywords || []).join('\n');
@@ -2576,6 +2586,7 @@ $('lsStToggle').onclick = async () => { if (!ST) return;
 $('lsSfSave').onclick = async () => {
   const r = await api('/api/stream', {threads: +$('lsSfThreads').value, rss_minutes: +$('lsSfRss').value, sitemap_minutes: +$('lsSfSm').value,
     max_age_hours: +$('lsSfAge').value, retention_days: +$('lsSfRet').value, domain_gap: +$('lsSfGap').value, keywords: $('lsSfKw').value,
+    health_weekday: +$('lsSfHDay').value, health_hour: +$('lsSfHHour').value, health_on_start: $('lsSfHStart').checked,
     catchup_days: +$('lsSfCuD').value, catchup_hour: +$('lsSfCuH').value,
     top_n: +$('lsSfTop').value, semi_hours: +$('lsSfSemi').value, rare_hours: +$('lsSfRare').value, inactive_days: +$('lsSfIn').value, dead_days: +$('lsSfDead').value,
     rss: $('lsSfUseRss').checked, sitemaps: $('lsSfUseSm').checked, robots: $('lsSfRobots').checked, exclude_domains: $('lsSfEx').value});

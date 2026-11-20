@@ -223,3 +223,37 @@ def test_catchup_sweep_takes_the_last_two_days_late_articles(st, monkeypatch):
         assert st.meta("catchup_last") == now.strftime("%Y-%m-%d") and st.status()["catchup"]["last_result"]["found"] == 2
     finally:
         st.running = False
+
+
+def test_site_check_marks_down_sites_and_brings_back_living_ones(st, monkeypatch):
+    import threading
+
+    class NoWait(threading.Event):
+        def wait(self, timeout=None):
+            return False
+    st.stop_event = NoWait()
+    now = time.time()
+    for d, tier, fails in [("hidup.id", "active", 0), ("bangkit.id", "dead", 3), ("mati.id", "inactive", 0),
+                           ("hidup2.id", "semi", 0), ("hidup3.id", "rare", 0)]:
+        st.x("INSERT INTO sources(id, kind, domain, url, next_check, interval, tier, fails) VALUES (?,?,?,?,?,?,?,?)",
+             (f"sm:{d}", "sitemap", d, "", now + 9 * 86400, 3600, tier, fails))
+    st.x("INSERT INTO sources(id, kind, domain, url, next_check, interval) VALUES ('rss:mati','rss','mati.id','u',0,600)")
+    calls = []
+
+    def check(d):
+        calls.append(d)
+        return (d != "mati.id"), (["https://bangkit.id/sitemap_news.xml"] if d == "bangkit.id" else [])
+    monkeypatch.setattr(st, "check_site", check)
+    out = st.run_health()
+    assert out["alive"] == 4 and out["down"] == 1 and calls.count("mati.id") == 2          # a second chance
+    src = {r["id"]: r for r in st.q("SELECT * FROM sources")}
+    assert src["sm:mati.id"]["tier"] == "dead" and src["rss:mati"]["tier"] == "dead"          # feed and sitemap: off
+    assert src["sm:mati.id"]["next_check"] > now + 86400                                       # until the next check
+    assert src["sm:bangkit.id"]["tier"] == "inactive" and src["sm:bangkit.id"]["fails"] == 0
+    assert src["sm:bangkit.id"]["next_check"] <= time.time() and "sitemap_news" in src["sm:bangkit.id"]["url"]
+    assert src["sm:hidup.id"]["tier"] == "active"                                              # untouched
+    assert st.status()["health"]["last_result"]["down"] == 1
+    # the server's own internet down: nothing is marked
+    monkeypatch.setattr(st, "check_site", lambda d: (False, []))
+    out = st.run_health()
+    assert "nothing was marked" in out["error"] and st.q("SELECT tier FROM sources WHERE id='sm:hidup.id'")[0]["tier"] == "active"

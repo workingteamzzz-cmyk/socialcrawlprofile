@@ -248,6 +248,10 @@ class StreamSettings(BaseModel):
     catchup_hour: int | None = Field(None, description="hour of the day (WIB) the sweep runs")
     catchup_now: bool | None = Field(None, description="run the late-article sweep now")
     weekly_report: bool | None = Field(None, description="weekly media access report (Excel + Telegram)")
+    health_on_start: bool | None = Field(None, description="check every registered site when the stream starts")
+    health_weekday: int | None = Field(None, description="weekly site check: 0 = Monday … 6 = Sunday")
+    health_hour: int | None = Field(None, description="weekly site check: hour, WIB")
+    health_now: bool | None = Field(None, description="check every registered site now")
     report_weekday: int | None = Field(None, description="0 = Monday … 6 = Sunday")
     report_hour: int | None = Field(None, description="hour of the day, WIB")
     semi_hours: int | None = None

@@ -108,3 +108,50 @@ def test_all_databases_stream_plus_news_search(rd):
         c.close()
     insights.prune_reports()
     assert rd.articles(start="2025-01-01", end="2025-12-31")["total"] == 0
+
+
+def test_client_api_key_sees_only_its_own_news(rd, tmp_path, monkeypatch):
+    """A client key: only the client's query, can only narrow it, no other endpoint, rate limit, pause / new key."""
+    pytest.importorskip("fastapi")
+    from crawler import client_api
+    from tests.test_users import SITE, _app, _client
+    app, _ = _app(tmp_path, monkeypatch)
+    admin = _client(app, "ana")
+    assert _client(app, "citra").post("/api/clients/save", json={"name": "x", "query": "pln"}, headers=SITE).status_code == 403
+    r = admin.post("/api/clients/save", json={"name": "PLN UID", "query": "pln, padam", "rate": 6}, headers=SITE).json()
+    assert r["ok"] and r["key"].startswith("wtc_") and r["client"]["query"] == "pln OR padam"
+    key, cid = r["key"], r["client"]["id"]
+    assert key not in (tmp_path / "data" / "client_api.json").read_text()        # only its hash is kept
+    assert oct(os.stat(tmp_path / "data" / "client_api.json").st_mode)[-3:] == "600"
+    c = _client(app)
+    h = {"X-Client-Key": key}
+    assert c.get("/api/client/articles").status_code == 401
+    got = c.get("/api/client/articles", headers=h).json()
+    assert got["ok"] and got["total"] == 4 and all("pln" in x["title"].lower() for x in got["rows"])
+    assert "matched" not in got["rows"][0] and "tier" not in got["rows"][0]   # other clients' topics never show
+    assert c.get("/api/client/articles", params={"q": "bogor"}, headers=h).json()["total"] == 1      # narrows
+    assert c.get("/api/client/articles", params={"q": "x) OR (cabai"}, headers=h).json().get("total", 0) == 0   # never widens
+    cabai = rd.articles(q="cabai")["rows"][0]["key"]
+    assert c.get("/api/client/articles/one", params={"key": cabai}, headers=h).json()["ok"] is False
+    mine = got["rows"][0]["key"]
+    one = c.get("/api/client/articles/one", params={"key": mine}, headers=h).json()
+    assert one["ok"] and one["paragraphs"] and "matched" not in one
+    for path in ("/api/articles", "/api/outputs", "/download/news_links_a.xlsx", "/api/dashboard"):
+        assert c.get(path, headers={**h, "X-API-Key": key}).status_code in (401, 403), path
+    r = c.get("/api/client/me", headers={**h, "Origin": "https://app.klien.id"})
+    assert r.json()["query"] == "pln OR padam" and r.headers["access-control-allow-origin"] == "https://app.klien.id"
+    assert c.options("/api/client/articles", headers={"Origin": "https://app.klien.id",
+                                                      "Access-Control-Request-Method": "GET"}).status_code == 204
+    assert c.get("/api/client/me", headers=h).status_code == 429                 # 6 per minute: the 7th waits
+    client_api._HITS.clear()
+    new = admin.post("/api/clients/rotate", json={"id": cid}, headers=SITE).json()["key"]
+    assert c.get("/api/client/me", headers=h).status_code == 401 and c.get(
+        "/api/client/me", headers={"Authorization": f"Bearer {new}"}).status_code == 200
+    item = admin.get("/api/clients").json()["clients"][0]
+    assert admin.post("/api/clients/save", json={**item, "enabled": False, "origins": "https://app.klien.id"}, headers=SITE).json()["ok"]
+    assert c.get("/api/client/me", headers={"X-Client-Key": new}).status_code == 401           # paused
+    admin.post("/api/clients/save", json={**item, "enabled": True, "origins": "https://app.klien.id"}, headers=SITE)
+    assert c.get("/api/client/me", headers={"X-Client-Key": new, "Origin": "https://lain.com"}).status_code == 403
+    assert admin.post("/api/clients/save", json={**item, "expires": "2020-01-01"}, headers=SITE).json()["ok"]
+    assert c.get("/api/client/me", headers={"X-Client-Key": new}).status_code == 401           # expired
+    assert admin.post("/api/clients/delete", json={"id": cid}, headers=SITE).json()["ok"] and not client_api.public()

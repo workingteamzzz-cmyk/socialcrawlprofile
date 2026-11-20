@@ -959,6 +959,111 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
         except ValueError as e:
             return {"ok": False, "error": str(e)}
 
+    # ---------- Client API: a key per client, only that client's news, no sign-in ----------
+    from . import client_api
+
+    def _client(request: Request):
+        ip = client_ip(request)
+        if failures.blocked(ip):
+            raise HTTPException(429, "Too many wrong keys — try again in a few minutes.")
+        key = request.headers.get("x-client-key") or ""
+        auth_h = request.headers.get("authorization") or ""
+        if not key and auth_h.lower().startswith("bearer "):
+            key = auth_h[7:].strip()
+        c = client_api.identify(key)
+        if c is None:
+            if key:
+                failures.add(ip)
+                audit.add("client?", "client key rejected", ip, path=request.url.path)
+            raise HTTPException(401, "Send your client key in the X-Client-Key header (or Authorization: Bearer).")
+        if not client_api.allow(c):
+            raise HTTPException(429, f"Too many requests — at most {c.get('rate') or 60} per minute for this key.")
+        client_api.touch(c)
+        request.state.client = c
+        return c
+
+    @app.middleware("http")
+    async def _client_cors(request: Request, call_next):
+        """/api/client/*: any website may call it from the browser with the key (no cookies are ever used there);
+        a client limited to its own websites gets the CORS header only for those."""
+        if not request.url.path.startswith("/api/client/"):
+            return await call_next(request)
+        origin = request.headers.get("origin") or ""
+        if request.method == "OPTIONS":
+            from fastapi import Response
+            resp = Response(status_code=204)
+        else:
+            resp = await call_next(request)
+        if origin:
+            resp.headers["Access-Control-Allow-Origin"] = origin if origin.startswith(("http://", "https://")) else "*"
+            resp.headers["Vary"] = "Origin"
+            resp.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+            resp.headers["Access-Control-Allow-Headers"] = "X-Client-Key, Authorization"
+            resp.headers["Access-Control-Max-Age"] = "600"
+        return resp
+
+    def _origin_ok(request: Request, c: dict) -> None:
+        origin = (request.headers.get("origin") or "").rstrip("/")
+        if origin and c.get("origins") and origin not in c["origins"]:
+            raise HTTPException(403, "This website may not use this key (ask for it to be added).")
+
+    @app.get("/api/client/me", tags=["client API"], summary="What this client key gives")
+    def client_me(request: Request):
+        c = _client(request)
+        _origin_ok(request, c)
+        return {"ok": True, **client_api.me(c)}
+
+    @app.get("/api/client/articles", tags=["client API"],
+             summary="This client's articles (X-Client-Key): q narrows them further (AND / OR / NOT), start / end "
+                     "(YYYY-MM-DD), sentiment, sort, page, size ≤ 100")
+    def client_articles(request: Request, q: str = "", start: str = "", end: str = "", sentiment: str = "",
+                        sort: str = "newest", page: int = 1, size: int = 24):
+        c = _client(request)
+        _origin_ok(request, c)
+        try:
+            return {"ok": True, **client_api.articles(c, q[:500], start, end, sentiment, sort, page, size)}
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+
+    @app.get("/api/client/articles/one", tags=["client API"], summary="One of this client's articles in full")
+    def client_article(request: Request, key: str):
+        c = _client(request)
+        _origin_ok(request, c)
+        try:
+            return {"ok": True, **client_api.article(c, key[:600])}
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+
+    @app.get("/api/clients", tags=["client API"], dependencies=admin_only, summary="Client keys (admins)")
+    def clients_list():
+        return {"clients": client_api.public()}
+
+    @app.post("/api/clients/save", tags=["client API"], dependencies=admin_only,
+              summary="Add a client (the key is in the answer, once) or change one")
+    def clients_save(body: dict, request: Request):
+        try:
+            c, key = client_api.save(body)
+        except client_api.ClientError as e:
+            return {"ok": False, "error": str(e)}
+        log(request, "added a client key" if key else "changed a client key", client=c["name"])
+        return {"ok": True, "client": c, "key": key}
+
+    @app.post("/api/clients/rotate", tags=["client API"], dependencies=admin_only,
+              summary="A new key for a client; the old one stops working at once")
+    def clients_rotate(body: dict, request: Request):
+        try:
+            key = client_api.rotate(str(body.get("id") or ""))
+        except client_api.ClientError as e:
+            return {"ok": False, "error": str(e)}
+        log(request, "renewed a client key", id=str(body.get("id"))[:12])
+        return {"ok": True, "key": key}
+
+    @app.post("/api/clients/delete", tags=["client API"], dependencies=admin_only, summary="Remove a client key")
+    def clients_delete(body: dict, request: Request):
+        ok = client_api.delete(str(body.get("id") or ""))
+        log(request, "removed a client key", id=str(body.get("id"))[:12])
+        return {"ok": ok}
+
     # ---------- news stream reader / client API ----------
     @app.get("/api/articles", tags=["client API"], dependencies=auth,
              summary="Every article in the server's databases (source=all: live stream + News Search / reports; "

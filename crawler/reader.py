@@ -58,11 +58,14 @@ def _topic_query(topic: str) -> str:
 
 
 def articles(q: str = "", topic: str = "", start: str = "", end: str = "", sentiment: str = "",
-             sort: str = "newest", page: int = 1, size: int = 24, source: str = "all") -> dict:
+             sort: str = "newest", page: int = 1, size: int = 24, source: str = "all", scope: str = "",
+             only_key: str = "") -> dict:
     """source: "all" = the live stream + the reporting database (News Search / Keyword / scheduled runs, imported
     files), a link in both shown once; "stream" = the live stream only; "reports" = the reporting database only."""
     source = source if source in SOURCES else "all"
     parts = []
+    if (scope or "").strip():                      # a client key's fixed query: its own part, so q can only narrow it
+        parts.append(f"({fts_query(scope)})")
     if (q or "").strip():
         parts.append(f"({fts_query(q)})")
     if topic:
@@ -81,6 +84,9 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
                 if v:
                     w.append(f"a.pub_date {op} ?")
                     a.append(v)
+            if only_key:
+                w.append("a.key = ?")
+                a.append(only_key)
             join = ""
             if expr:
                 join = "JOIN s.docs d ON d.key = a.key"
@@ -96,6 +102,9 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
                 if v:
                     w.append(f"r.pub_date {op} ?")
                     a.append(v)
+            if only_key:
+                w.append("r.skey = ?")
+                a.append(only_key)
             join = ""
             if expr:
                 join = "JOIN s.rdocs rd ON rd.skey = r.skey"

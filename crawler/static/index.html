@@ -716,6 +716,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
       <div class="sep">System</div>
       <button data-p="schedules"><svg class="i"><use href="#i-cal"/></svg>Schedules<span class="count" id="navSch">0</span></button>
       <button data-p="exports"><svg class="i"><use href="#i-file"/></svg>Exports</button>
+      <button data-p="clients" class="need-admin"><svg class="i"><use href="#i-link"/></svg>Client API</button>
       <button data-p="users" class="need-admin" style="display:none" id="navUsers"><svg class="i"><use href="#i-users"/></svg>Users</button>
       <button data-p="log"><svg class="i"><use href="#i-term"/></svg>Activity Log</button>
     </nav>
@@ -1580,6 +1581,54 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
       <p class="hint" id="schHint" style="margin-top:12px"></p>
     </section>
 
+    <!-- CLIENT API (admin) -->
+    <section class="page" id="p-clients">
+      <div class="pagehead"><div><h1>Client API</h1><p>Give a client their own key: their system reads <b>only their news</b> — no sign-in to this dashboard, no files, nothing of other clients. The key is shown once.</p></div></div>
+      <div class="collect">
+        <div style="display:flex;flex-direction:column;gap:16px">
+          <div class="card"><div class="card-hd"><h3 id="clFormTitle">Add a client</h3><div class="tools"><button class="btn sm" id="clNew" hidden>New client</button></div></div>
+            <div class="card-bd">
+              <div class="field"><label for="clName">Client name</label><input id="clName" maxlength="80" placeholder="e.g. PLN UID Jabar"></div>
+              <div class="field"><label for="clQuery">What they may see — query or keywords</label>
+                <textarea id="clQuery" rows="3" placeholder='pln AND (padam OR gangguan) — or a list: pln, listrik padam, pemadaman'></textarea>
+                <small class="hint">AND · OR · NOT · "exact phrase" · ( ) · prefix*. A plain list (comma / one per line) means any of them.</small></div>
+              <div class="field"><label for="clTopic">…or a report topic</label><select id="clTopic"><option value="">— none —</option></select></div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px">
+                <div class="field"><label for="clSource">Databases</label><select id="clSource"><option value="all">All (Live Stream + News Search)</option><option value="stream">Live Stream only</option><option value="reports">News Search &amp; reports only</option></select></div>
+                <div class="field"><label for="clSince">Data from (optional)</label><input type="date" id="clSince"></div>
+                <div class="field"><label for="clExpires">Key expires (optional)</label><input type="date" id="clExpires"></div>
+                <div class="field"><label for="clRate">Requests per minute</label><input type="number" id="clRate" min="1" max="600" value="60"></div>
+              </div>
+              <div class="field"><label for="clOrigins">Only from these websites (optional)</label><input id="clOrigins" placeholder="https://dashboard.client.id — empty: any website or server">
+                <small class="hint">For a dashboard that calls from the browser. Calls from the client's own server need nothing here.</small></div>
+              <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn primary" id="clSave">Create key</button></div>
+              <div class="alert" id="clMsg"></div>
+            </div></div>
+          <div class="card" id="clKeyCard" hidden><div class="card-hd"><h3>Key for <span id="clKeyFor"></span></h3><span class="tag bad">shown once — copy it now</span></div>
+            <div class="card-bd">
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><code id="clKey" style="font-size:13px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel-2);word-break:break-all;flex:1;min-width:0"></code><button class="btn" id="clCopy">Copy</button></div>
+              <p class="hint" style="margin-top:10px">Send it to the client's IT team privately (not in a group chat). Example for them:</p>
+              <pre id="clEx" style="white-space:pre-wrap;word-break:break-all;font-size:12px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:10px;margin:0"></pre>
+              <div style="display:flex;justify-content:flex-end;margin-top:10px"><button class="btn" id="clKeyDone">I have saved it</button></div>
+            </div></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:16px">
+          <div class="card"><div class="card-hd"><h3>How the client uses it</h3></div>
+            <div class="card-bd" style="font-size:13.5px">
+              <p style="margin:0 0 8px">Every call sends the key in the <code>X-Client-Key</code> header (or <code>Authorization: Bearer …</code>):</p>
+              <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px">
+                <li><code>GET /api/client/articles</code> — their articles, newest first. Optional: <code>q</code> (narrows further, AND / OR / NOT), <code>start</code> / <code>end</code> (YYYY-MM-DD), <code>sentiment</code>, <code>sort</code>, <code>page</code>, <code>size</code> (≤ 100). Also the positive / negative / neutral shares.</li>
+                <li><code>GET /api/client/articles/one?key=…</code> — one article in full (paragraphs, author, spokespersons, people).</li>
+                <li><code>GET /api/client/me</code> — what the key gives.</li>
+              </ul>
+              <p class="hint" style="margin:10px 0 0">Wrong key → 401 · too many calls → 429. <b>New key</b> replaces a leaked one at once; <b>Pause</b> or <b>Delete</b> cuts the access. Prefer pushing instead? Live Stream → Client feeds sends their articles to their server within seconds.</p>
+            </div></div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:16px"><div class="card-hd"><h3>Clients</h3><span class="tag gray" id="clCount">0</span></div>
+        <div class="card-bd" style="overflow-x:auto"><table class="tbl" id="clTbl"><thead><tr><th>Client</th><th>Sees</th><th class="num">Calls</th><th>Last used</th><th></th></tr></thead><tbody></tbody></table></div></div>
+    </section>
+
     <!-- USERS (admin) -->
     <section class="page" id="p-users">
       <div class="pagehead"><div><h1>Users</h1><p>Who may sign in, and what they may do. <b>Viewer</b>: see results and download Excel. <b>Operator</b>: also run searches, schedules, account lists. <b>Admin</b>: also users, platform cookies and the access log.</p></div></div>
@@ -1803,6 +1852,7 @@ function go(p){
   if (p === 'exports'){ loadExports(); if (SERVER && ROLE === 'admin') loadAudit(); }
   if (p === 'schedules') loadSchedules();
   if (p === 'users') loadUsers();
+  if (p === 'clients') loadClients();
   if (p === 'apiscrape') loadApInfo();
   if (p === 'report') loadReport();
   if (p === 'home') loadHome();
@@ -3461,6 +3511,61 @@ async function loadSchedules(){
   tb.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => { const s = schList[+b.dataset.del];
     if (!confirm(`Delete the schedule “${s.name}”?`)) return; await api('/api/schedules/delete', {id: s.id}); loadSchedules(); });
 }
+
+/* ---------- client API keys ---------- */
+let CLK = {list: [], edit: null, topics: []};
+const clDate = t => t ? new Date(t * 1000).toLocaleString('en-GB', {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'}) : 'never';
+async function loadClients(){
+  const [d, tp] = await Promise.all([api('/api/clients'), CLK.topics.length ? null : api('/api/report/topics')]);
+  if (tp && tp.topics){ CLK.topics = tp.topics;
+    $('clTopic').innerHTML = '<option value="">— none —</option>' + tp.topics.map(t => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join(''); }
+  CLK.list = (d && d.clients) || []; $('clCount').textContent = CLK.list.length;
+  const topicName = id => (CLK.topics.find(t => t.id === id) || {}).name || 'topic';
+  $('clTbl').querySelector('tbody').innerHTML = CLK.list.map((c, i) => `<tr>
+      <td><b>${esc(c.name)}</b><br><span class="pill sm ${c.enabled && !c.expired ? '' : 'off'}"><i></i>${c.expired ? 'Expired' : c.enabled ? 'Active' : 'Paused'}</span> <small class="hint">…${esc(c.key_tail || '')}</small></td>
+      <td><small>${c.query ? esc(c.query) : 'Topic: ' + esc(topicName(c.topic))}</small><br><small class="hint">${{all: 'All databases', stream: 'Live Stream', reports: 'News Search'}[c.source] || ''}${c.since ? ' · from ' + esc(c.since) : ''}${c.expires ? ' · until ' + esc(c.expires) : ''} · ${c.rate}/min${(c.origins || []).length ? ' · ' + c.origins.map(o => esc(new URL(o).host)).join(', ') : ''}</small></td>
+      <td class="num">${fmt(c.calls || 0)}</td><td><small>${clDate(c.last_used)}</small></td>
+      <td style="white-space:nowrap"><button class="btn sm" data-cle="${i}">Edit</button> <button class="btn sm" data-clk="${i}">New key</button>
+        <button class="btn sm" data-clp="${i}">${c.enabled ? 'Pause' : 'Resume'}</button> <button class="btn sm ghost" data-cld="${i}" style="color:var(--bad)">Delete</button></td></tr>`).join('')
+    || '<tr><td colspan="5">' + emptyBox('No client keys yet. Add a client on the left — the key appears once.', 'i-link') + '</td></tr>';
+  const tb = $('clTbl');
+  tb.querySelectorAll('[data-cle]').forEach(b => b.onclick = () => clFill(CLK.list[+b.dataset.cle]));
+  tb.querySelectorAll('[data-clk]').forEach(b => b.onclick = async () => { const c = CLK.list[+b.dataset.clk];
+    if (!confirm(`A new key for “${c.name}”? The old key stops working at once.`)) return;
+    const r = await api('/api/clients/rotate', {id: c.id}); if (r.ok) clShowKey(c.name, r.key); else toast(r.error || 'Not changed'); loadClients(); });
+  tb.querySelectorAll('[data-clp]').forEach(b => b.onclick = async () => { const c = CLK.list[+b.dataset.clp];
+    const r = await api('/api/clients/save', {...c, enabled: !c.enabled}); if (!r.ok) toast(r.error || 'Not changed'); loadClients(); });
+  tb.querySelectorAll('[data-cld]').forEach(b => b.onclick = async () => { const c = CLK.list[+b.dataset.cld];
+    if (!confirm(`Delete “${c.name}”? Their key stops working at once.`)) return; await api('/api/clients/delete', {id: c.id}); loadClients(); });
+}
+function clFill(c){
+  CLK.edit = c || null;
+  $('clFormTitle').textContent = c ? `Change “${c.name}”` : 'Add a client'; $('clSave').textContent = c ? 'Save changes' : 'Create key'; $('clNew').hidden = !c;
+  $('clName').value = c ? c.name : ''; $('clQuery').value = c ? c.query : ''; $('clTopic').value = c ? c.topic : '';
+  $('clSource').value = c ? c.source : 'all'; $('clSince').value = c ? c.since : ''; $('clExpires').value = c ? c.expires : '';
+  $('clRate').value = c ? c.rate : 60; $('clOrigins').value = c ? (c.origins || []).join(', ') : ''; $('clMsg').className = 'alert';
+  if (c) $('clName').focus();
+}
+function clShowKey(name, key){
+  const host = location.origin;
+  $('clKeyFor').textContent = name; $('clKey').textContent = key; $('clKeyCard').hidden = false;
+  $('clEx').textContent = `curl -H "X-Client-Key: ${key}" "${host}/api/client/articles?start=${new Date().toISOString().slice(0, 10)}&size=50"\n\n// JavaScript (browser or Node)\nfetch("${host}/api/client/articles?size=50", {headers: {"X-Client-Key": "${key}"}}).then(r => r.json())`;
+  $('clKeyCard').scrollIntoView({behavior: 'smooth', block: 'nearest'});
+}
+$('clCopy').onclick = async () => { try { await navigator.clipboard.writeText($('clKey').textContent); toast('Key copied'); }
+  catch (e){ const r = document.createRange(); r.selectNodeContents($('clKey')); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); toast('Selected — press Ctrl/Cmd+C'); } };
+$('clKeyDone').onclick = () => { $('clKeyCard').hidden = true; $('clKey').textContent = ''; $('clEx').textContent = ''; };
+$('clNew').onclick = () => clFill(null);
+$('clSave').onclick = async () => {
+  const body = {id: CLK.edit ? CLK.edit.id : '', name: $('clName').value.trim(), query: $('clQuery').value.trim(), topic: $('clTopic').value,
+    source: $('clSource').value, since: $('clSince').value, expires: $('clExpires').value, rate: +$('clRate').value || 60,
+    origins: $('clOrigins').value.trim(), enabled: CLK.edit ? CLK.edit.enabled : true};
+  const r = await api('/api/clients/save', body), m = $('clMsg');
+  if (!r.ok){ m.textContent = r.error || 'Not saved'; m.className = 'alert show err'; return; }
+  m.className = 'alert';
+  if (r.key) clShowKey(r.client.name, r.key); else toast('Saved');
+  clFill(null); loadClients();
+};
 
 /* ---------- rights, my account, users ---------- */
 let ROLE = 'admin', ME = null;

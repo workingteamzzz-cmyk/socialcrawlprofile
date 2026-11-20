@@ -377,6 +377,25 @@ Keyword / scheduled run and imported Online file; a link found by both shows onc
 reports only*. Articles from News Search carry a "News Search" tag. Clear both dates to search every day on the server.
 The client API takes the same choice: `&source=all|stream|reports`.
 
+### Client API — a key per client, only their news (recommended)
+
+Sidebar → **Client API** (admins): a client's name, what they may see (a query — `AND` `OR` `NOT` `"phrase"` `( )`,
+or a plain keyword list — or a report topic), which databases, optionally *data from* a date, an expiry date, requests
+per minute and the websites allowed to call from the browser. **Create key** shows the key once (`wtc_…`; only its hash
+is kept). The client needs no account and no sign-in:
+
+```bash
+curl -H "X-Client-Key: wtc_…" "https://app.workingteamzzz.id/api/client/articles?start=2026-11-20&size=50"
+```
+
+- `GET /api/client/articles` — their articles: `q` narrows further (never widens), `start` / `end`, `sentiment`, `sort`,
+  `page`, `size` (≤ 100); with the sentiment shares. `GET /api/client/articles/one?key=…` — one of theirs in full.
+  `GET /api/client/me` — what the key gives.
+- The key reaches nothing else: no files, no dashboard, no other client's articles or keywords. Wrong key → 401 (and
+  too many wrong keys block the address for a while), too many calls → 429.
+- Browser dashboards work without changing `.env` (CORS for these paths, no cookies); "Only from these websites"
+  limits it. **New key** replaces a leaked one at once; **Pause**, an expiry date or **Delete** end the access.
+
 ### Giving a client's dashboard the data (API)
 
 1. Users → add a **viewer** user for the client (e.g. `klien-pln`), then **New API key** — give the key to the client

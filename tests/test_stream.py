@@ -87,17 +87,45 @@ def test_rss_to_queue_to_reader_to_reports(st, monkeypatch):
 
 def test_quiet_and_dead_sources_are_checked_less_often(st, monkeypatch):
     import requests
-    from crawler import stream
     monkeypatch.setattr(requests, "get", lambda *a, **k: (_ for _ in ()).throw(ConnectionError("down")))
     st.x("INSERT INTO sources(id, kind, domain, url, next_check, interval) VALUES ('rss:d','rss','mati.id','https://mati.id/rss',0,600)")
+    ivs = []
     for _ in range(3):
         st.check_source(st.q("SELECT * FROM sources")[0])
+        ivs.append(st.q("SELECT interval FROM sources")[0]["interval"])
     src = st.q("SELECT * FROM sources")[0]
-    assert src["fails"] == 3 and src["interval"] == stream.DEAD_INTERVAL
-    quiet = {"id": "rss:q", "kind": "rss", "interval": 600, "fails": 0, "hits": 0}
-    st.x("INSERT INTO sources(id, kind, domain, url, next_check, interval) VALUES ('rss:q','rss','q.id','u',0,600)")
-    st.reschedule(quiet, 0, False)
-    assert st.q("SELECT interval FROM sources WHERE id='rss:q'")[0]["interval"] == 900
+    assert ivs[:2] == [3600, 3600] and src["fails"] == 3 and src["tier"] == "dead" and src["interval"] == 7 * 86400
+    st.x("INSERT INTO sources(id, kind, domain, url, next_check, interval) VALUES ('sm:q','sitemap','q.id','',0,600)")
+    st.reschedule(st.q("SELECT * FROM sources WHERE id='sm:q'")[0], 0, False)    # first check, nothing recent
+    q = st.q("SELECT tier, interval FROM sources WHERE id='sm:q'")[0]
+    assert q["tier"] == "inactive" and q["interval"] == 3 * 86400
+    st.reschedule(st.q("SELECT * FROM sources WHERE id='sm:q'")[0], 5, False)    # it publishes again: promoted
+    q = st.q("SELECT tier, interval FROM sources WHERE id='sm:q'")[0]
+    assert q["tier"] == "semi" and q["interval"] == 4 * 3600
+
+
+def test_tiers_from_the_last_seven_days(st):
+    from crawler import stream
+    st.cfg = stream.save_settings({"top_n": 50})
+    day = datetime.now(WIB)
+    rows = []
+    for i in range(80):                                              # 80 outlets published this week, 0..79 articles
+        rows.append((f"m{i}.id", day.strftime("%Y-%m-%d"), 80 - i))
+    rows.append(("lama.id", (day - timedelta(days=12)).strftime("%Y-%m-%d"), 4))   # only 12 days ago
+    with st.lock:
+        st._db.executemany("INSERT INTO domain_days VALUES (?,?,?)", rows)
+        st._db.commit()
+    srcs = [f"m{i}.id" for i in range(80)] + ["lama.id", "sepi.id", "baru.id"]
+    for d in srcs:
+        st.x("INSERT INTO sources(id, kind, domain, url, next_check, interval, checked) VALUES (?,?,?,?,?,?,?)",
+             (f"sm:{d}", "sitemap", d, "", time.time() + 9 * 86400, 9 * 86400, 0 if d == "baru.id" else time.time() - 3600))
+    got = st.compute_tiers()
+    assert got["active"] == 50 and got["semi"] == 30 and got["rare"] == 1 and got["inactive"] == 1 and got["new"] == 1
+    tier = {r["domain"]: r for r in st.q("SELECT domain, tier, next_check FROM sources")}
+    assert tier["m0.id"]["tier"] == "active" and tier["m60.id"]["tier"] == "semi" and tier["lama.id"]["tier"] == "rare"
+    assert tier["m0.id"]["next_check"] < time.time() + 3600 + 5        # promoted: checked within the hour, not in 9 days
+    assert tier["sepi.id"]["next_check"] > time.time() + 8 * 86400    # inactive: left alone
+    assert st.status()["tiers"]["active"] == 50
 
 
 def test_settings_limits_and_endpoint_roles(tmp_path, monkeypatch):
@@ -129,3 +157,39 @@ def test_a_found_link_goes_straight_to_the_front_of_the_readers(st):
         assert st.add_found([{"url": "https://a.id/berita/2026/baru-saja-terbit", "domain": "a.id"}], "rss") == 0
     finally:
         st.running = False
+
+
+def test_robots_exclude_and_all_articles_export(st, monkeypatch, tmp_path):
+    import openpyxl
+    import requests
+    from crawler import stream
+    from crawler.medmas import extract
+    st.cfg = stream.save_settings({"exclude_domains": "https://www.dilarang.id/\nlarangan.id"})
+    assert st.cfg["exclude_domains"] == ["dilarang.id", "larangan.id"]
+    monkeypatch.setattr(requests, "get", lambda url, headers=None, timeout=None:
+                        Resp(200, b"", None) if "robots" not in url else
+                        type("R", (), {"status_code": 200, "text": "User-agent: *\nDisallow: /premium/\n"})())
+    read = []
+
+    def fake_extract(url, timeout=20):
+        read.append(url)
+        text = "Isi berita yang cukup panjang untuk dianggap artikel sungguhan oleh pembaca. " * 5
+        return {"url": url, "media": "", "title": "Judul " + url[-6:], "author": "", "date": "2026-11-20",
+                "time": "09:30", "summary": text[:60], "content": text, "image": "", "influencer": "", "persons": "",
+                "organizations": "", "method": "", "error": "", "is_index": False, "is_article": True}
+    monkeypatch.setattr(extract, "extract_article", fake_extract)
+    st.cfg["max_age_hours"] = 24 * 3650
+    jobs = [{"key": k, "url": u, "domain": "", "title": "", "feed_date": "", "feed_time": ""} for k, u in [
+        ("a", "https://www.dilarang.id/berita/satu-dua-tiga"),
+        ("b", "https://boleh.id/premium/berita-berbayar-satu"),
+        ("c", "https://boleh.id/berita/berita-gratis-satu"),
+        ("d", "https://boleh.id/berita/berita-gratis-dua")]]
+    for j in jobs:
+        st.x("INSERT INTO articles(key, url, discovered) VALUES (?,?,?)", (j["key"], j["url"], time.time()))
+    assert [st.read(j) for j in jobs] == ["skipped", "skipped", "success", "success"]
+    assert read == [jobs[2]["url"], jobs[3]["url"]]                    # excluded outlet + robots.txt: never opened
+    name = st.export_day("2026-11-20", str(tmp_path / "out"))
+    ws = openpyxl.load_workbook(tmp_path / "out" / name).active
+    assert [c.value for c in ws[1]][:4] == ["DATE", "TIME", "TITLE", "URL"] and ws.max_row == 3
+    assert ws["A2"].value == "20-Nov-2026" and ws["B2"].value == "09:30:00" and ws["K2"].value.startswith("<p>")
+    assert ws["A1"].fill.fgColor.rgb == "FF15677B" and st.export["rows"] == 2 and not st.export["running"]

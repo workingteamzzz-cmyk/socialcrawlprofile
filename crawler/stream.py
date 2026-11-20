@@ -28,12 +28,24 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 WIB = timezone(timedelta(hours=7))
-DEFAULTS = {"enabled": False, "threads": 16, "discovery_threads": 12, "rss_minutes": 10, "sitemap_minutes": 30,
+DEFAULTS = {"enabled": False, "threads": 16, "discovery_threads": 12, "rss_minutes": 10, "sitemap_minutes": 60,
+            "top_n": 1000, "semi_hours": 4, "rare_hours": 24, "inactive_days": 3, "dead_days": 7,
             "retention_days": 7, "max_age_hours": 48, "domain_gap": 1.5, "rss": True, "sitemaps": True,
-            "keywords": []}
+            "keywords": [], "robots": True, "exclude_domains": []}
 LIMITS = {"threads": (2, 64), "discovery_threads": (2, 48), "rss_minutes": (2, 240), "sitemap_minutes": (10, 720),
+          "top_n": (50, 20000), "semi_hours": (1, 48), "rare_hours": (2, 168), "inactive_days": (1, 30),
+          "dead_days": (1, 60),
           "retention_days": (1, 90), "max_age_hours": (6, 168)}
-MAX_INTERVAL = 6 * 3600              # a quiet source is still checked at least every 6 h
+# Tiers — how often an outlet is checked, from how much it published (new articles found) in the last days:
+#   active    the top `top_n` outlets of the last 7 days     sitemap every `sitemap_minutes` (60), RSS every `rss_minutes` (10)
+#   semi      published in the last 7 days, not in the top    every `semi_hours` (4 h), RSS every hour
+#   rare      nothing in 7 days, something in the last 30     every `rare_hours` (24 h)
+#   inactive  nothing in 30 days (or never)                   every `inactive_days` (3 days)
+#   dead      unreachable 3 times in a row                    every `dead_days` (7 days)
+#   new       never checked yet                               checked once right away, then classified
+# Recomputed every 10 minutes; an outlet that suddenly publishes is promoted at once (semi at least).
+TIERS = ("active", "semi", "rare", "inactive", "dead", "new")
+MAX_INTERVAL = 6 * 3600
 DEAD_INTERVAL = 24 * 3600
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS articles(
@@ -48,9 +60,10 @@ CREATE TABLE IF NOT EXISTS sources(
   id TEXT PRIMARY KEY, kind TEXT, domain TEXT, url TEXT DEFAULT '', next_check REAL, interval REAL,
   hits INTEGER DEFAULT 0, fails INTEGER DEFAULT 0, etag TEXT DEFAULT '', modified TEXT DEFAULT '', checked REAL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS s_next ON sources(next_check);
+CREATE TABLE IF NOT EXISTS domain_days(domain TEXT, day TEXT, n INTEGER DEFAULT 0, PRIMARY KEY(domain, day));
 CREATE TABLE IF NOT EXISTS hourly(
   hour TEXT PRIMARY KEY, found INTEGER DEFAULT 0, read INTEGER DEFAULT 0, failed INTEGER DEFAULT 0,
-  matched INTEGER DEFAULT 0);
+  matched INTEGER DEFAULT 0, skipped INTEGER DEFAULT 0);
 """
 
 
@@ -96,8 +109,11 @@ def save_settings(data: dict) -> dict:
                 raise ValueError(f"{k}: a number from {lo} to {hi}.")
         elif k == "domain_gap":
             v = max(0.5, min(30.0, float(v)))
-        elif k in ("rss", "sitemaps"):
+        elif k in ("rss", "sitemaps", "robots"):
             v = bool(v)
+        elif k == "exclude_domains":
+            items = v if isinstance(v, list) else re.split(r"[\n,\s]+", str(v or ""))
+            v = sorted({re.sub(r"^(https?://)?(www\.)?", "", x.strip().lower()).split("/")[0] for x in items if str(x).strip()})[:2000]
         elif k == "keywords":
             items = v if isinstance(v, list) else re.split(r"[\n,]", str(v or ""))
             v = list(dict.fromkeys(x.strip() for x in items if str(x).strip()))[:500]
@@ -125,13 +141,22 @@ class Stream:
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA synchronous=NORMAL")
         self._db.executescript(SCHEMA)
+        for sql in ("ALTER TABLE hourly ADD COLUMN skipped INTEGER DEFAULT 0",          # databases from v23
+                    "ALTER TABLE sources ADD COLUMN tier TEXT DEFAULT 'new'"):
+            try:
+                self._db.execute(sql)
+            except sqlite3.OperationalError:
+                pass
         self._db.commit()
         self.lock = threading.RLock()
         self.stop_event = threading.Event()
         self.threads: list[threading.Thread] = []
         self.running = False
         self.started = 0.0
-        self.counts = {"found": 0, "read": 0, "failed": 0, "matched": 0}   # this hour, flushed every few seconds
+        self.counts = {"found": 0, "read": 0, "failed": 0, "matched": 0, "skipped": 0}   # this hour, flushed often
+        self.robots: dict = {}
+        self.tiers: dict = {}                  # domain -> tier (recomputed every 10 minutes)
+        self.export = {"running": False, "done": 0, "total": 0, "file": "", "error": ""}
         self.recent = deque(maxlen=50000)       # timestamps of articles read (rate per minute)
         self.inflight_sources: set = set()
         self.queued: set = set()               # article keys handed to the readers
@@ -163,8 +188,9 @@ class Stream:
             c, self.counts = self.counts, {k: 0 for k in self.counts}
             if any(c.values()):
                 self._db.execute("INSERT INTO hourly(hour) VALUES (?) ON CONFLICT(hour) DO NOTHING", (_hour(),))
-                self._db.execute("UPDATE hourly SET found=found+?, read=read+?, failed=failed+?, matched=matched+? "
-                                 "WHERE hour=?", (c["found"], c["read"], c["failed"], c["matched"], _hour()))
+                self._db.execute("UPDATE hourly SET found=found+?, read=read+?, failed=failed+?, matched=matched+?, "
+                                 "skipped=skipped+? WHERE hour=?",
+                                 (c["found"], c["read"], c["failed"], c["matched"], c["skipped"], _hour()))
                 self._db.commit()
 
     # ----- sources -----
@@ -210,18 +236,73 @@ class Stream:
         return self.q(f"SELECT * FROM sources WHERE next_check <= ? AND kind IN ({','.join('?' * len(kinds))}) "
                       "ORDER BY next_check LIMIT ?", (time.time(), *kinds, limit))
 
+    def interval(self, kind: str, tier: str) -> float:
+        c = self.cfg
+        sm = {"active": c["sitemap_minutes"] * 60, "semi": c["semi_hours"] * 3600, "rare": c["rare_hours"] * 3600,
+              "inactive": c["inactive_days"] * 86400, "dead": c["dead_days"] * 86400, "new": c["sitemap_minutes"] * 60}
+        if kind == "rss":                                   # a feed is almost free to check (304): more often
+            return {"active": c["rss_minutes"] * 60, "semi": min(sm["semi"], 3600)}.get(tier, sm[tier])
+        return sm[tier]
+
+    def tier_of(self, src) -> str:
+        t = self.tiers.get(src["domain"])
+        if t:
+            return t
+        try:
+            return src["tier"] or "new"
+        except (IndexError, KeyError):
+            return "new"
+
     def reschedule(self, src, new: int, failed: bool, extra: dict | None = None) -> None:
-        base = (self.cfg["rss_minutes"] if src["kind"] == "rss" else self.cfg["sitemap_minutes"]) * 60
+        tier = self.tier_of(src)
         fails = (src["fails"] + 1) if failed else 0
         if failed:
-            iv = DEAD_INTERVAL if fails >= 3 else min(MAX_INTERVAL, base * 2 ** fails)
-        elif new:
-            iv = base
+            tier = "dead" if fails >= 3 else tier
+            iv = self.interval(src["kind"], tier) if fails >= 3 else min(3600 * fails, self.interval(src["kind"], tier))
         else:
-            iv = min(MAX_INTERVAL, max(base, (src["interval"] or base) * 1.5))     # quiet: check less often
+            if new and tier in ("rare", "inactive", "new", "dead"):
+                tier = "semi"                                # it publishes again: promoted right away
+            elif not new and tier == "new":
+                tier = "inactive"                            # first check found nothing recent
+            iv = self.interval(src["kind"], tier)
+        if tier in ("semi", "inactive", "dead") and not failed:
+            with self.lock:
+                if self.tiers.get(src["domain"]) in (None, "new", "rare", "inactive", "dead"):
+                    self.tiers[src["domain"]] = tier
         sets = {"next_check": time.time() + iv * random.uniform(0.9, 1.1), "interval": iv, "fails": fails,
-                "checked": time.time(), "hits": src["hits"] + new, **(extra or {})}
+                "checked": time.time(), "hits": src["hits"] + new, "tier": tier, **(extra or {})}
         self.x(f"UPDATE sources SET {', '.join(k + '=?' for k in sets)} WHERE id=?", (*sets.values(), src["id"]))
+
+    def compute_tiers(self) -> dict:
+        """Rank the outlets by new articles found in the last 7 days: the top `top_n` are active, the rest of the
+        7-day publishers semi, 30-day publishers rare, the others inactive; unreachable ones stay dead. Sources whose
+        tier now asks for an earlier check are moved forward."""
+        today = datetime.now(WIB)
+        d7, d30 = (today - timedelta(days=6)).strftime("%Y-%m-%d"), (today - timedelta(days=29)).strftime("%Y-%m-%d")
+        c7 = {r["domain"]: r["n"] for r in self.q("SELECT domain, SUM(n) n FROM domain_days WHERE day >= ? "
+                                                    "GROUP BY domain HAVING n > 0", (d7,))}
+        c30 = {r["domain"] for r in self.q("SELECT domain FROM domain_days WHERE day >= ? GROUP BY domain "
+                                            "HAVING SUM(n) > 0", (d30,))}
+        ranked = sorted(c7, key=lambda d: -c7[d])
+        top = set(ranked[:self.cfg["top_n"]])
+        rows = self.q("SELECT domain, MAX(fails) f, MAX(checked) c FROM sources GROUP BY domain")
+        tiers = {}
+        for r in rows:
+            d = r["domain"]
+            tiers[d] = ("active" if d in top else "semi" if d in c7 else "rare" if d in c30 else
+                        "dead" if (r["f"] or 0) >= 3 else "inactive" if r["c"] else "new")
+        with self.lock:
+            self.tiers = tiers
+            for t in TIERS:
+                doms = [d for d, x in tiers.items() if x == t]
+                if doms:
+                    self._db.executemany("UPDATE sources SET tier=? WHERE domain=?", [(t, d) for d in doms])
+            for kind in ("rss", "sitemap"):                 # promoted: the next check comes sooner
+                for t in ("active", "semi", "rare"):
+                    self._db.execute("UPDATE sources SET next_check = MIN(next_check, checked + ?) "
+                                     "WHERE kind=? AND tier=? AND checked > 0", (self.interval(kind, t), kind, t))
+            self._db.commit()
+        return {t: sum(1 for x in tiers.values() if x == t) for t in TIERS}
 
     def add_found(self, items: list[dict], source: str) -> int:
         """New article links -> the reading queue. Only articles, only recent ones (max_age_hours)."""
@@ -246,6 +327,12 @@ class Stream:
                                        "feed_time, discovered) VALUES (?,?,?,?,?,?,?,?)", row)
                 if cur.rowcount:
                     fresh.append(row)
+            per_dom: dict = {}
+            for row in fresh:
+                per_dom[row[2]] = per_dom.get(row[2], 0) + 1
+            day = datetime.now(WIB).strftime("%Y-%m-%d")
+            self._db.executemany("INSERT INTO domain_days(domain, day, n) VALUES (?,?,?) ON CONFLICT(domain, day) "
+                                 "DO UPDATE SET n = n + excluded.n", [(d, day, n) for d, n in per_dom.items() if d])
             self._db.commit()
             self.counts["found"] += len(fresh)
             if self.running:                     # straight to the readers, at the front: newest first, no waiting
@@ -334,6 +421,9 @@ class Stream:
         return self.add_found(items, "sitemap"), False, extra
 
     def check_source(self, src) -> int:
+        if self.excluded("https://" + (src["domain"] or "")):           # an excluded outlet: not even its feed
+            self.x("UPDATE sources SET next_check=?, checked=? WHERE id=?", (time.time() + DEAD_INTERVAL, time.time(), src["id"]))
+            return 0
         try:
             new, failed, extra = (self.check_rss if src["kind"] == "rss" else self.check_sitemap)(src)
         except Exception as e:  # noqa: BLE001
@@ -387,9 +477,43 @@ class Stream:
         self.kw_cache = (time.time(), kws)
         return kws
 
+    def excluded(self, url: str) -> bool:
+        host = norm_key(url).split("/")[0].split(":")[0]
+        return any(host == d or host.endswith("." + d) for d in self.cfg.get("exclude_domains") or [])
+
+    def robots_ok(self, url: str) -> bool:
+        """The outlet's robots.txt allows this page (read once a day per outlet; no robots.txt = allowed)."""
+        if not self.cfg.get("robots", True):
+            return True
+        from urllib import robotparser
+        from urllib.parse import urlparse
+        p = urlparse(url)
+        base = f"{p.scheme}://{p.netloc}"
+        with self.lock:
+            hit = self.robots.get(base)
+        if not hit or time.time() - hit[0] > 86400:
+            rp = None
+            try:
+                import requests
+                from .medmas.discovery import _HEADERS
+                r = requests.get(base + "/robots.txt", headers=_HEADERS, timeout=8)
+                if r.status_code == 200 and r.text:
+                    rp = robotparser.RobotFileParser()
+                    rp.parse(r.text.splitlines())
+            except Exception:  # noqa: BLE001  unreachable robots.txt: allowed, like search engines do
+                rp = None
+            hit = (time.time(), rp)
+            with self.lock:
+                self.robots[base] = hit
+        return hit[1] is None or hit[1].can_fetch("*", url)
+
     def read(self, job: dict) -> str:
         from .medmas.extract import extract_article
         from .medmas.filters import keyword_excluded, keyword_match, url_slug
+        if self.excluded(job["url"]) or not self.robots_ok(job["url"]):
+            self.x("UPDATE articles SET status='skipped', fetched=? WHERE key=?", (time.time(), job["key"]))
+            self.bump("skipped")
+            return "skipped"
         res = extract_article(job["url"], 20)
         d = str(res.get("date") or "")[:10] or job.get("feed_date") or ""
         t = str(res.get("time") or "")[:5] or job.get("feed_time") or ""
@@ -478,10 +602,16 @@ class Stream:
                 self.inflight_sources.discard(src["id"])
 
     def house_loop(self) -> None:
-        last_purge = 0.0
+        last_purge = last_tiers = 0.0
         while not self.stop_event.is_set():
             self.flush_counts()
             self.refill()
+            if time.time() - last_tiers > 600:
+                last_tiers = time.time()
+                try:
+                    self.compute_tiers()
+                except sqlite3.Error as e:
+                    self.last_error = f"tiers: {e}"
             if time.time() - last_purge > 1800:
                 last_purge = time.time()
                 self.purge()
@@ -494,7 +624,72 @@ class Stream:
         n = self.x("DELETE FROM articles WHERE discovered < ?", (cut,))
         day = (datetime.now(WIB) - timedelta(days=max(30, self.cfg["retention_days"]))).strftime("%Y-%m-%d")
         self.x("DELETE FROM hourly WHERE hour < ?", (day,))
+        self.x("DELETE FROM domain_days WHERE day < ?", ((datetime.now(WIB) - timedelta(days=35)).strftime("%Y-%m-%d"),))
         return n
+
+    # ----- every article of a day -> the team's Online file -----
+    def export_day(self, day: str, out_dir: str) -> str:
+        """All articles published on `day` (YYYY-MM-DD) read by the stream -> one Online Excel (the uploader's
+        cleaning rules), written row by row so even 100,000+ articles fit in memory. Returns the file name."""
+        from openpyxl import Workbook
+        from openpyxl.cell import WriteOnlyCell
+        from openpyxl.styles import Alignment, Font, PatternFill
+        from openpyxl.styles.colors import Color
+        from . import templates, online_clean as oc
+        if not re.match(r"\d{4}-\d{2}-\d{2}$", day or ""):
+            raise ValueError("Date as YYYY-MM-DD.")
+        total = self.q("SELECT COUNT(*) n FROM articles WHERE status='success' AND pub_date=?", (day,))[0]["n"]
+        with self.lock:
+            self.export = {"running": True, "done": 0, "total": total, "file": "", "error": "", "day": day}
+        name = f"Stream_All_{day.replace('-', '')}_{datetime.now(WIB):%H%M}.xlsx"
+        os.makedirs(out_dir, exist_ok=True)
+        wb = Workbook(write_only=True)
+        ws = wb.create_sheet("Sheet1")
+        ws.sheet_view.zoomScale = 80
+        for i, w in enumerate(templates.ONLINE_WIDTHS, 1):
+            ws.column_dimensions[chr(64 + i)].width = w
+        font = Font(name="Calibri", size=9, bold=True, color=Color(theme=0))
+        teal, grey = PatternFill("solid", fgColor="FF15677B"), PatternFill("solid", fgColor=Color(theme=0, tint=-0.5))
+        head = []
+        for c in templates.ONLINE_COLUMNS:
+            cell = WriteOnlyCell(ws, value=c)
+            cell.font, cell.alignment = font, Alignment(horizontal="left", vertical="center")
+            cell.fill = grey if c in ("INFLUENCER", "PERSON", "SUMMARY") else teal
+            head.append(cell)
+        ws.append(head)
+        seen, last = set(), 0
+        try:
+            while True:
+                rows = self.q("SELECT rowid, * FROM articles WHERE status='success' AND pub_date=? AND rowid > ? "
+                              "ORDER BY rowid LIMIT 500", (day, last))
+                if not rows:
+                    break
+                for r in rows:
+                    last = r["rowid"]
+                    text = zlib.decompress(r["content"]).decode("utf-8", "ignore") if r["content"] else ""
+                    t = r["pub_time"] or ""
+                    row = templates.online_row({
+                        "url": r["url"], "title": r["title"], "author": r["author"], "text": text,
+                        "description": r["summary"], "image": r["image"], "influencer": r["influencer"],
+                        "person": r["persons"], "published": day,
+                        "published_full": f"{day} {t}" if re.match(r"\d{2}:\d{2}$", t) else ""}, WIB)
+                    u = row[3]
+                    if u in seen or not (row[10] or "").strip():
+                        continue
+                    seen.add(u)
+                    ws.append([oc.safe_cell(v, templates.ONLINE_COLUMNS[k]) for k, v in enumerate(row)])
+                with self.lock:
+                    self.export["done"] = min(total, self.export["done"] + len(rows))
+            tmp = os.path.join(out_dir, name + ".tmp")
+            wb.save(tmp)
+            os.replace(tmp, os.path.join(out_dir, name))
+        except Exception as e:  # noqa: BLE001
+            with self.lock:
+                self.export.update(running=False, error=str(e)[:200])
+            raise
+        with self.lock:
+            self.export.update(running=False, done=total, file=name, rows=len(seen))
+        return name
 
     # ----- control -----
     def start(self, log=print) -> None:
@@ -540,8 +735,9 @@ class Stream:
         for h in hours:
             r = got.get(h, {})
             series.append({"hour": h, **{k: int(r.get(k, 0)) + (live[k] if h == _hour() else 0)
-                                         for k in ("found", "read", "failed", "matched")}})
-        day = {k: sum(s[k] for s in series if s["hour"].startswith(today)) for k in ("found", "read", "failed", "matched")}
+                                         for k in ("found", "read", "failed", "matched", "skipped")}})
+        day = {k: sum(s[k] for s in series if s["hour"].startswith(today))
+               for k in ("found", "read", "failed", "matched", "skipped")}
         src = {r["kind"]: dict(r) for r in self.q(
             "SELECT kind, COUNT(*) n, SUM(fails >= 3) dead, SUM(hits > 0) productive, SUM(checked > 0) checked "
             "FROM sources GROUP BY kind")}
@@ -562,7 +758,11 @@ class Stream:
                 "stored": self.q("SELECT COUNT(*) n FROM articles WHERE status='success'")[0]["n"],
                 "per_minute": round(per_min, 1), "per_day_pace": int(per_min * 60 * 24), "today": day,
                 "hourly": series, "sources": src, "keywords": len(self.keywords()), "db_mb": round(size / 1e6, 1),
-                "readers_busy": len(self.busy_domains), "last_error": self.last_error,
+                "tiers": {r["tier"] or "new": r["n"] for r in self.q(
+                    "SELECT tier, COUNT(DISTINCT domain) n FROM sources GROUP BY tier")},
+                "readers_busy": len(self.busy_domains), "last_error": self.last_error, "export": dict(self.export),
+                "days": [r["d"] for r in self.q("SELECT DISTINCT pub_date d FROM articles WHERE status='success' "
+                                                 "AND pub_date != '' ORDER BY d DESC LIMIT 14")],
                 "latest": [dict(r) for r in rows]}
 
 
@@ -615,3 +815,22 @@ def apply(data: dict, log=print) -> dict:
     if isinstance(data.get("enabled"), bool):
         out = set_enabled(data["enabled"], log)
     return {**settings(), **out}
+
+
+def start_export(day: str) -> dict:
+    """In the background: the dashboard shows the progress, the file lands in Exports."""
+    from .paths import OUTPUT_DIR
+    s = get()
+    if s.export.get("running"):
+        return {"ok": False, "error": "An export is already running."}
+    if not re.match(r"\d{4}-\d{2}-\d{2}$", day or ""):
+        return {"ok": False, "error": "Date as YYYY-MM-DD."}
+    threading.Thread(target=lambda: _quiet(s.export_day, day, OUTPUT_DIR), daemon=True).start()
+    return {"ok": True}
+
+
+def _quiet(fn, *a):
+    try:
+        fn(*a)
+    except Exception:  # noqa: BLE001  the error is in s.export
+        pass

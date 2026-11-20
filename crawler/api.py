@@ -243,9 +243,20 @@ class StreamSettings(BaseModel):
     retention_days: int | None = Field(None, description="articles kept in the stream database for … days")
     max_age_hours: int | None = Field(None, description="only articles published in the last … hours")
     domain_gap: float | None = Field(None, description="seconds between two pages of the same outlet")
+    top_n: int | None = Field(None, description="active outlets = the top N of the last 7 days")
+    semi_hours: int | None = None
+    rare_hours: int | None = None
+    inactive_days: int | None = None
+    dead_days: int | None = None
     rss: bool | None = None
     sitemaps: bool | None = None
     keywords: list[str] | str | None = Field(None, description="stream keywords (report topics are added)")
+    robots: bool | None = Field(None, description="respect each outlet's robots.txt (default on)")
+    exclude_domains: list[str] | str | None = Field(None, description="outlets the stream never reads")
+
+
+class StreamExport(BaseModel):
+    day: str = Field(..., description="YYYY-MM-DD: every article published that day, as one Online Excel")
 
 
 class TelegramSettings(BaseModel):
@@ -734,6 +745,15 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
     def stream_get(q: str = "", latest: int = 30):
         from . import stream
         return stream.get().status(max(1, min(latest, 200)), q.strip()[:100])
+
+    @app.post("/api/stream/export", tags=["stream"], dependencies=op,
+              summary="Every article of a day from the stream -> one Online Excel (in Exports)")
+    def stream_export(body: StreamExport, request: Request):
+        from . import stream
+        out = stream.start_export(body.day)
+        if out.get("ok"):
+            log(request, "exported the news stream", day=body.day)
+        return out
 
     @app.post("/api/stream", tags=["stream"], dependencies=admin_only, summary="Start / stop the stream, set its numbers")
     def stream_set(body: StreamSettings, request: Request):

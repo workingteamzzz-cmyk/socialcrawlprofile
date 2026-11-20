@@ -293,8 +293,23 @@ running (also after a restart) and reads every new article from the registered m
 
 - **RSS engine** — every working RSS feed of the media dictionary (curated + all feeds the multi-source engine has
   discovered) is checked every 10 minutes; an unchanged feed answers "304 not modified" (almost free).
-- **Sitemap engine** — every outlet's news sitemap (~12,000 outlets) every 30 minutes; outlets with nothing new are
-  checked less often (up to every 6 h), unreachable ones once a day, so the busy outlets get the attention.
+- **Sitemap engine** — every outlet's news sitemap (~12,000 outlets), how often depends on the outlet's tier.
+- **Tiers** — every 10 minutes the outlets are ranked by the new articles they published in the last 7 days:
+
+  | Tier | Who | Sitemap | RSS |
+  | --- | --- | --- | --- |
+  | Active | the top 1,000 of the last 7 days | every hour | every 10 min |
+  | Semi-active | published in the last 7 days, not in the top | every 4 h | every hour |
+  | Rare | nothing in 7 days, something in 30 | every 24 h | every 24 h |
+  | Inactive | nothing in 30 days | every 3 days | every 3 days |
+  | Unreachable | failed 3 times in a row | every 7 days | every 7 days |
+
+  A new outlet is checked once right away; an outlet that publishes again is promoted at once. All numbers can be
+  changed under Live Stream → Stream settings.
+- **Safety** — each outlet's robots.txt is respected (pages it disallows are never opened), outlets can be excluded
+  completely (e.g. one that forbids crawling without permission), one page at a time per outlet with a pause.
+- **Every article of a day** — *Download every article of a day* writes one Online Excel (the uploader's rules) of
+  everything the stream read for that day, even 100,000+ articles; it lands in Exports.
 - **Readers** — 16 threads (2–64) read the new articles newest-first: one page at a time per outlet with a pause
   between pages, so no outlet is hammered.
 - Every article read is kept in the stream database (7 days, adjustable). Articles matching a **stream keyword or any

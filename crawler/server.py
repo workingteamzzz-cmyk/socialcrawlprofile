@@ -205,6 +205,9 @@ class Handler(BaseHTTPRequestHandler):
                 err = get().run_now(data.get("id", ""))
             except ScheduleError as e:
                 return self._json({"ok": False, "error": str(e)})
+        elif u.path == "/api/stream/export":
+            from . import stream
+            return self._json(stream.start_export(str(data.get("day") or "")))
         elif u.path == "/api/stream":
             from . import stream
             try:

@@ -1083,21 +1083,32 @@ body{font-feature-settings:"tnum" 1,"cv11" 1;letter-spacing:-.003em}
           <div class="card-bd"><div class="chart" id="lsChStream"></div></div></div>
         <div class="card"><div class="card-hd"><h3>Engines</h3></div><div class="card-bd" id="lsStEngines"></div></div>
       </div>
+      <div class="card" style="margin-bottom:16px"><div class="card-hd"><h3>Download every article of a day</h3><span class="hd-note">the team's Online layout · lands in Exports</span></div>
+        <div class="card-bd" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <select class="select" id="lsDay" style="max-width:200px"></select>
+          <button class="btn primary need-op" id="lsExport"><svg class="i"><use href="#i-dl"/></svg>Make the Excel</button>
+          <span class="hint" id="lsExpMsg"></span></div></div>
       <div class="card"><div class="card-hd"><h3>Latest articles</h3><input class="search" id="lsStQ" placeholder="Filter by title or keyword…" style="margin-left:auto;max-width:280px;height:32px"></div>
         <div class="tbl-wrap"><table class="tbl dtbl"><thead><tr><th style="width:110px">Published</th><th>Title</th><th style="width:180px">Media</th><th style="width:200px">Keyword</th></tr></thead><tbody id="lsStBody"></tbody></table></div></div>
       <div class="card need-admin" style="margin-top:16px"><div class="card-hd"><h3>Stream settings</h3><span class="hd-note">admins</span></div><div class="card-bd">
         <div class="grid2" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px">
           <div class="field"><label for="lsSfThreads">Article readers (threads)</label><input id="lsSfThreads" type="number" min="2" max="64"></div>
-          <div class="field"><label for="lsSfRss">Check each RSS feed every (minutes)</label><input id="lsSfRss" type="number" min="2" max="240"></div>
-          <div class="field"><label for="lsSfSm">Check each outlet sitemap every (minutes)</label><input id="lsSfSm" type="number" min="10" max="720"></div>
+          <div class="field"><label for="lsSfRss">RSS feeds of active outlets: every (minutes)</label><input id="lsSfRss" type="number" min="2" max="240"></div>
+          <div class="field"><label for="lsSfTop">Active outlets = the top … of the last 7 days</label><input id="lsSfTop" type="number" min="50" max="20000"></div>
+          <div class="field"><label for="lsSfSm">Active: check every (minutes)</label><input id="lsSfSm" type="number" min="10" max="720"></div>
+          <div class="field"><label for="lsSfSemi">Semi-active: every (hours)</label><input id="lsSfSemi" type="number" min="1" max="48"></div>
+          <div class="field"><label for="lsSfRare">Rare (nothing in 7 days): every (hours)</label><input id="lsSfRare" type="number" min="2" max="168"></div>
+          <div class="field"><label for="lsSfIn">Inactive (nothing in 30 days): every (days)</label><input id="lsSfIn" type="number" min="1" max="30"></div>
+          <div class="field"><label for="lsSfDead">Unreachable: every (days)</label><input id="lsSfDead" type="number" min="1" max="60"></div>
           <div class="field"><label for="lsSfAge">Only articles from the last (hours)</label><input id="lsSfAge" type="number" min="6" max="168"></div>
           <div class="field"><label for="lsSfRet">Keep articles in the stream for (days)</label><input id="lsSfRet" type="number" min="1" max="90"></div>
           <div class="field"><label for="lsSfGap">Pause between pages of one outlet (seconds)</label><input id="lsSfGap" type="number" min="0.5" max="30" step="0.5"></div>
         </div>
         <div class="field" style="margin-top:12px"><label for="lsSfKw">Stream keywords (one per line; every report topic is added automatically)</label><textarea id="lsSfKw" rows="4" placeholder="banjir&#10;pemadaman listrik&#10;&quot;air bersih&quot; NOT iklan"></textarea></div>
-        <div style="display:flex;gap:18px;margin:6px 0 14px;flex-wrap:wrap"><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfUseRss"> RSS engine</label><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfUseSm"> Sitemap engine</label></div>
+        <div class="field" style="margin-top:12px"><label for="lsSfEx">Never read these outlets (one per line, e.g. a media that forbids crawling without permission)</label><textarea id="lsSfEx" rows="3" placeholder="antaranews.com"></textarea></div>
+        <div style="display:flex;gap:18px;margin:6px 0 14px;flex-wrap:wrap"><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfUseRss"> RSS engine</label><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfUseSm"> Sitemap engine</label><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfRobots"> Respect each outlet's robots.txt (recommended)</label></div>
         <button class="btn primary" id="lsSfSave">Save settings</button> <span class="hint" id="lsSfMsg"></span>
-        <p class="hint">Quiet outlets are checked less often (up to every 6 h) and unreachable ones once a day, so the busy outlets get the attention. One page at a time per outlet, with the pause above — nobody is hammered. More readers = faster, as long as the server has CPU to spare.</p>
+        <p class="hint">Outlets are ranked every 10 minutes by the new articles they published in the last 7 days: the top ones are checked most often, quiet ones less, unreachable ones rarely — and an outlet that starts publishing again is promoted at once. RSS feeds of active outlets are checked more often (an unchanged feed costs almost nothing). One page at a time per outlet, with the pause above — nobody is hammered. More readers = faster, as long as the server has CPU to spare.</p>
       </div></div>
     </section>
 
@@ -2470,13 +2481,19 @@ async function loadStream(){
   $('lsStToggle').textContent = d.running ? 'Stop stream' : 'Start stream'; $('lsStToggle').classList.toggle('primary', !d.running);
   $('navStream').textContent = d.running ? '●' : '';
   $('lsStRet').textContent = cfg.retention_days;
-  $('lsSRead').textContent = fmt(d.today.read); $('lsSReadS').textContent = `${fmt(d.today.failed)} could not be read · ${fmt(d.stored)} stored`;
+  $('lsSRead').textContent = fmt(d.today.read); $('lsSReadS').textContent = `${fmt(d.today.failed)} could not be read · ${fmt(d.today.skipped || 0)} skipped (robots.txt / excluded) · ${fmt(d.stored)} stored`;
   $('lsSPace').textContent = fmt(d.per_minute) + ' /min'; $('lsSPaceS').textContent = d.running ? `≈ ${fmt(d.per_day_pace)} per day at this pace` : 'stream is stopped';
   $('lsSMatch').textContent = fmt(d.today.matched); $('lsSMatchS').textContent = `${d.keywords} keyword(s) incl. report topics`;
   $('lsSQueue').textContent = fmt(d.queue); $('lsSQueueS').textContent = `${fmt(d.today.found)} new links found today`;
   const sr = d.sources || {}, row = (k, label) => { const x = sr[k] || {}; return `<div class="hs-foot" style="border-top:0;padding:4px 0"><span><b style="font-size:13px!important">${label}</b></span><b>${fmt(x.n || 0)}</b></div>
-    <div class="hs-foot"><span>checked so far</span><b>${fmt(x.checked || 0)}</b></div><div class="hs-foot"><span>with new articles</span><b>${fmt(x.productive || 0)}</b></div><div class="hs-foot"><span>unreachable (checked daily)</span><b>${fmt(x.dead || 0)}</b></div>`; };
-  $('lsStEngines').innerHTML = row('rss', 'RSS feeds') + '<div style="height:14px"></div>' + row('sitemap', 'Outlet sitemaps') +
+    <div class="hs-foot"><span>checked so far</span><b>${fmt(x.checked || 0)}</b></div><div class="hs-foot"><span>with new articles</span><b>${fmt(x.productive || 0)}</b></div><div class="hs-foot"><span>unreachable</span><b>${fmt(x.dead || 0)}</b></div>`; };
+  const tr = d.tiers || {}, every = m => m >= 1440 ? `${+(m / 1440).toFixed(1)} day${m >= 2880 ? 's' : ''}` : m >= 60 ? `${+(m / 60).toFixed(1)} h` : `${m} min`;
+  const tiers = [['active', `Active (top ${fmt(cfg.top_n)})`, every(cfg.sitemap_minutes), '#16a34a'], ['semi', 'Semi-active', every(cfg.semi_hours * 60), '#2a78d6'],
+    ['rare', 'Rare', every(cfg.rare_hours * 60), '#e0a100'], ['inactive', 'Inactive', every(cfg.inactive_days * 1440), '#8a92a3'],
+    ['dead', 'Unreachable', every(cfg.dead_days * 1440), '#d03b3b'], ['new', 'Not checked yet', 'first check soon', '#c3c2b7']];
+  $('lsStEngines').innerHTML = `<div class="sub-hd" style="margin-top:0;padding-top:0;border:0">Outlets by activity</div>` +
+    tiers.map(([k, l, e, c]) => `<div class="hs-foot"><span style="display:flex;align-items:center;gap:7px"><i style="width:8px;height:8px;border-radius:2px;background:${c}"></i>${l} <small style="color:var(--faint)">· ${e}</small></span><b>${fmt(tr[k] || 0)}</b></div>`).join('') +
+    '<div style="height:14px"></div>' + row('rss', 'RSS feeds') + '<div style="height:14px"></div>' + row('sitemap', 'Outlet sitemaps') +
     `<div class="hs-foot" style="margin-top:14px"><span>Readers busy</span><b>${d.readers_busy} / ${cfg.threads}</b></div><div class="hs-foot"><span>Stream database</span><b>${fmt(d.db_mb)} MB</b></div>` +
     (d.last_error ? `<p class="hint" style="margin-top:10px">Last problem: ${esc(d.last_error)}</p>` : '');
   drawStream(d);
@@ -2485,9 +2502,18 @@ async function loadStream(){
     <td>${r.matched ? r.matched.split(', ').map(k => `<span class="badge b-ok" style="margin:1px">${esc(k)}</span>`).join('') : '<span class="hint">—</span>'}</td></tr>`).join('')
     : `<tr><td colspan="4" class="empty-s">${d.running ? 'Starting up — the first articles arrive within minutes.' : 'Start the stream to read every new article from the registered media.'}</td></tr>`;
   if (!loadStream.filled){ loadStream.filled = true;
-    $('lsSfThreads').value = cfg.threads; $('lsSfRss').value = cfg.rss_minutes; $('lsSfSm').value = cfg.sitemap_minutes; $('lsSfAge').value = cfg.max_age_hours;
+    $('lsSfThreads').value = cfg.threads; $('lsSfRss').value = cfg.rss_minutes; $('lsSfSm').value = cfg.sitemap_minutes;
+    $('lsSfTop').value = cfg.top_n; $('lsSfSemi').value = cfg.semi_hours; $('lsSfRare').value = cfg.rare_hours; $('lsSfIn').value = cfg.inactive_days; $('lsSfDead').value = cfg.dead_days; $('lsSfAge').value = cfg.max_age_hours;
     $('lsSfRet').value = cfg.retention_days; $('lsSfGap').value = cfg.domain_gap; $('lsSfKw').value = (cfg.keywords || []).join('\n');
-    $('lsSfUseRss').checked = !!cfg.rss; $('lsSfUseSm').checked = !!cfg.sitemaps; }
+    $('lsSfUseRss').checked = !!cfg.rss; $('lsSfUseSm').checked = !!cfg.sitemaps; $('lsSfRobots').checked = cfg.robots !== false;
+    $('lsSfEx').value = (cfg.exclude_domains || []).join('\n'); }
+  const days = d.days || [], cur = $('lsDay').value;
+  $('lsDay').innerHTML = days.length ? days.map(x => `<option value="${x}">${new Date(x + 'T00:00:00').toLocaleDateString([], {weekday: 'short', day: '2-digit', month: 'short', year: 'numeric'})}</option>`).join('') : '<option value="">No articles yet</option>';
+  if (cur && days.includes(cur)) $('lsDay').value = cur;
+  const ex = d.export || {};
+  $('lsExpMsg').innerHTML = ex.running ? `Making the file… ${fmt(ex.done)} of ${fmt(ex.total)} articles` :
+    ex.error ? `Not made: ${esc(ex.error)}` : ex.file ? `Ready: <a href="/download/${encodeURIComponent(ex.file)}">${esc(ex.file)}</a> (${fmt(ex.rows || 0)} articles)` : '';
+  $('lsExport').disabled = !!ex.running || !days.length;
 }
 $('lsStToggle').onclick = async () => { if (!ST) return;
   const r = await api('/api/stream', {enabled: !ST.running}); if (r && r.ok === false) return toast(r.error || 'Not changed');
@@ -2495,8 +2521,12 @@ $('lsStToggle').onclick = async () => { if (!ST) return;
 $('lsSfSave').onclick = async () => {
   const r = await api('/api/stream', {threads: +$('lsSfThreads').value, rss_minutes: +$('lsSfRss').value, sitemap_minutes: +$('lsSfSm').value,
     max_age_hours: +$('lsSfAge').value, retention_days: +$('lsSfRet').value, domain_gap: +$('lsSfGap').value, keywords: $('lsSfKw').value,
-    rss: $('lsSfUseRss').checked, sitemaps: $('lsSfUseSm').checked});
+    top_n: +$('lsSfTop').value, semi_hours: +$('lsSfSemi').value, rare_hours: +$('lsSfRare').value, inactive_days: +$('lsSfIn').value, dead_days: +$('lsSfDead').value,
+    rss: $('lsSfUseRss').checked, sitemaps: $('lsSfUseSm').checked, robots: $('lsSfRobots').checked, exclude_domains: $('lsSfEx').value});
   $('lsSfMsg').textContent = r && r.ok ? 'Saved.' : (r && r.error) || 'Not saved'; loadStream.filled = false; loadStream(); };
+$('lsExport').onclick = async () => { const r = await api('/api/stream/export', {day: $('lsDay').value});
+  if (r && r.ok === false) return toast(r.error || 'Not started'); toast('Making the Excel…'); setTimeout(loadStream, 800);
+  const t = setInterval(async () => { await loadStream(); if (!(ST && ST.export && ST.export.running)) clearInterval(t); }, 2000); };
 let _stq; $('lsStQ').addEventListener('input', () => { clearTimeout(_stq); _stq = setTimeout(loadStream, 300); });
 setInterval(() => { if (document.visibilityState === 'visible' && $('p-stream').classList.contains('on')) loadStream(); }, 10000);
 document.addEventListener('mousemove', e => { const t = e.target.closest && e.target.closest('#lsChStream [data-tip]'); if (t) tip(e, t.dataset.tip); else if (e.target.closest && e.target.closest('#lsChStream')) tip(); });

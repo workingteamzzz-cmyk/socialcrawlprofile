@@ -374,6 +374,117 @@ input[type=date]::-webkit-calendar-picker-indicator{opacity:.7}
 .me-theme{flex:none;width:30px;height:30px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--muted);display:grid;place-items:center;cursor:pointer}
 .me-theme:hover{color:var(--text);background:var(--hover)}
 .me-theme svg.i{width:15px;height:15px}
+/* ================= Enterprise layer: navy sidebar, flat accent, top bar, formal cards ================= */
+:root{--accent:#2f5bea;--accent-soft:rgba(47,91,234,.08);--accent-ring:rgba(47,91,234,.42);--grad:var(--accent);
+  --bg:#f5f6f8;--panel:#fff;--panel-2:#fbfbfc;--soft:#f1f3f6;--line:#e3e6eb;--text:#101828;--muted:#5d6679;--faint:#8a92a3;
+  --shadow:0 1px 2px rgba(16,24,40,.05);--radius:10px;
+  --sb:#0c1322;--sb-2:#121b2e;--sb-line:rgba(255,255,255,.07);--sb-text:#c6cbd6;--sb-faint:#6f7a8f;--sb-hover:rgba(255,255,255,.05)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--accent:#6d8cff;--accent-soft:rgba(109,140,255,.12);--accent-ring:rgba(109,140,255,.5);
+  --bg:#0b0f17;--panel:#111723;--panel-2:#141b28;--soft:#1a2232;--line:rgba(148,163,184,.13);--text:#e7eaf0;--muted:#9aa3b5;--faint:#6f788b;
+  --sb:#080c14;--sb-2:#0e1420}}
+:root[data-theme="dark"]{--accent:#6d8cff;--accent-soft:rgba(109,140,255,.12);--accent-ring:rgba(109,140,255,.5);
+  --bg:#0b0f17;--panel:#111723;--panel-2:#141b28;--soft:#1a2232;--line:rgba(148,163,184,.13);--text:#e7eaf0;--muted:#9aa3b5;--faint:#6f788b;
+  --sb:#080c14;--sb-2:#0e1420}
+body{font-feature-settings:"tnum" 1,"cv11" 1;letter-spacing:-.003em}
+/* sidebar — dark in both themes */
+.sidebar{background:var(--sb);border-right:1px solid var(--sb-line);color:var(--sb-text)}
+.ws{padding:18px 18px 14px;border-bottom:1px solid var(--sb-line)}
+.ws b{color:#fff;font-size:12.5px;letter-spacing:.26em;font-weight:700}
+.ws small{color:var(--sb-faint)}
+.brand-logo{width:28px;height:28px;border-radius:7px}
+.newbtn{margin:14px 14px 8px}
+.newbtn .btn.primary{background:var(--accent);box-shadow:none;border-radius:8px;padding:9px 12px;font-weight:600;font-size:13.5px}
+:root .newbtn .btn.primary{background:#2f5bea}
+.newmenu{background:var(--sb-2);border-color:var(--sb-line);border-radius:8px}
+.newmenu button{color:var(--sb-text);font-size:13px;padding:9px 12px}
+.newmenu button:hover{background:var(--sb-hover);color:#fff}
+.nav{padding:4px 10px}
+.nav button{color:var(--sb-text);border-radius:7px;padding:8px 12px;font-size:13.5px}
+.nav button svg.i{color:var(--sb-faint);width:17px;height:17px}
+.nav button:hover{background:var(--sb-hover);color:#fff}
+.nav button.on{background:rgba(255,255,255,.07);color:#fff;font-weight:600}
+.nav button.on svg.i{color:#8aa4ff}
+.nav button.on::before{left:-10px;top:8px;bottom:8px;background:#5b7cff;width:3px}
+.nav .sep{color:var(--sb-faint);font-size:10.5px;letter-spacing:.14em;padding:18px 12px 6px}
+.nav .count{color:var(--sb-faint);font-size:11.5px}
+.side-foot{border-top:1px solid var(--sb-line);background:var(--sb)}
+.side-foot .btn,.side-foot .btn-block{background:transparent;border-color:var(--sb-line);color:var(--sb-text);box-shadow:none}
+.side-foot .btn:hover,.side-foot .btn-block:hover{background:var(--sb-hover);border-color:var(--sb-line);color:#fff}
+.side-foot .btn.ghost{color:#8aa4ff!important}
+.side-foot .logins{color:var(--sb-faint)}
+.sf-more{background:transparent;border-color:var(--sb-line);border-radius:8px}
+.sf-more summary{color:var(--sb-text)}
+.me-row b{color:#fff;font-weight:600}.me-row small{color:var(--sb-faint)}
+.me-av{background:#24324f;color:#cdd7ff;border-radius:8px;width:32px;height:32px;font-size:13px}
+.me-bar{background:rgba(255,255,255,.08)}.me-bar span{background:#5b7cff}
+.me-theme{background:transparent;border-color:var(--sb-line);color:var(--sb-text)}
+.me-theme:hover{background:var(--sb-hover);color:#fff}
+.status-row b{color:#fff}.status-row small{color:var(--sb-faint)}
+.dot{box-shadow:0 0 0 3px rgba(34,197,94,.18)}
+/* top bar */
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:12px;height:52px;padding:0 28px;margin:-20px -24px 24px;
+  background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:saturate(1.4) blur(8px);border-bottom:1px solid var(--line)}
+.crumb{font-size:13px;color:var(--faint);display:flex;gap:8px;align-items:center;min-width:0}
+.crumb b{color:var(--text);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tb-right{margin-left:auto;display:flex;gap:10px;align-items:center}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;border:1px solid var(--line);background:var(--panel);color:var(--muted);white-space:nowrap}
+.pill i{width:7px;height:7px;border-radius:50%;background:var(--ok)}
+.pill.run i{background:var(--accent);animation:pl 1.2s infinite}
+@keyframes pl{50%{opacity:.35}}
+.tb-clock{font-size:12.5px;color:var(--faint);white-space:nowrap}
+/* page header */
+.main{padding:20px 24px 48px}
+.main > section{max-width:1320px}
+.pagehead{margin-bottom:22px;align-items:center}
+.ph-ico{width:40px;height:40px;border-radius:9px;background:var(--panel);box-shadow:var(--shadow);color:var(--accent)}
+.ph-ico svg.i{width:19px;height:19px}
+.pagehead h1{font-size:22px;font-weight:650;letter-spacing:-.02em}
+.pagehead p{font-size:13px;color:var(--muted);margin-top:3px}
+.tabs button{font-size:13.5px;padding:10px 2px;margin-right:22px}
+.tabs button.on{border-color:var(--accent);color:var(--text);font-weight:600}
+/* surfaces */
+.card{border-radius:10px;box-shadow:var(--shadow)}
+.card-hd{padding:14px 20px;border-bottom:1px solid var(--line);min-height:52px}
+.card-hd h3{font-size:14px;font-weight:600;letter-spacing:-.005em}
+.card-bd{padding:16px 20px 20px}
+.btn{border-radius:7px;font-weight:550;box-shadow:var(--shadow)}
+.btn-block{border-radius:8px}
+.btn.primary{background:var(--accent);box-shadow:0 1px 2px rgba(16,24,40,.12)}
+.btn.primary:hover{background:var(--accent);filter:brightness(1.08)}
+.field input,.field select,.field textarea,.search,.select,.kwbox{border-radius:7px}
+.choice{border-radius:8px}
+.chip{border-radius:7px}
+.switch input:checked+span{background:var(--accent)}
+.stat{border-radius:8px;background:var(--panel)}
+.tbl th{font-size:11px;letter-spacing:.06em;text-transform:uppercase;font-weight:600;color:var(--faint)}
+.toast{border-radius:8px}
+/* home */
+.kpis{gap:14px;margin-bottom:18px}
+.kpi{border-radius:10px;padding:16px 18px;box-shadow:var(--shadow);position:relative}
+.kpi small:first-child{display:block;padding-right:26px;text-transform:uppercase;letter-spacing:.07em;font-size:11px;font-weight:600;color:var(--faint)}
+.kpi b{font-size:28px;font-weight:650;letter-spacing:-.02em;margin-top:8px}
+.kpi .kpi-sub{display:block;font-size:12px;color:var(--muted);margin-top:4px}
+.kpi svg.i{position:absolute;right:16px;top:15px;width:17px;height:17px;color:var(--faint)}
+.home-grid{display:grid;grid-template-columns:320px minmax(0,1fr);gap:18px;align-items:start}
+@media (max-width:1000px){.home-grid{grid-template-columns:minmax(0,1fr)}}
+.score #hPassed{display:block;font-size:34px;font-weight:650;letter-spacing:-.02em;margin:6px 0 2px}
+.score .lbl{font-size:11px;letter-spacing:.07em;text-transform:uppercase;font-weight:600;color:var(--faint)}
+.segbar{display:flex;gap:3px;margin:14px 0 14px;height:8px}
+.segbar span{flex:1;border-radius:2px;background:var(--soft)}
+.segbar .s-ok{background:var(--ok)}.segbar .s-warn{background:#e0a100}.segbar .s-bad{background:var(--bad)}
+.legend{display:grid;gap:8px;font-size:13px;color:var(--muted)}
+.legend div{display:flex;align-items:center;gap:8px}.legend i{width:8px;height:8px;border-radius:2px}
+.legend b{margin-left:auto;color:var(--text);font-weight:600;font-size:13px}
+.ck-list{margin:0}
+.ck-row{align-items:center;padding:13px 20px;margin:0 -20px}
+.ck-row:hover{background:var(--hover)}
+.ck-row > div{flex:1;min-width:0}
+.ck-row b{font-weight:550;font-size:13.5px}
+.ck-row small{font-size:12.5px}
+.ck-ic{width:20px;height:20px;border-radius:50%;font-size:11px}
+.badge{font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:5px;white-space:nowrap}
+.b-ok{background:var(--ok-soft);color:var(--ok)}.b-warn{background:var(--warn-soft);color:var(--warn)}.b-bad{background:var(--bad-soft);color:var(--bad)}
+@media (max-width:860px){.topbar{margin:-16px -16px 18px;padding:0 16px}.tb-clock{display:none}}
 </style>
 </head>
 <body>
@@ -407,6 +518,7 @@ input[type=date]::-webkit-calendar-picker-indicator{opacity:.7}
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
   <symbol id="i-news" viewBox="0 0 24 24"><path d="M4 5h13v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M17 9h3v10a2 2 0 0 1-2 2M8 9h5M8 13h5M8 17h3"/></symbol>
   <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
   <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11 12 4l9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/></symbol>
   <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/></symbol>
   <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
@@ -459,19 +571,26 @@ input[type=date]::-webkit-calendar-picker-indicator{opacity:.7}
   </aside>
 
   <main class="main">
+    <header class="topbar"><div class="crumb"><span>Working Teamz</span><span>/</span><b id="tbPage">Home</b></div>
+      <div class="tb-right"><span class="pill" id="tbEnv"><i></i><span id="tbStat">Ready</span></span><span class="tb-clock" id="tbClock"></span></div></header>
     <!-- HOME -->
     <section class="page on" id="p-home">
       <div class="pagehead"><div><h1>Home</h1><p>Is everything set up and healthy? Today's numbers, and what to fix — at a glance.</p></div></div>
       <div class="kpis">
-        <div class="kpi"><small>News articles today</small><b id="kA">–</b></div>
-        <div class="kpi"><small>Social posts today</small><b id="kP">–</b></div>
-        <div class="kpi"><small>API credits today</small><b id="kC">–</b></div>
-        <div class="kpi"><small>Schedules running</small><b id="kS">–</b><small id="kN"></small></div>
+        <div class="kpi"><small>News articles today</small><svg class="i"><use href="#i-news"/></svg><b id="kA">–</b><span class="kpi-sub">saved to the report database</span></div>
+        <div class="kpi"><small>Social posts today</small><svg class="i"><use href="#i-link"/></svg><b id="kP">–</b><span class="kpi-sub">from every platform</span></div>
+        <div class="kpi"><small>API credits today</small><svg class="i"><use href="#i-pulse"/></svg><b id="kC">–</b><span class="kpi-sub" id="kCs">daily limit</span></div>
+        <div class="kpi"><small>Schedules running</small><svg class="i"><use href="#i-clock"/></svg><b id="kS">–</b><span class="kpi-sub" id="kN">–</span></div>
       </div>
-      <div class="card"><div class="card-bd" style="padding-top:16px"><small class="hint">System checks passed</small><div style="font-size:26px;font-weight:780;margin-top:2px" id="hPassed">–</div></div></div>
-      <div class="card" style="margin-top:16px"><div class="card-hd"><h3>Checklist</h3></div><div class="card-bd">
-        <p class="hint" style="margin-top:0">What this app has set up right now. <span class="ck-ic ck-warn" style="display:inline-grid;width:16px;height:16px;font-size:10px;vertical-align:-3px">!</span> = works, but worth looking at.</p>
-        <div class="ck-list" id="hChecks"></div></div></div>
+      <div class="home-grid">
+        <div class="card score"><div class="card-hd"><h3>System health</h3></div><div class="card-bd">
+          <span class="lbl">Checks passed</span><b id="hPassed">–</b>
+          <div class="segbar" id="hSeg"></div>
+          <div class="legend"><div><i style="background:var(--ok)"></i>Passed<b id="hOk">0</b></div><div><i style="background:#e0a100"></i>Needs review<b id="hWarn">0</b></div><div><i style="background:var(--bad)"></i>Action needed<b id="hBad">0</b></div></div>
+        </div></div>
+        <div class="card"><div class="card-hd"><h3>Checklist</h3><span class="hint" style="margin-left:auto;font-size:12px" id="hTime"></span></div><div class="card-bd" style="padding-top:4px;padding-bottom:4px">
+          <div class="ck-list" id="hChecks"></div></div></div>
+      </div>
     </section>
 
     <!-- COLLECT -->
@@ -1255,6 +1374,7 @@ function go(p){
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.p === p));
   document.querySelectorAll('.page').forEach(s => s.classList.toggle('on', s.id === 'p-' + p));
   ls.set('page', p); window.scrollTo(0, 0);
+  const nb = document.querySelector(`#nav button[data-p="${p}"]`); if (nb && $('tbPage')) { const c = nb.cloneNode(true); c.querySelectorAll('.count,svg').forEach(x => x.remove()); $('tbPage').textContent = c.textContent.trim(); }
   if (p === 'exports'){ loadExports(); if (SERVER && ROLE === 'admin') loadAudit(); }
   if (p === 'schedules') loadSchedules();
   if (p === 'users') loadUsers();
@@ -2078,13 +2198,18 @@ async function loadHome(){
   if (!d || !d.checks) return;
   const st = d.stats || {};
   $('kA').textContent = fmt(st.articles_today || 0); $('kP').textContent = fmt(st.posts_today || 0);
-  $('kC').textContent = fmt(st.credits_today || 0) + (st.credits_cap ? ' / ' + fmt(st.credits_cap) : '');
+  $('kC').textContent = fmt(st.credits_today || 0);
   $('kS').textContent = fmt(st.schedules || 0);
-  $('kN').textContent = st.next_run ? 'next ' + new Date(st.next_run * 1000).toLocaleString([], {day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'}) : '';
-  $('hPassed').textContent = `${d.passed} / ${d.total}`;
-  const ic = {ok: ['ck-ok', '✓'], warn: ['ck-warn', '!'], bad: ['ck-bad', '✕']};
+  $('kN').textContent = st.next_run ? 'Next run ' + new Date(st.next_run * 1000).toLocaleString([], {day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'}) : 'none scheduled';
+  $('hPassed').textContent = `${d.passed} of ${d.total}`;
+  const n = st => d.checks.filter(c => c.state === st).length;
+  $('hOk').textContent = n('ok'); $('hWarn').textContent = n('warn'); $('hBad').textContent = n('bad');
+  $('hSeg').innerHTML = ['ok', 'warn', 'bad'].flatMap(k => Array(n(k)).fill(`<span class="s-${k}"></span>`)).join('');
+  $('kCs').textContent = st.credits_cap ? `of ${fmt(st.credits_cap)} daily limit` : 'no daily limit set';
+  $('hTime').textContent = 'Updated ' + new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+  const ic = {ok: ['ck-ok', '✓', 'b-ok', 'Passed'], warn: ['ck-warn', '!', 'b-warn', 'Review'], bad: ['ck-bad', '✕', 'b-bad', 'Action needed']};
   $('hChecks').innerHTML = d.checks.map(c => `<div class="ck-row"><span class="ck-ic ${ic[c.state][0]}">${ic[c.state][1]}</span>
-    <div><b>${esc(c.title)}</b>${c.detail ? `<small>${esc(c.detail)}</small>` : ''}</div></div>`).join('');
+    <div><b>${esc(c.title)}</b>${c.detail ? `<small>${esc(c.detail)}</small>` : ''}</div><span class="badge ${ic[c.state][2]}">${ic[c.state][3]}</span></div>`).join('');
   updateMe(st);
 }
 function updateMe(st){
@@ -2097,6 +2222,8 @@ function updateMe(st){
   }
 }
 setInterval(() => { if (document.visibilityState === 'visible') api('/api/overview').then(d => d && d.stats && updateMe(d.stats)); }, 60000);
+
+(function clock(){ const t = $('tbClock'); if (t) t.textContent = new Date().toLocaleString([], {weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'}); setTimeout(clock, 30000); })();
 
 /* ---------- reports ---------- */
 let TOPICS = [];
@@ -2357,8 +2484,10 @@ async function poll(){
     $('apStart').style.display = running ? 'none' : '';
     $('btnLogin').disabled = running;
     $('stDot').classList.toggle('run', running);
+    $('tbEnv').classList.toggle('run', running);
     const mp = s.modes || {};
     $('stTitle').textContent = running ? (s.kind === 'login' ? 'Login mode' : s.kind === 'decode' ? 'Fixing Google News links' : s.kind === 'apiscrape' ? 'API scraper' : isKw ? 'Keyword search' : isNews ? 'News search' : 'Collecting') : 'Ready';
+    $('tbStat').textContent = $('stTitle').textContent;
     $('stSub').textContent = running ? (s.kind === 'login' ? 'Close the browser when done'
       : `${s.done}/${s.total} ${isKw ? 'searches' : isNews ? 'keywords' : 'accounts'} · ${fmt((mp[s.kind] || {}).count || 0)} links`) : 'No job running';
     const progFor = (pref, mine, unit, count) => {

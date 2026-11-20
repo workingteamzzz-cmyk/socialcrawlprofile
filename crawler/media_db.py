@@ -304,9 +304,12 @@ def stats(force: bool = False) -> dict:
                 else:
                     x["rss"] += 1
         except sqlite3.Error:
-            pass
-        finally:
+            # busy (the stream just restarted, a migration is running): keep what we had and try again in 20 s
+            # instead of showing every outlet as 0 for the next 5 minutes
             c.close()
+            _CACHE["t"] = time.time() - 280
+            return _CACHE.get("stats") or out
+        c.close()
     _CACHE.update(t=time.time(), stats=out)
     return out
 

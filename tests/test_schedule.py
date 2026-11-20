@@ -116,6 +116,38 @@ def test_scheduler_runs_waits_catches_up_and_reports(tmp_path):
     assert s2.list()[0]["last_result"].startswith("error:")
 
 
+def test_stop_holds_the_next_scheduled_run(tmp_path):
+    """After Stop, the next due schedule does not start the moment the stopped run ends (it looked like Stop failed)."""
+    job = FakeJob()
+    s = sch.Scheduler(str(tmp_path / "schedules.json"), job)
+    first = s.save(NEWS)["next_run"]
+    job.stopped_at = first                                                   # Stop pressed just now
+    s.tick(first + 30)
+    assert job.calls == []
+    s.tick(first + sch.HOLD_AFTER_STOP + 1)                                  # 10 minutes later it runs
+    assert len(job.calls) == 1
+
+
+def test_real_job_reports_stopping(tmp_path, monkeypatch):
+    import time as _t
+
+    from crawler import job as jobmod
+    j = jobmod.Job()
+    monkeypatch.setattr(jobmod, "_captcha_info", lambda: {})
+    gate = threading.Event()
+    assert j._start("decode", lambda: gate.wait(5)) is None
+    assert j.state()["running"] and not j.state()["stopping"]
+    j.stop()
+    st = j.state()
+    assert st["stopping"] and any("Stop requested" in x for x in st["logs"]) and j.stopped_at
+    gate.set()
+    for _ in range(50):
+        if not j.running:
+            break
+        _t.sleep(0.05)
+    assert not j.state()["stopping"]
+
+
 def test_pause_run_now_and_delete(tmp_path):
     job = FakeJob()
     s = sch.Scheduler(str(tmp_path / "schedules.json"), job)

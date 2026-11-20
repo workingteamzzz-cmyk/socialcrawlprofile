@@ -83,7 +83,8 @@ class Job:
 
     def state(self, since: int = 0) -> dict:
         with self.lock:
-            return {"kind": self.kind, "running": self.running, "done": self.done, "total": self.total,
+            return {"kind": self.kind, "running": self.running, "stopping": self.running and self.stop_flag.is_set(),
+                    "done": self.done, "total": self.total,
                     "current": self.current, "error": self.error, "job_id": self.job_id,
                     "logs": self.logs[max(0, since - (self.log_total - len(self.logs))):] if since < self.log_total else [],
                     "log_count": self.log_total, "captcha": _captcha_info(),
@@ -148,6 +149,13 @@ class Job:
         return None
 
     def stop(self):
+        """Stop the running job. It finishes the articles / pages it is reading right now and saves what it collected
+        (seconds to a minute or two on a big run); scheduled runs wait 10 minutes (schedule.HOLD_AFTER_STOP) so the
+        next one does not start the moment this one ends."""
+        self.stopped_at = time.time()
+        if self.running and not self.stop_flag.is_set():
+            self.log("⏹ Stop requested — finishing the articles being read right now and saving what was collected "
+                     "(can take up to a minute or two). Scheduled runs wait 10 minutes.")
         self.stop_flag.set()
 
     def _pause_between(self):

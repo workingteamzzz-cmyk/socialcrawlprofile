@@ -638,6 +638,8 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
   .rd-detail.open{transform:none}.rd-close{display:inline-flex}}
 @media (max-width:860px){.rd-wrap{grid-template-columns:minmax(0,1fr)}.rd-filters{position:static;max-height:none}.rd-grid{grid-template-columns:minmax(0,1fr)}
   .rd-kpis{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.rd-kpi{padding:10px;gap:8px}.rd-face{display:none}.rd-thumb{width:110px;height:78px}}
+.spin{width:14px;height:14px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;display:inline-block;animation:spin .8s linear infinite;flex:none}
+@keyframes spin{to{transform:rotate(360deg)}}
 </style>
 </head>
 <body>
@@ -1982,8 +1984,14 @@ $('btnStart').onclick = async () => {
   if (r.error){ alertMsg(r.error); return; }
   alertMsg(''); $('log').textContent = ''; logCount = 0; toast('Collection started'); started();
 };
-$('btnStop').onclick = () => api('/api/stop', {});
-$('kBtnStop').onclick = () => api('/api/stop', {});
+async function stopJob(e){                               // instant feedback; the poll keeps it until the job has ended
+  const b = e.currentTarget; b.dataset.label = b.dataset.label || b.innerHTML; b.dataset.busy = '1'; b.disabled = true;
+  b.innerHTML = '<span class="spin"></span>Stopping… saving what was collected';
+  const r = await api('/api/stop', {});
+  if (r && r.ok === false){ b.dataset.busy = ''; b.disabled = false; b.innerHTML = b.dataset.label; toast(r.error || 'Could not stop'); }
+}
+$('btnStop').onclick = stopJob;
+$('kBtnStop').onclick = stopJob;
 let SERVER = false;      // running on a server without a screen: logins come from imported cookies
 $('btnLogin').onclick = async () => {
   if (SERVER){ openCookies(); return; }
@@ -2262,7 +2270,7 @@ $('nBtnStart').onclick = async () => {
   if (r.error){ nwAlert(r.error); return; }
   nwAlert(''); $('log').textContent = ''; logCount = 0; toast('News search started'); started();
 };
-$('nBtnStop').onclick = () => api('/api/stop', {});
+$('nBtnStop').onclick = stopJob;
 const NEWS_COLS = {
   links: [['keyword', 'Keyword'], ['url', 'Link']],
   basic: [['published', 'Date'], ['keyword', 'Keyword'], ['media', 'Media'], ['title', 'Title'], ['url', 'Link']],
@@ -2499,7 +2507,7 @@ $('apStart').onclick = async () => {
   if (r.error){ apAlert(r.error); return; }
   apAlert(''); $('log').textContent = ''; logCount = 0; toast('API scraper started'); started(); go('log');
 };
-$('apStop').onclick = () => api('/api/stop', {});
+$('apStop').onclick = stopJob;
 $('apSched').onclick = () => {
   if (!$('apQ').value.trim() && !$('apImport').value.trim()){ apAlert('Type at least one keyword or link.'); $('apQ').focus(); return; }
   if (!(+$('apBudget').value > 0)){ apAlert('Set Max credits for each run first — a schedule never spends more than that per run.'); return; }
@@ -3470,6 +3478,11 @@ async function poll(){
     $('kBtnStop').style.display = running && isKw ? '' : 'none';
     $('nBtnStop').style.display = running && isNews ? '' : 'none';
     $('apStop').style.display = running && s.kind === 'apiscrape' ? '' : 'none';
+    for (const id of ['btnStop', 'kBtnStop', 'nBtnStop', 'apStop']){        // after a click: it is stopping, not ignored
+      const b = $(id); b.dataset.label = b.dataset.label || b.innerHTML; const busy = !!(running && s.stopping);
+      if (busy !== (b.dataset.busy === '1')){ b.dataset.busy = busy ? '1' : '';
+        b.disabled = busy; b.innerHTML = busy ? '<span class="spin"></span>Stopping… saving what was collected' : b.dataset.label; }
+    }
     $('apStart').style.display = running ? 'none' : '';
     $('btnLogin').disabled = running;
     $('stDot').classList.toggle('run', running);

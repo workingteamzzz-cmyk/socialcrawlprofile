@@ -297,6 +297,9 @@ class Scheduler:
         self._check_finished()
         if self.job.running:
             return
+        stopped = float(getattr(self.job, "stopped_at", 0) or 0)
+        if now - stopped < HOLD_AFTER_STOP:              # someone pressed Stop: don't start the next run right away
+            return
         with self.lock:
             due = sorted((s for s in self.items if s.get("enabled") and s.get("next_run") and s["next_run"] <= now),
                          key=lambda s: s["next_run"])
@@ -319,6 +322,7 @@ class Scheduler:
 
 
 SCHEDULER: Scheduler | None = None
+HOLD_AFTER_STOP = 600                                  # seconds scheduled runs wait after the Stop button
 
 
 def get() -> Scheduler:

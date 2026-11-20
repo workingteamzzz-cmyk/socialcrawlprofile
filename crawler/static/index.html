@@ -1100,6 +1100,8 @@ body{font-feature-settings:"tnum" 1,"cv11" 1;letter-spacing:-.003em}
           <div class="field"><label for="lsSfRare">Rare (nothing in 7 days): every (hours)</label><input id="lsSfRare" type="number" min="2" max="168"></div>
           <div class="field"><label for="lsSfIn">Inactive (nothing in 30 days): every (days)</label><input id="lsSfIn" type="number" min="1" max="30"></div>
           <div class="field"><label for="lsSfDead">Unreachable: every (days)</label><input id="lsSfDead" type="number" min="1" max="60"></div>
+          <div class="field"><label for="lsSfCuD">Late articles: sweep the last … days (0 = off)</label><input id="lsSfCuD" type="number" min="0" max="7"></div>
+          <div class="field"><label for="lsSfCuH">Late-article sweep runs daily at (hour, WIB)</label><input id="lsSfCuH" type="number" min="0" max="23"></div>
           <div class="field"><label for="lsSfAge">Only articles from the last (hours)</label><input id="lsSfAge" type="number" min="6" max="168"></div>
           <div class="field"><label for="lsSfRet">Keep articles in the stream for (days)</label><input id="lsSfRet" type="number" min="1" max="90"></div>
           <div class="field"><label for="lsSfGap">Pause between pages of one outlet (seconds)</label><input id="lsSfGap" type="number" min="0.5" max="30" step="0.5"></div>
@@ -2493,9 +2495,16 @@ async function loadStream(){
     ['dead', 'Unreachable', every(cfg.dead_days * 1440), '#d03b3b'], ['new', 'Not checked yet', 'first check soon', '#c3c2b7']];
   $('lsStEngines').innerHTML = `<div class="sub-hd" style="margin-top:0;padding-top:0;border:0">Outlets by activity</div>` +
     tiers.map(([k, l, e, c]) => `<div class="hs-foot"><span style="display:flex;align-items:center;gap:7px"><i style="width:8px;height:8px;border-radius:2px;background:${c}"></i>${l} <small style="color:var(--faint)">· ${e}</small></span><b>${fmt(tr[k] || 0)}</b></div>`).join('') +
+    (() => { const c = d.catchup || {}, lr = c.last_result || {};
+      const st = c.running ? `running — ${fmt(c.done)} of ${fmt(c.total)} outlets, ${fmt(c.found)} late articles so far`
+        : lr.finished ? `last run ${new Date(lr.finished * 1000).toLocaleString([], {day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'})}: ${fmt(lr.found)} late articles from ${fmt(lr.total)} outlets` : 'not run yet';
+      return `<div class="sub-hd">Late articles (last ${cfg.catchup_days} days, daily ${String(cfg.catchup_hour).padStart(2, '0')}:00)</div><p class="hint" style="margin:4px 0 6px">${st}</p>` +
+        (d.running && !c.running ? '<button class="btn sm need-admin" id="lsCatchup">Run the sweep now</button>' : ''); })() +
     '<div style="height:14px"></div>' + row('rss', 'RSS feeds') + '<div style="height:14px"></div>' + row('sitemap', 'Outlet sitemaps') +
     `<div class="hs-foot" style="margin-top:14px"><span>Readers busy</span><b>${d.readers_busy} / ${cfg.threads}</b></div><div class="hs-foot"><span>Stream database</span><b>${fmt(d.db_mb)} MB</b></div>` +
     (d.last_error ? `<p class="hint" style="margin-top:10px">Last problem: ${esc(d.last_error)}</p>` : '');
+  if ($('lsCatchup')) $('lsCatchup').onclick = async () => { const r = await api('/api/stream', {catchup_now: true});
+    toast(r && r.ok ? 'Late-article sweep started' : (r && r.error) || 'Not started'); setTimeout(loadStream, 1500); };
   drawStream(d);
   $('lsStBody').innerHTML = d.latest.length ? d.latest.map(r => `<tr><td class="nowrap"><b>${r.pub_date ? dShort(r.pub_date) : '–'}</b><small>${esc(r.pub_time || '')}</small></td>
     <td><a class="lt-t" href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title || r.url)}</a></td><td class="nowrap">${esc(r.domain)}</td>
@@ -2503,6 +2512,7 @@ async function loadStream(){
     : `<tr><td colspan="4" class="empty-s">${d.running ? 'Starting up — the first articles arrive within minutes.' : 'Start the stream to read every new article from the registered media.'}</td></tr>`;
   if (!loadStream.filled){ loadStream.filled = true;
     $('lsSfThreads').value = cfg.threads; $('lsSfRss').value = cfg.rss_minutes; $('lsSfSm').value = cfg.sitemap_minutes;
+    $('lsSfCuD').value = cfg.catchup_days; $('lsSfCuH').value = cfg.catchup_hour;
     $('lsSfTop').value = cfg.top_n; $('lsSfSemi').value = cfg.semi_hours; $('lsSfRare').value = cfg.rare_hours; $('lsSfIn').value = cfg.inactive_days; $('lsSfDead').value = cfg.dead_days; $('lsSfAge').value = cfg.max_age_hours;
     $('lsSfRet').value = cfg.retention_days; $('lsSfGap').value = cfg.domain_gap; $('lsSfKw').value = (cfg.keywords || []).join('\n');
     $('lsSfUseRss').checked = !!cfg.rss; $('lsSfUseSm').checked = !!cfg.sitemaps; $('lsSfRobots').checked = cfg.robots !== false;
@@ -2521,6 +2531,7 @@ $('lsStToggle').onclick = async () => { if (!ST) return;
 $('lsSfSave').onclick = async () => {
   const r = await api('/api/stream', {threads: +$('lsSfThreads').value, rss_minutes: +$('lsSfRss').value, sitemap_minutes: +$('lsSfSm').value,
     max_age_hours: +$('lsSfAge').value, retention_days: +$('lsSfRet').value, domain_gap: +$('lsSfGap').value, keywords: $('lsSfKw').value,
+    catchup_days: +$('lsSfCuD').value, catchup_hour: +$('lsSfCuH').value,
     top_n: +$('lsSfTop').value, semi_hours: +$('lsSfSemi').value, rare_hours: +$('lsSfRare').value, inactive_days: +$('lsSfIn').value, dead_days: +$('lsSfDead').value,
     rss: $('lsSfUseRss').checked, sitemaps: $('lsSfUseSm').checked, robots: $('lsSfRobots').checked, exclude_domains: $('lsSfEx').value});
   $('lsSfMsg').textContent = r && r.ok ? 'Saved.' : (r && r.error) || 'Not saved'; loadStream.filled = false; loadStream(); };

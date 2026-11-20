@@ -244,6 +244,9 @@ class StreamSettings(BaseModel):
     max_age_hours: int | None = Field(None, description="only articles published in the last … hours")
     domain_gap: float | None = Field(None, description="seconds between two pages of the same outlet")
     top_n: int | None = Field(None, description="active outlets = the top N of the last 7 days")
+    catchup_days: int | None = Field(None, description="late-article sweep: the last N days (0 = off)")
+    catchup_hour: int | None = Field(None, description="hour of the day (WIB) the sweep runs")
+    catchup_now: bool | None = Field(None, description="run the late-article sweep now")
     semi_hours: int | None = None
     rare_hours: int | None = None
     inactive_days: int | None = None

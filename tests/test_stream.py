@@ -193,3 +193,33 @@ def test_robots_exclude_and_all_articles_export(st, monkeypatch, tmp_path):
     assert [c.value for c in ws[1]][:4] == ["DATE", "TIME", "TITLE", "URL"] and ws.max_row == 3
     assert ws["A2"].value == "20-Nov-2026" and ws["B2"].value == "09:30:00" and ws["K2"].value.startswith("<p>")
     assert ws["A1"].fill.fgColor.rgb == "FF15677B" and st.export["rows"] == 2 and not st.export["running"]
+
+
+def test_catchup_sweep_takes_the_last_two_days_late_articles(st, monkeypatch):
+    from crawler import stream
+    from crawler.medmas.discovery import sitemaps as sm
+    st.cfg = stream.save_settings({"catchup_days": 2})
+    now = datetime.now(WIB)
+    day = {k: (now - timedelta(days=k)).strftime("%Y-%m-%d") for k in (0, 1, 2, 10)}
+    idx = "".join(f"<sitemap><loc>https://x.id/sitemap-{day[k]}.xml</loc></sitemap>" for k in (10, 2, 1, 0))
+    pages = {"https://x.id/sitemap.xml": f'<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{idx}</sitemapindex>'}
+    for k in (0, 1, 2, 10):
+        pages[f"https://x.id/sitemap-{day[k]}.xml"] = (
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            f"<url><loc>https://x.id/berita/{day[k]}/judul-berita-hari-{k}</loc><lastmod>{day[k]}T08:00:00+07:00</lastmod></url>"
+            "</urlset>")
+    monkeypatch.setattr(sm, "_fetch", lambda u, timeout=8: pages[u].encode())
+    st.x("INSERT INTO sources(id, kind, domain, url, next_check, interval, checked) VALUES "
+         "('sm:x.id','sitemap','x.id',?,?,3600,?)", ('["https://x.id/sitemap.xml"]', time.time() + 3600, time.time()))
+    st.running = True
+    try:
+        st.add_found([{"url": f"https://x.id/berita/{day[0]}/judul-berita-hari-0", "date": day[0], "domain": "x.id"}], "rss")
+        out = st.run_catchup()
+        assert out["total"] == 1 and out["found"] == 2 and not out["running"]       # D-1, D-2; today's known; D-10 too old
+        urls = {r["url"] for r in st.q("SELECT url FROM articles")}
+        assert {f"https://x.id/berita/{day[k]}/judul-berita-hari-{k}" for k in (0, 1, 2)} == urls
+        dom, job = st.next_job()
+        assert job["url"].endswith("hari-0")                                           # late links wait behind the news
+        assert st.meta("catchup_last") == now.strftime("%Y-%m-%d") and st.status()["catchup"]["last_result"]["found"] == 2
+    finally:
+        st.running = False

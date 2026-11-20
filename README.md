@@ -306,6 +306,9 @@ running (also after a restart) and reads every new article from the registered m
 
   A new outlet is checked once right away; an outlet that publishes again is promoted at once. All numbers can be
   changed under Live Stream → Stream settings.
+- **Late articles** — once a day (01:00 WIB) a sweep reads every reachable outlet's sitemaps for the last 2 days,
+  including its dated archive sitemaps: articles listed late, or missed while an outlet was checked rarely, are taken
+  then (known links are skipped; late links wait behind fresh news). So every outlet is looked at at least daily.
 - **Safety** — each outlet's robots.txt is respected (pages it disallows are never opened), outlets can be excluded
   completely (e.g. one that forbids crawling without permission), one page at a time per outlet with a pause.
 - **Every article of a day** — *Download every article of a day* writes one Online Excel (the uploader's rules) of

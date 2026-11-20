@@ -29,10 +29,12 @@ from datetime import datetime, timedelta, timezone
 
 WIB = timezone(timedelta(hours=7))
 DEFAULTS = {"enabled": False, "threads": 16, "discovery_threads": 12, "rss_minutes": 10, "sitemap_minutes": 60,
+            "catchup_days": 2, "catchup_hour": 1,
             "top_n": 1000, "semi_hours": 4, "rare_hours": 24, "inactive_days": 3, "dead_days": 7,
             "retention_days": 7, "max_age_hours": 48, "domain_gap": 1.5, "rss": True, "sitemaps": True,
             "keywords": [], "robots": True, "exclude_domains": []}
 LIMITS = {"threads": (2, 64), "discovery_threads": (2, 48), "rss_minutes": (2, 240), "sitemap_minutes": (10, 720),
+          "catchup_days": (0, 7), "catchup_hour": (0, 23),
           "top_n": (50, 20000), "semi_hours": (1, 48), "rare_hours": (2, 168), "inactive_days": (1, 30),
           "dead_days": (1, 60),
           "retention_days": (1, 90), "max_age_hours": (6, 168)}
@@ -60,6 +62,7 @@ CREATE TABLE IF NOT EXISTS sources(
   id TEXT PRIMARY KEY, kind TEXT, domain TEXT, url TEXT DEFAULT '', next_check REAL, interval REAL,
   hits INTEGER DEFAULT 0, fails INTEGER DEFAULT 0, etag TEXT DEFAULT '', modified TEXT DEFAULT '', checked REAL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS s_next ON sources(next_check);
+CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS domain_days(domain TEXT, day TEXT, n INTEGER DEFAULT 0, PRIMARY KEY(domain, day));
 CREATE TABLE IF NOT EXISTS hourly(
   hour TEXT PRIMARY KEY, found INTEGER DEFAULT 0, read INTEGER DEFAULT 0, failed INTEGER DEFAULT 0,
@@ -156,6 +159,8 @@ class Stream:
         self.counts = {"found": 0, "read": 0, "failed": 0, "matched": 0, "skipped": 0}   # this hour, flushed often
         self.robots: dict = {}
         self.tiers: dict = {}                  # domain -> tier (recomputed every 10 minutes)
+        self.catchup = {"running": False, "done": 0, "total": 0, "found": 0, "started": 0, "finished": 0}
+        self.catchup_now = threading.Event()
         self.export = {"running": False, "done": 0, "total": 0, "file": "", "error": ""}
         self.recent = deque(maxlen=50000)       # timestamps of articles read (rate per minute)
         self.inflight_sources: set = set()
@@ -304,10 +309,16 @@ class Stream:
             self._db.commit()
         return {t: sum(1 for x in tiers.values() if x == t) for t in TIERS}
 
-    def add_found(self, items: list[dict], source: str) -> int:
-        """New article links -> the reading queue. Only articles, only recent ones (max_age_hours)."""
+    def cutoff(self) -> str:
+        """The oldest publication day the stream takes: max_age_hours, or the catch-up's days if longer."""
+        hours = max(self.cfg["max_age_hours"], (self.cfg.get("catchup_days") or 0) * 24 + 24)
+        return (datetime.now(WIB) - timedelta(hours=hours)).strftime("%Y-%m-%d")
+
+    def add_found(self, items: list[dict], source: str, front: bool = True) -> int:
+        """New article links -> the reading queue (front: fresh news first; catch-up links go to the back).
+        Only articles, only from the days the stream covers."""
         from .medmas.filters import is_article_link
-        cutoff = (datetime.now(WIB) - timedelta(hours=self.cfg["max_age_hours"])).strftime("%Y-%m-%d")
+        cutoff = self.cutoff()
         now, rows = time.time(), []
         for it in items:
             url = (it.get("url") or "").strip()
@@ -338,7 +349,7 @@ class Stream:
             if self.running:                     # straight to the readers, at the front: newest first, no waiting
                 for key, url, dom, title, _src, fd, ft, _t in fresh:
                     self._enqueue({"key": key, "url": url, "domain": dom, "title": title, "feed_date": fd,
-                                   "feed_time": ft}, front=True)
+                                   "feed_time": ft}, front=front)
         return len(fresh)
 
     def _enqueue(self, job: dict, front: bool = False) -> None:
@@ -377,7 +388,9 @@ class Stream:
         extra = {"etag": r.headers.get("ETag", "")[:200], "modified": r.headers.get("Last-Modified", "")[:100]}
         return self.add_found(items, "rss"), False, extra
 
-    def check_sitemap(self, src) -> tuple[int, bool, dict]:
+    def check_sitemap(self, src, catchup: int = 0) -> tuple[int, bool, dict]:
+        """An outlet's sitemaps -> new links. catchup = N: the late-article sweep — also the archive sitemaps of the
+        last N days (sitemap-2026-11-19.xml, …/2026/11/19/…), more sub-sitemaps read, links queued behind the news."""
         from .medmas.discovery import sitemaps as sm
         dom = src["domain"]
         roots = json.loads(src["url"]) if src["url"] else None
@@ -390,9 +403,13 @@ class Stream:
             cands.sort(key=lambda u: (0 if ("news" in u.lower() or "berita" in u.lower()) else 1))
             roots = cands[:6]
             extra["url"] = json.dumps(roots)
-        months = {datetime.now(WIB).strftime("%Y-%m"), (datetime.now(WIB) - timedelta(days=2)).strftime("%Y-%m")}
+        now = datetime.now(WIB)
+        back = [now - timedelta(days=i) for i in range(0, max(2, catchup) + 1)]
+        months = {d.strftime("%Y-%m") for d in back}
+        stamps = [f for d in back[1:catchup + 1] for f in (d.strftime("%Y-%m-%d"), d.strftime("%Y%m%d"),
+                                                            d.strftime("%Y/%m/%d"), d.strftime("%Y/%m/") + f"{d.day}")]
         items, ok_any, queue, seen, reads = [], False, list(roots), set(), 0
-        while queue and reads < 6:
+        while queue and reads < (14 if catchup else 6):
             u = queue.pop(0)
             if u in seen:
                 continue
@@ -408,7 +425,10 @@ class Stream:
                 ranked = sorted(((x, sm._sitemap_priority(x, frozenset(months))) for x in data),
                                 key=lambda t: (t[1] is None, t[1] or 0))
                 subs = [x for x, p in ranked if p is not None and (p < 0 or any(m in x for m in months))]
-                queue.extend((subs or [x for x, p in ranked if p is not None][-2:])[:3])
+                if catchup:                                  # the day's own archive sitemaps first
+                    dated = [x for x, p in ranked if p is not None and any(t in x for t in stamps)]
+                    subs = dated + [x for x in subs if x not in dated]
+                queue.extend((subs or [x for x, p in ranked if p is not None][-2:])[:8 if catchup else 3])
                 continue
             news = "news" in u.lower() or "berita" in u.lower()
             for e in data:
@@ -418,7 +438,7 @@ class Stream:
             if roots and src["url"]:                         # known sitemaps all failed: look for them again next time
                 extra["url"] = ""
             return 0, True, extra
-        return self.add_found(items, "sitemap"), False, extra
+        return self.add_found(items, "catchup" if catchup else "sitemap", front=not catchup), False, extra
 
     def check_source(self, src) -> int:
         if self.excluded("https://" + (src["domain"] or "")):           # an excluded outlet: not even its feed
@@ -519,7 +539,7 @@ class Stream:
         t = str(res.get("time") or "")[:5] or job.get("feed_time") or ""
         status = "success" if res.get("content") and res.get("is_article", True) and not res.get("is_index") else \
             ("failed" if not res.get("content") else "filtered")
-        cutoff = (datetime.now(WIB) - timedelta(hours=self.cfg["max_age_hours"])).strftime("%Y-%m-%d")
+        cutoff = self.cutoff()
         if status == "success" and re.match(r"\d{4}-\d{2}-\d{2}$", d) and d < cutoff:
             status = "old"
         matched = []
@@ -627,6 +647,58 @@ class Stream:
         self.x("DELETE FROM domain_days WHERE day < ?", ((datetime.now(WIB) - timedelta(days=35)).strftime("%Y-%m-%d"),))
         return n
 
+    # ----- late articles: the daily catch-up sweep -----
+    def meta(self, k: str, v: str | None = None) -> str:
+        if v is not None:
+            self.x("INSERT INTO meta(k, v) VALUES (?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", (k, v))
+            return v
+        r = self.q("SELECT v FROM meta WHERE k=?", (k,))
+        return r[0]["v"] if r else ""
+
+    def run_catchup(self) -> dict:
+        """Every reachable outlet's sitemaps for the last `catchup_days` days, once: links published earlier but
+        listed late, or missed while an outlet was checked rarely. Known links are skipped (one row per article)."""
+        days = int(self.cfg.get("catchup_days") or 0)
+        srcs = [r for r in self.q("SELECT * FROM sources WHERE kind='sitemap' AND fails < 3 AND checked > 0")
+                if not self.excluded("https://" + r["domain"])] if days else []
+        with self.lock:
+            self.catchup = {"running": True, "done": 0, "total": len(srcs), "found": 0, "started": time.time(),
+                            "finished": 0, "days": days}
+
+        def one(src):
+            if self.stop_event.is_set():
+                return
+            try:
+                n, _failed, _extra = self.check_sitemap(src, catchup=days)
+            except Exception:  # noqa: BLE001
+                n = 0
+            with self.lock:
+                self.catchup["done"] += 1
+                self.catchup["found"] += n
+        with ThreadPoolExecutor(max_workers=max(2, self.cfg["discovery_threads"] // 2)) as ex:
+            list(ex.map(one, srcs))
+        with self.lock:
+            self.catchup.update(running=False, finished=time.time())
+            out = dict(self.catchup)
+        self.meta("catchup_last", datetime.now(WIB).strftime("%Y-%m-%d"))
+        self.meta("catchup_result", json.dumps({k: out[k] for k in ("total", "found", "started", "finished")}))
+        return out
+
+    def catchup_loop(self) -> None:
+        while not self.stop_event.is_set():
+            now = datetime.now(WIB)
+            due = (self.cfg.get("catchup_days") and now.hour >= self.cfg.get("catchup_hour", 1)
+                   and self.meta("catchup_last") != now.strftime("%Y-%m-%d"))
+            if due or self.catchup_now.is_set():
+                self.catchup_now.clear()
+                try:
+                    self.run_catchup()
+                except Exception as e:  # noqa: BLE001
+                    self.last_error = f"catch-up: {str(e)[:120]}"
+                    with self.lock:
+                        self.catchup["running"] = False
+            self.stop_event.wait(30)
+
     # ----- every article of a day -> the team's Online file -----
     def export_day(self, day: str, out_dir: str) -> str:
         """All articles published on `day` (YYYY-MM-DD) read by the stream -> one Online Excel (the uploader's
@@ -703,6 +775,7 @@ class Stream:
         log(f"🛰 News stream started: {info['rss']} RSS feeds + {info['sitemaps']} outlet sitemaps, "
             f"{self.cfg['threads']} readers")
         self.threads = [threading.Thread(target=self.discovery_loop, daemon=True, name="stream-discovery"),
+                        threading.Thread(target=self.catchup_loop, daemon=True, name="stream-catchup"),
                         threading.Thread(target=self.house_loop, daemon=True, name="stream-house")]
         self.threads += [threading.Thread(target=self.reader_loop, daemon=True, name=f"stream-reader-{i}")
                          for i in range(self.cfg["threads"])]
@@ -760,6 +833,8 @@ class Stream:
                 "hourly": series, "sources": src, "keywords": len(self.keywords()), "db_mb": round(size / 1e6, 1),
                 "tiers": {r["tier"] or "new": r["n"] for r in self.q(
                     "SELECT tier, COUNT(DISTINCT domain) n FROM sources GROUP BY tier")},
+                "catchup": {**dict(self.catchup), "last": self.meta("catchup_last"),
+                            "last_result": json.loads(self.meta("catchup_result") or "{}")},
                 "readers_busy": len(self.busy_domains), "last_error": self.last_error, "export": dict(self.export),
                 "days": [r["d"] for r in self.q("SELECT DISTINCT pub_date d FROM articles WHERE status='success' "
                                                  "AND pub_date != '' ORDER BY d DESC LIMIT 14")],
@@ -814,6 +889,11 @@ def apply(data: dict, log=print) -> dict:
             threading.Thread(target=again, daemon=True).start()
     if isinstance(data.get("enabled"), bool):
         out = set_enabled(data["enabled"], log)
+    if data.get("catchup_now"):
+        if not s.running:
+            raise ValueError("Start the stream first.")
+        s.catchup_now.set()
+        out["catchup"] = "started"
     return {**settings(), **out}
 
 

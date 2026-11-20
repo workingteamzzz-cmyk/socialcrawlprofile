@@ -14,6 +14,9 @@ MODES = {"keyword": None, "link": "BY LINK (paste URLs)", "profile": "BY PROFILE
          "mixed": "MIXED (keyword + link + profil sekaligus)"}
 
 
+LAST_USE: dict = {}         # the last run: credits used, pages skipped as already known
+
+
 def engine():
     from . import engine as eng          # imported on first use (pandas, requests)
     return eng
@@ -188,6 +191,8 @@ def run(cfg: dict, log, progress, stop_event: threading.Event, out_dir: str, dat
     before = set(os.listdir(out_dir))
     out = _Lines(log)
     eng._REQN["other"] = eng._REQN["twitter"] = 0
+    eng.KNOWN.update(on=bool(cfg.get("skip_known")), ids=eng.load_seen_ids() if cfg.get("skip_known") else set(),
+                     stops=0)
     try:
         with contextlib.redirect_stdout(out):
             eng.on_click(None)
@@ -196,6 +201,8 @@ def run(cfg: dict, log, progress, stop_event: threading.Event, out_dir: str, dat
         done.set()
         colab_shim.HOOK["fn"] = None
         settings.record_usage(eng._REQN["other"], eng._REQN["twitter"])
+        LAST_USE.update(credits=eng._REQN["other"] + eng._REQN["twitter"], early_stops=eng.KNOWN["stops"])
+        eng.KNOWN.update(on=False, ids=set())
         eng.ALL_PLATFORMS = all_before
         eng.STOP["on"] = False                  # a Stop ends this run only
         try:

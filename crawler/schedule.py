@@ -21,9 +21,13 @@ from datetime import datetime, timedelta, timezone
 
 KINDS = ("news", "keywords", "profiles", "apiscrape")
 # period collected at run time: (first day, last day) relative to the run's day
-WINDOWS = {"yesterday": (-1, -1), "today": (0, 0), "yesterday_today": (-1, 0), "last_7_days": (-7, -1)}
-WINDOW_LABEL = {"yesterday": "yesterday", "today": "today", "yesterday_today": "yesterday + today",
-                "last_7_days": "the 7 days before"}
+WINDOWS = {"since_last": None, "yesterday": (-1, -1), "today": (0, 0), "yesterday_today": (-1, 0),
+           "last_7_days": (-7, -1)}
+WINDOW_LABEL = {"since_last": "everything since the last run", "yesterday": "yesterday", "today": "today",
+                "yesterday_today": "yesterday + today", "last_7_days": "the 7 days before"}
+AUTO_MIN_H, AUTO_MAX_H = 1, 12          # "automatic" schedules: how often, at the most and at the least
+SINCE_MAX_DAYS = 31                     # "since the last run" never reaches back further than this
+HISTORY = 12                            # runs remembered per schedule (dashboard sparkline, automatic pace)
 TIMEZONES = {"WIB": 7, "WITA": 8, "WIT": 9, "UTC": 0}
 MAX_SCHEDULES = 50
 
@@ -45,19 +49,36 @@ def next_run(s: dict, after: float) -> float:
         if t.timestamp() <= after:
             t += timedelta(days=1)
         return t.timestamp()
+    if s["repeat"] == "auto":
+        return after + float(s.get("auto_hours") or s.get("hours") or 2) * 3600
     return after + int(s["hours"]) * 3600
+
+
+def since(s: dict, at: float) -> float:
+    """'Since the last run': where this run starts — the start of the last run that finished well (a few minutes
+    of overlap; what is already known is skipped anyway), else one day back; never more than SINCE_MAX_DAYS."""
+    last = float(s.get("last_ok") or 0)
+    start = (last - 600) if last else (at - 86400)
+    return max(start, at - SINCE_MAX_DAYS * 86400)
 
 
 def period(s: dict, at: float) -> tuple[str, str]:
     """(start, end) dates, YYYY-MM-DD in the schedule's time zone, for a run at `at`."""
-    day = datetime.fromtimestamp(at, _tz(s.get("payload", {}).get("tz", "WIB"))).date()
+    tz = _tz(s.get("payload", {}).get("tz", "WIB"))
+    day = datetime.fromtimestamp(at, tz).date()
+    if s["window"] == "since_last":
+        return datetime.fromtimestamp(since(s, at), tz).date().isoformat(), day.isoformat()
     a, b = WINDOWS[s["window"]]
     return (day + timedelta(days=a)).isoformat(), (day + timedelta(days=b)).isoformat()
 
 
 def describe(s: dict) -> str:
-    when = f"every day at {s['time']}" if s["repeat"] == "daily" else \
-        ("every hour" if int(s["hours"]) == 1 else f"every {s['hours']} hours")
+    if s["repeat"] == "auto":
+        h = float(s.get("auto_hours") or s.get("hours") or 2)
+        when = f"automatic — now every {h:g} hour{'s' if h != 1 else ''}, faster when much is new"
+    else:
+        when = f"every day at {s['time']}" if s["repeat"] == "daily" else \
+            ("every hour" if int(s["hours"]) == 1 else f"every {s['hours']} hours")
     if s.get("new_only"):
         when += ", only new results"
     return f"{when} ({s.get('payload', {}).get('tz', 'WIB')}), collecting {WINDOW_LABEL[s['window']]}"
@@ -96,6 +117,14 @@ def clean(data: dict) -> dict:
         if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", t):
             raise ScheduleError("Give the time as HH:MM, e.g. 07:00.")
         s["time"] = t
+    elif repeat == "auto":
+        from . import safety
+        least = safety.min_schedule_hours(kind, payload) or AUTO_MIN_H
+        try:
+            h = int(data.get("hours") or 2)
+        except (TypeError, ValueError):
+            h = 2
+        s["hours"] = max(least, min(AUTO_MAX_H, h))          # where the pace starts
     elif repeat == "hours":
         try:
             h = int(data.get("hours"))
@@ -111,7 +140,7 @@ def clean(data: dict) -> dict:
                                 "Choose 6 hours or more — or, for news, the Multi-source engine, which may run hourly.")
         s["hours"] = h
     else:
-        raise ScheduleError("Choose how often: daily or every few hours.")
+        raise ScheduleError("Choose how often: daily, every few hours or automatic.")
     if s["window"] not in WINDOWS:
         raise ScheduleError("Choose the period to collect.")
     if not s["name"]:
@@ -119,6 +148,26 @@ def clean(data: dict) -> dict:
             " ".join(str((payload.get("cfg") or {}).get("queries") or "").split())[:40] or "accounts"
         s["name"] = f"{'API scraper' if kind == 'apiscrape' else kind.capitalize()}: {what}"
     return s
+
+
+def pace(s: dict, new: int) -> float:
+    """Automatic schedules: much new → run sooner (down to the safe minimum), nothing new → later (up to 12 h).
+    'Much' is judged against the schedule's own recent runs, so a busy keyword and a quiet one each find a pace."""
+    from . import safety
+    least = max(AUTO_MIN_H, safety.min_schedule_hours(s["kind"], s.get("payload") or {}) or 0)
+    h = float(s.get("auto_hours") or s.get("hours") or 2)
+    past = [x.get("new") or 0 for x in (s.get("history") or [])[:-1]][-6:]
+    usual = (sum(past) / len(past)) if past else 0
+    if new == 0:
+        h *= 2
+    elif new >= max(20, 2 * usual):          # a surge (a spike in the news): check far more often
+        h /= 2
+    elif new < max(3, usual / 2):
+        h *= 1.5
+    elif new > usual * 1.3:
+        h /= 1.5
+    h = max(least, min(AUTO_MAX_H, h))
+    return round(h * 2) / 2                  # half hours
 
 
 class Scheduler:
@@ -214,20 +263,31 @@ class Scheduler:
         self.job._next_origin = "Manual" if manual else "Auto"         # file names: 20261108_Online_Auto_24.00
         if s.get("new_only"):
             self.job._next_new_only = True                              # each file: only what is new since last run
+        smart = s.get("window") == "since_last" or bool(s.get("new_only"))
+        since_txt = datetime.fromtimestamp(since(s, now), _tz(p["tz"])).strftime("%Y-%m-%d %H:%M") \
+            if s.get("window") == "since_last" else ""
+        self.job._next_smart = smart                                    # skip / stop at what is already known
         if s["kind"] == "news":
             opts = dict(p.get("options") or {})
             if s.get("new_only"):
                 opts["new_only"] = True                                 # the multi-source engine's own memory too
             err = self.job.start_news(p.get("keywords") or [], start, end, p["tz"], opts)
         elif s["kind"] == "keywords":
+            opts = dict(p.get("options") or {})
+            if smart:
+                opts["stop_known"] = True                               # stop scrolling at what earlier runs have
+            if since_txt:
+                opts["since"] = since_txt                               # the API's time filter: to the minute
             err = self.job.start_keywords(p.get("keywords") or [], start, end, p["tz"], p.get("platforms") or [],
-                                          p.get("options") or {})
+                                          opts)
         elif s["kind"] == "apiscrape":
             cfg = dict(p.get("cfg") or {})
             if cfg.get("mode", "keyword") == "keyword":          # the schedule's period becomes the time filter
-                cfg["time_from"], cfg["time_to"] = f"{start} 00:00", f"{end} 23:55"
+                cfg["time_from"], cfg["time_to"] = (since_txt or f"{start} 00:00"), f"{end} 23:55"
             if s.get("new_only"):
                 cfg["delta"] = True                             # the engine skips posts it already delivered
+            if smart:
+                cfg["skip_known"] = True                        # known posts: no paid look-ups, a known page ends paging
             err = self.job.start_apiscrape(cfg)
         else:
             from . import store
@@ -237,6 +297,7 @@ class Scheduler:
         if err:
             self.job.__dict__.pop("_next_origin", None)
             self.job.__dict__.pop("_next_new_only", None)
+            self.job.__dict__.pop("_next_smart", None)
             return err                                       # a scheduled one stays due and is tried again
         with self.lock:
             self.running_id = (s["id"], self.job.job_id, s["kind"], start, end)
@@ -245,7 +306,9 @@ class Scheduler:
             if not manual:
                 s["next_run"] = next_run(s, now)
             self._save()
-        self.job.log(f"⏰ Schedule “{s['name']}” started — period {start} to {end}")
+        self.job.log(f"⏰ Schedule “{s['name']}” started — "
+                     + (f"since the last run ({since_txt})" if since_txt else f"period {start} to {end}")
+                     + (" · already-collected results are skipped" if smart else ""))
         self.audit("schedule", "started a scheduled run", name=s["name"], period=f"{start}..{end}")
         return None
 
@@ -269,11 +332,30 @@ class Scheduler:
         else:
             result = (f"{len(files)} file(s)" if kind == "apiscrape" else f"{mode.get('count', 0)} links") + \
                 (f" — {files[0]}" if files else "")
+        stats = dict(getattr(self.job, "run_stats", None) or {}) if same_job else {}
         with self.lock:
             self.running_id = None
             s = next((x for x in self.items if x["id"] == sid), None)
             if s:
+                ok = same_job and not st.get("error") and not stats.get("stopped")
+                if stats.get("new") is not None and same_job:
+                    result += f" · {stats['new']} new" + (f", {stats['known']} already known" if stats.get("known")
+                                                         else "")
                 s["last_result"] = result
+                if ok:
+                    s["last_ok"] = s.get("last_run") or time.time()
+                if same_job and stats:
+                    s["history"] = (s.get("history") or [])[-(HISTORY - 1):] + [
+                        {"t": int(s.get("last_run") or time.time()), **{k: stats.get(k) for k in
+                                                                        ("found", "new", "known", "reused",
+                                                                         "credits", "secs")}}]
+                if s.get("repeat") == "auto" and ok:
+                    old_h = float(s.get("auto_hours") or s.get("hours") or 2)
+                    s["auto_hours"] = pace(s, stats.get("new") or 0)
+                    s["next_run"] = (s.get("last_run") or time.time()) + s["auto_hours"] * 3600
+                    if s["auto_hours"] != old_h:
+                        self.job.log(f"⏱ “{s['name']}”: {stats.get('new') or 0} new → next run in "
+                                     f"{s['auto_hours']:g} h (was {old_h:g} h)")
                 self._save()
         name = s["name"] if s else "schedule"
         from .telegram_bot import public_url

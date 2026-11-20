@@ -1570,6 +1570,12 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
     <!-- SCHEDULES -->
     <section class="page" id="p-schedules">
       <div class="pagehead"><div><h1>Schedules</h1><p>Searches that run by themselves — e.g. news for yesterday, every morning. Set a search up on its page, then click <b>Schedule it</b>. Each run saves its own Excel file (Exports).</p></div></div>
+      <div class="kpis" id="schEff">
+        <div class="kpi"><small>Runs · last 7 days</small><b id="seRuns">–</b><span class="hint" id="seRunsN"></span></div>
+        <div class="kpi"><small>New results</small><b id="seNew">–</b><span class="hint" id="seNewN"></span></div>
+        <div class="kpi"><small>Skipped as already known</small><b id="seKnown">–</b><span class="hint" id="seKnownN"></span></div>
+        <div class="kpi"><small>Taken from Live Stream · credits</small><b id="seReused">–</b><span class="hint" id="seReusedN"></span></div>
+      </div>
       <div class="card"><div class="card-bd" style="overflow-x:auto"><table class="tbl" id="schTbl"><thead><tr><th>Name</th><th>What</th><th>When</th><th>Next run</th><th>Last run</th><th></th></tr></thead><tbody></tbody></table></div></div>
       <p class="hint" id="schHint" style="margin-top:12px"></p>
     </section>
@@ -1689,12 +1695,12 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
       <p class="hint" style="margin-top:0" id="schWhat"></p>
       <div class="field"><label for="schName">Name</label><input id="schName" maxlength="80"></div>
       <div class="field"><label for="schRepeat">How often</label>
-        <select id="schRepeat"><option value="daily">Every day at a set time</option><option value="hours">Every hour / every few hours</option></select></div>
+        <select id="schRepeat"><option value="auto">Automatic — sooner when much is new, later when quiet (recommended)</option><option value="daily">Every day at a set time</option><option value="hours">Every hour / every few hours</option></select></div>
       <div class="field" id="schTimeF"><label for="schTime">Time (<span id="schTz">WIB</span>)</label><input id="schTime" type="time" value="07:00"></div>
       <div class="field" id="schHoursF" style="display:none"><label for="schHours">Every</label>
         <select id="schHours"><option value="1">1 hour</option><option value="2">2 hours</option><option value="3">3 hours</option><option value="4">4 hours</option><option value="6">6 hours</option><option value="8">8 hours</option><option value="12">12 hours</option></select></div>
       <div class="field"><label for="schWindow">Period collected at each run</label>
-        <select id="schWindow"><option value="yesterday">Yesterday (best for a daily run)</option><option value="today">Today so far</option>
+        <select id="schWindow"><option value="since_last">Everything since the last run (recommended)</option><option value="yesterday">Yesterday (best for a daily run)</option><option value="today">Today so far</option>
           <option value="yesterday_today">Yesterday + today</option><option value="last_7_days">The 7 days before</option></select></div>
       <label class="opt-row" style="margin-top:6px"><span class="t"><b>Each file: only what is new</b><small>Leaves out what an earlier run of any search already delivered — for hourly runs, each file holds only the last hour's new posts / articles</small></span>
         <span class="switch"><input type="checkbox" id="schNew"><span></span></span></label>
@@ -3368,14 +3374,15 @@ let schDraft = null;
 const closeSch = () => schModal.classList.remove('show');
 $('schClose').onclick = closeSch; $('schCancel').onclick = closeSch;
 schModal.addEventListener('click', e => { if (e.target === schModal) closeSch(); });
-$('schRepeat').onchange = () => { const d = $('schRepeat').value === 'daily';
+$('schRepeat').onchange = () => { const v = $('schRepeat').value, d = v === 'daily';
   $('schTimeF').style.display = d ? '' : 'none'; $('schHoursF').style.display = d ? 'none' : '';
-  $('schWindow').value = d ? 'yesterday' : 'today'; $('schNew').checked = !d; };
+  $('schHoursF').querySelector('label').textContent = v === 'auto' ? 'Start at every' : 'Every';
+  $('schWindow').value = d ? 'yesterday' : 'since_last'; $('schNew').checked = !d; };
 function openSch(kind, payload, what, name){
   schDraft = {kind, payload};
   $('schWhat').textContent = what; $('schName').value = name; $('schTz').textContent = payload.tz || 'WIB';
-  $('schErrs').innerHTML = ''; $('schRepeat').value = 'daily'; $('schRepeat').onchange();
-  $('schWindow').value = 'yesterday'; $('schHook').value = ''; $('schToken').value = ''; schModal.classList.add('show');
+  $('schErrs').innerHTML = ''; $('schRepeat').value = 'auto'; $('schHours').value = '2'; $('schRepeat').onchange();
+  $('schHook').value = ''; $('schToken').value = ''; schModal.classList.add('show');
 }
 $('schSave').onclick = async () => {
   const r = await api('/api/schedules/save', {...schDraft, name: $('schName').value.trim(), repeat: $('schRepeat').value,
@@ -3412,16 +3419,34 @@ const when = t => t ? new Date(t * 1000).toLocaleString('en-GB', {day: 'numeric'
 const rel = t => { if (!t) return ''; const m = Math.round((t * 1000 - Date.now()) / 60000);
   return m <= 0 ? 'due now' : m < 60 ? `in ${m} min` : m < 1440 ? `in ${Math.floor(m / 60)} h ${m % 60 ? (m % 60) + ' min' : ''}` : `in ${Math.round(m / 1440)} day(s)`; };
 let schList = [];
+function schSpark(s){                                     // new results per run: the schedule's recent rhythm
+  const h = (s.history || []).slice(-12); if (h.length < 2) return '';
+  const W = 120, H = 26, max = Math.max(1, ...h.map(x => x.new || 0));
+  const bw = W / h.length;
+  return `<div title="New results per run (last ${h.length} runs)" style="margin-top:6px"><svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-label="New results per run">${h.map((x, i) => {
+    const v = x.new || 0, bh = Math.max(1.5, v / max * (H - 2));
+    return `<rect x="${(i * bw + 1).toFixed(1)}" y="${(H - bh).toFixed(1)}" width="${Math.max(2, bw - 2).toFixed(1)}" height="${bh.toFixed(1)}" rx="1.5" fill="var(--accent)" opacity="${v ? .85 : .25}"><title>${new Date(x.t * 1000).toLocaleString()} — ${v} new, ${x.known || 0} known</title></rect>`; }).join('')}</svg></div>`;
+}
+function schEfficiency(){
+  const since = Date.now() / 1000 - 7 * 86400, runs = schList.flatMap(s => (s.history || []).filter(x => x.t >= since));
+  const sum = k => runs.reduce((a, x) => a + (+x[k] || 0), 0);
+  const nw = sum('new'), kn = sum('known'), ru = sum('reused'), cr = sum('credits');
+  $('seRuns').textContent = fmt(runs.length); $('seRunsN').textContent = `${schList.filter(s => s.enabled).length} active schedule(s)`;
+  $('seNew').textContent = fmt(nw); $('seNewN').textContent = 'delivered for the first time';
+  $('seKnown').textContent = fmt(kn); $('seKnownN').textContent = nw + kn ? `${Math.round(kn * 100 / (nw + kn))}% of what was found — not read or paid for again` : '';
+  $('seReused').textContent = fmt(ru); $('seReusedN').textContent = `articles not downloaded again · ${fmt(cr)} API credits used`;
+}
 async function loadSchedules(){
   const d = await api('/api/schedules');
   schList = d.schedules || [];
+  schEfficiency();
   $('navSch').textContent = schList.length;
   $('schTbl').querySelector('tbody').innerHTML = schList.map((s, i) => {
     const p = s.payload || {}, what = s.kind === 'profiles' ? `${(p.ids || []).length} accounts` : (p.keywords || []).join(', ');
     return `<tr><td><b>${esc(s.name)}</b><br><span class="pill sm ${s.running ? 'run' : ''} ${s.enabled ? '' : 'off'}"><i></i>${s.running ? 'Running now' : s.enabled ? 'Active' : 'Paused'}</span></td>
       <td>${esc(KIND_LABEL[s.kind])}<br><small class="hint">${esc(what)}</small></td><td>${esc(s.describe)}${s.webhook ? '<br><small class="hint">→ results sent to ' + esc(new URL(s.webhook).host) + '</small>' : ''}</td>
       <td>${s.enabled ? `${when(s.next_run)}<br><small class="hint">${rel(s.next_run)}</small>` : '—'}</td>
-      <td>${s.running ? '<b>running now</b>' : when(s.last_run)}<br><small class="hint">${esc(s.last_result || '')}</small></td>
+      <td>${s.running ? '<b>running now</b>' : when(s.last_run)}<br><small class="hint">${esc(s.last_result || '')}</small>${schSpark(s)}</td>
       <td style="white-space:nowrap"><button class="btn sm" data-run="${i}">Run now</button>
         <button class="btn sm" data-tog="${i}">${s.enabled ? 'Pause' : 'Resume'}</button>
         <button class="btn sm ghost" data-del="${i}" style="color:var(--bad)">Delete</button></td></tr>`.replace(/<button class="btn sm/g, '<button class="need-op btn sm');

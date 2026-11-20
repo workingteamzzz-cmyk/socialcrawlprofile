@@ -381,3 +381,37 @@ def test_telegram_messages_for_verifications_and_finished_schedules(tmp_path, mo
     wait(4)
     assert any("finished — 42 links" in b["text"] for _, b in got[2:])
     httpd.shutdown()
+
+
+def test_since_the_last_run_and_the_automatic_pace(tmp_path):
+    """'Since the last run' starts where the last good run started; 'automatic' runs sooner when much is new and
+    later when nothing is — and every run is remembered (found / new / known) for the dashboard."""
+    job = FakeJob()
+    s = sch.Scheduler(str(tmp_path / "schedules.json"), job)
+    multi = {**NEWS, "payload": {**NEWS["payload"], "options": {"engine": "multi"}}}   # may run hourly (safe mode)
+    item = s.save({**multi, "repeat": "auto", "hours": 2, "window": "since_last"})
+    assert "automatic" in sch.describe(item) and "since the last run" in sch.describe(item)
+    t0 = item["next_run"]
+    assert item["next_run"] - item["created"] == pytest.approx(2 * 3600, abs=5)
+    s.tick(t0 + 1)                                                           # first run: one day back
+    assert job.calls[-1][2:4] == sch.period({**item, "last_ok": None}, t0 + 1)
+    job.run_stats = {"found": 50, "new": 40, "known": 10, "reused": 30, "credits": None, "secs": 60}
+    job.finish(count=50)
+    s.tick(t0 + 100)
+    it = s.list()[0]
+    assert it["last_ok"] == pytest.approx(t0 + 1) and it["history"][-1]["new"] == 40
+    assert it["auto_hours"] == 1.0 and it["next_run"] == pytest.approx(t0 + 1 + 3600)   # a surge: sooner
+    assert "40 new, 10 already known" in it["last_result"]
+    t1 = it["next_run"]
+    s.tick(t1 + 1)                                                           # since the last run, to the minute
+    assert job.calls[-1][2] == sch.period(it, t1 + 1)[0]
+    for quiet in range(3):                                                   # nothing new: later and later, max 12 h
+        job.run_stats = {"found": 5, "new": 0, "known": 5}
+        job.finish(count=5)
+        s.tick(s.list()[0]["next_run"] - 1)
+        nr = s.list()[0]["next_run"]
+        s.tick(nr + 1)
+    assert s.list()[0]["auto_hours"] == 8.0
+    assert sch.pace({**s.list()[0], "auto_hours": 12}, 0) == 12
+    assert sch.since({"last_ok": 0}, 100 * 86400) == 99 * 86400
+    assert sch.since({"last_ok": 1}, 100 * 86400) == 100 * 86400 - sch.SINCE_MAX_DAYS * 86400

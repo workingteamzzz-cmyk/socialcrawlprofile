@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS items (
 );
 CREATE INDEX IF NOT EXISTS idx_items_day ON items(kind, day);
 CREATE INDEX IF NOT EXISTS idx_items_seen ON items(kind, last_seen, key);
+CREATE TABLE IF NOT EXISTS urls (u TEXT PRIMARY KEY);   -- every link stored, normalized (known-link checks)
 """
 
 
@@ -102,6 +103,9 @@ def add(kind: str, items: list[tuple[str, dict]]) -> int:
                 if not key or key in ("online:", "medsos:"):
                     continue
                 kws = [k.strip().lower() for k in str(kw or "").split(",") if k.strip()]
+                u = _norm_url(str(row.get("URL") or row.get("Url") or ""))
+                if u:
+                    c.execute("INSERT OR IGNORE INTO urls VALUES (?)", (u,))
                 if kind == "online":
                     day, src, sent = _iso_day(row.get("DATE")), row.get("MEDIA") or "", row.get("SENTIMENT") or ""
                     text = f"{row.get('TITLE') or ''} {row.get('SUMMARY') or ''} {row.get('CONTENT') or ''}"
@@ -163,6 +167,57 @@ def only_new(kind: str, rows: list[dict], tz) -> list[dict]:
         finally:
             c.close()
     return [r for r, k in zip(rows, keys) if not k or k not in known]
+
+
+def new_since(kind: str, rows: list[dict], tz, since: str) -> int:
+    """How many of a run's rows reached the database for the first time at or after `since` (the run's start)."""
+    keys = [k for k in set(_row_keys(kind, list(rows), tz)) if k]
+    n = 0
+    with _LOCK:
+        c = _db()
+        try:
+            for i in range(0, len(keys), 500):
+                part = keys[i:i + 500]
+                n += c.execute(f"SELECT COUNT(*) FROM items WHERE kind=? AND first_seen >= ? AND key IN "
+                               f"({','.join('?' * len(part))})", (kind, since, *part)).fetchone()[0]
+        finally:
+            c.close()
+    return n
+
+
+def known_urls(urls: list[str]) -> set:
+    """The links (posts or articles) already in the database — to stop scrolling where earlier runs got to."""
+    want = {_norm_url(u): u for u in urls if u}
+    if not want:
+        return set()
+    got: set = set()
+    with _LOCK:
+        c = _db()
+        try:
+            _fill_urls(c)
+            keys = list(want)
+            for i in range(0, len(keys), 500):
+                part = keys[i:i + 500]
+                got |= {r[0] for r in c.execute(f"SELECT u FROM urls WHERE u IN ({','.join('?' * len(part))})", part)}
+        finally:
+            c.close()
+    return {want[k] for k in got}
+
+
+def _fill_urls(c) -> None:
+    """Once: the links of rows stored before the urls table existed."""
+    if c.execute("SELECT 1 FROM urls WHERE u='~filled'").fetchone():
+        return
+    for r in c.execute("SELECT row FROM items").fetchall():
+        try:
+            d = json.loads(r[0] or "{}")
+        except ValueError:
+            continue
+        u = _norm_url(str(d.get("URL") or d.get("Url") or ""))
+        if u:
+            c.execute("INSERT OR IGNORE INTO urls VALUES (?)", (u,))
+    c.execute("INSERT OR IGNORE INTO urls VALUES ('~filled')")
+    c.commit()
 
 
 def add_rows(kind: str, rows: list[dict], tz, keyword_of=None) -> int:

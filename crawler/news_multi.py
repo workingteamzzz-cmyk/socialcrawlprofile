@@ -169,6 +169,48 @@ def _shared_reads(ttl: float = 15 * 60):
     return undo
 
 
+def _from_stream(pipeline, data_dir: str, counter: dict):
+    """Articles the Live Stream already read are taken from its database instead of being downloaded again
+    (the stream reads 1,000+ outlets around the clock, so most of a search's articles are often there already).
+    Wraps the engine's article reader for this run only; returns undo."""
+    import sqlite3
+    import zlib
+    from .stream import norm_key
+    path = os.path.join(data_dir, "stream", "stream.db")
+    orig = pipeline.extract_article
+    if not os.path.exists(path):
+        return lambda: None
+
+    def read(url, *a, **k):
+        try:
+            c = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
+            c.row_factory = sqlite3.Row
+            try:
+                r = c.execute("SELECT * FROM articles WHERE key=? AND status='success'", (norm_key(url),)).fetchone()
+            finally:
+                c.close()
+        except sqlite3.Error:
+            r = None
+        text = ""
+        if r is not None and r["content"]:
+            try:
+                text = zlib.decompress(r["content"]).decode("utf-8", "ignore")
+            except zlib.error:
+                text = ""
+        if len(text) < 200 or not r["title"]:
+            return orig(url, *a, **k)
+        counter["n"] = counter.get("n", 0) + 1
+        return {"title": r["title"], "content": text, "is_article": True, "date": r["pub_date"] or "",
+                "time": r["pub_time"] or "", "summary": r["summary"] or "", "author": r["author"] or "",
+                "image": r["image"] or "", "influencer": r["influencer"] or "", "persons": r["persons"] or "",
+                "organizations": "", "media": "", "method": "live-stream", "error": ""}
+    pipeline.extract_article = read
+
+    def undo():
+        pipeline.extract_article = orig
+    return undo
+
+
 def _live(Database, on_hit, start: str, end: str, include_review: bool, need_keyword: bool = True):
     """Every article the engine accepts is handed over the moment it has been read — not at the end of the run —
     so it reaches the reporting database, the dashboard and the Excel file while the search goes on. Done by
@@ -318,8 +360,11 @@ def run(keywords: list[str], start: str, end: str, opt, tz, log, stop_event: thr
         r["keyword"] = to_dash.get(r["keyword"], keywords[0] if len(keywords) == 1 else r["keyword"])
         on_row(r)
     undo_l = _live(Database, hit if on_row else None, start, end, bool(opt.include_review))
+    reused: dict = {}
+    undo_s = _from_stream(pipeline, data_dir, reused)
 
     def undo():
+        undo_s()
         undo_l()
         undo_f()
         undo_r()
@@ -336,6 +381,8 @@ def run(keywords: list[str], start: str, end: str, opt, tz, log, stop_event: thr
     finally:
         done.set()
         undo()
+        if reused.get("n"):
+            log(f"♻️ {reused['n']} article(s) taken from the Live Stream's database — not downloaded again")
         pipeline.clear_stop()
         _RUN_LOCK.release()
     db = Database(cfg.db_path)
@@ -361,6 +408,7 @@ def run(keywords: list[str], start: str, end: str, opt, tz, log, stop_event: thr
             shutil.copyfile(os.path.join(cfg.output_folder, name), os.path.join(out_dir, dest))
             extra.append(dest)
     stat["needs_review_left"] = sum(1 for h in hits if h["status"] == "needs_review")
+    stat["reused_stream"] = reused.get("n", 0)
     return rows, extra, stat
 
 
@@ -424,7 +472,9 @@ def import_links(links: list[str], tz, log, stop_event: threading.Event, data_di
         r = _row(h, tz)
         r["keyword"] = BULK_LABEL
         on_row(r)
-    undo = _live(Database, hit if on_row else None, "", "", True, need_keyword=False)
+    undo_l = _live(Database, hit if on_row else None, "", "", True, need_keyword=False)
+    reused: dict = {}
+    undo_s = _from_stream(pipeline, data_dir, reused) if not force else (lambda: None)
     try:
         pipeline.clear_stop()
         threading.Thread(target=watch, daemon=True).start()
@@ -433,9 +483,13 @@ def import_links(links: list[str], tz, log, stop_event: threading.Event, data_di
         stat = pipeline.import_links(cfg, links, log=log, label="", force=force)
     finally:
         done.set()
-        undo()
+        undo_s()
+        undo_l()
+        if reused.get("n"):
+            log(f"♻️ {reused['n']} article(s) taken from the Live Stream's database — not downloaded again")
         pipeline.clear_stop()
         _RUN_LOCK.release()
+    stat["reused_stream"] = reused.get("n", 0)
     db = Database(cfg.db_path)
     try:
         hits = results(db, stat["batch"], "", "", True)

@@ -725,3 +725,29 @@ def test_titles_that_name_no_news_are_skipped(tmp_path):
         s._db.commit()
     assert s.drop_junk_titles() == 1 and s.drop_junk_titles() == 0          # once per filter version
     assert [r["title"] for r in s.rq("SELECT title FROM articles WHERE status='success'")] == ["PLN Amankan Pembiayaan"]
+
+
+def test_scrolling_stops_where_earlier_runs_got_to():
+    """Two screens in a row with only posts collected before: the search stops scrolling (scheduled runs)."""
+    from datetime import datetime, timedelta, timezone
+
+    from crawler.browser import BrowserCrawler, Post
+    now = datetime.now(timezone.utc)
+    c = BrowserCrawler.__new__(BrowserCrawler)
+    c.start, c.end, c.logs = now - timedelta(days=2), now, []
+    c.log = c.logs.append
+    c._check_stop = c._scroll = c._pause = lambda *a: None
+    screens = iter([[f"https://x.com/a/status/{i}" for i in range(s, s + 5)] for s in range(0, 100, 5)])
+    shown = []
+
+    def extract():
+        urls = next(screens, [])
+        shown.extend(urls)
+        return [Post(url=u, time_utc=now - timedelta(hours=1)) for u in urls]
+    c.known_fn = lambda urls: {u for u in urls if int(u.rsplit("/", 1)[1]) >= 10}   # older ones were collected before
+    got = c._scroll_loop({}, extract, 0, 5, 50, 0)
+    assert len(shown) == 20 and len(got) == 20 and any("stopped scrolling" in x for x in c.logs)
+    c.known_fn = None
+    screens = iter([[f"https://x.com/a/status/{i}" for i in range(s, s + 5)] for s in range(0, 100, 5)])
+    shown.clear()
+    assert len(c._scroll_loop({}, extract, 0, 5, 50, 0)) == 100              # manual runs: everything, as before

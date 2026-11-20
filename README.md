@@ -329,6 +329,24 @@ Measured on a 4-CPU test machine with local test sites: ~37 articles/second (≈
 core. On the real internet the pace is set by how many articles the media publish and how fast their sites answer; the
 page shows the live pace and the "per day at this pace" figure.
 
+## Smart automation (skip what is already known)
+
+Schedules → **How often: Automatic** and **Period: Everything since the last run** (both the default for new schedules):
+
+- **Since the last run**: each run searches from the start of the last run that finished well (a few minutes of
+  overlap) — no fixed "yesterday / 7 days"; a gap while the server was off is covered by itself (max. 31 days back).
+  API runs use it to the minute (fewer pages, fewer credits).
+- **Automatic pace**: much new (a surge against the schedule's own recent runs) → the next run comes sooner (down to
+  safe mode's minimum, at least 1 h); nothing new → later (up to 12 h). The log says when the pace changes.
+- **Stop at what is known**: scheduled browser searches stop scrolling after two screens of posts that earlier runs
+  collected; the API stops paging at a page of known posts. Known posts get no paid look-ups (comments, followers,
+  user ID) and are not opened again for their details.
+- **News from the Live Stream**: News Search and Bulk links take an article the Live Stream already read from its
+  database instead of downloading it again.
+- **One link, many keywords**: a post or article found by several keywords is one row with all of them (also API).
+- Every run ends with a line like `📊 This run: 120 found · 35 new · 85 already in the database · 60 taken from the
+  Live Stream · 14 credits · 3 min`; the Schedules page shows the week's totals and each schedule's new results per run.
+
 ## Keyword Search with the API
 
 Keyword Search → **Search engine**: *Browser (no API)* — free, uses the signed-in accounts — or *API (uses credits)* —

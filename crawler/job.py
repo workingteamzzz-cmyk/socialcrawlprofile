@@ -74,7 +74,9 @@ def _api_rows(path: str, kws: list[str]) -> list[dict]:
                 continue
             p = str(r.get("Platform") or "").lower()
             q = str(r.get("Query") or "").replace("(comment)", "").strip()
-            kw = lower.get(q.lower()) or next((k for k in kws if k.lower() in q.lower()), q or (kws[0] if kws else ""))
+            mine = [lower[x.strip().lower()] for x in q.split(",") if x.strip().lower() in lower]   # one post, many keywords
+            kw = mine[0] if mine else (next((k for k in kws if k.lower() in q.lower()), q or (kws[0] if kws else "")))
+            mine = mine or [kw]
             d, t = r.get("Date"), r.get("Time")
             d = d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d or "")[:10]
             t = t.strftime("%H:%M") if hasattr(t, "strftime") else str(t or "")[:5]
@@ -83,8 +85,8 @@ def _api_rows(path: str, kws: list[str]) -> list[dict]:
             except ValueError:
                 ts = 0
             out.append({"platform": next((v for k, v in plat_key.items() if k in p), p or "other"), "url": url,
-                        "author": str(r.get("Username") or ""), "date": d, "time": t, "ts": ts, "keyword": kw,
-                        "keywords": [kw], "caption": str(r.get("Text") or ""), "likes": r.get("Likes"),
+                        "author": str(r.get("Username") or ""), "date": d, "time": t, "ts": ts,
+                        "keyword": ", ".join(mine), "keywords": mine, "caption": str(r.get("Text") or ""), "likes": r.get("Likes"),
                         "comments": r.get("Reply"), "shares": r.get("Shares"), "views": r.get("Views Count"),
                         "sub_type": str(r.get("Sub Type") or "")})
     finally:
@@ -160,6 +162,9 @@ class Job:
             self.kind = kind
             self._origin = self.__dict__.pop("_next_origin", None) or "Manual"   # "Auto" for scheduled runs
             self._new_only = bool(self.__dict__.pop("_next_new_only", False))  # hourly schedules: only new rows
+            self._smart = bool(self.__dict__.pop("_next_smart", False))        # skip / stop at what is known
+            self._t0, self._t0s = time.time(), time.strftime("%Y-%m-%d %H:%M:%S")
+            self.run_stats, self._reused, self._credits, self._api_new = {}, 0, None, None
             self.logs, self.log_total, self.done, self.total, self.current, self.error = [], 0, 0, 0, "", ""
             self.__dict__.pop("_save_warned", None)
             self._last_save = 0
@@ -176,6 +181,10 @@ class Job:
                 self.log(f"❌ Error: {first}")
                 traceback.print_exc()
             finally:
+                try:
+                    self._run_summary(kind)
+                except Exception:  # noqa: BLE001  numbers only: never cost a run its file
+                    pass
                 self.running = False
                 self.current = ""
                 if kind in MODES:
@@ -187,6 +196,35 @@ class Job:
         self.thread = threading.Thread(target=wrap, daemon=True)
         self.thread.start()
         return None
+
+    def _run_summary(self, kind: str) -> None:
+        """What this run did, against what the server already had: found, new, already known, taken from the Live
+        Stream instead of downloaded, credits — in the log, and for the schedule (its pace and its history)."""
+        if kind not in MODES and kind != "apiscrape":
+            return
+        from . import archive
+        rows = list(self.data[kind]["links"]) if kind in MODES else []
+        layout = "online" if kind == "news" else "medsos"
+        found = len(rows) if kind in MODES else 0
+        if self._api_new is not None:
+            new = self._api_new
+            found = found or new
+        else:
+            new = archive.new_since(layout, rows, timezone(timedelta(hours=7)), self._t0s) if rows else 0
+        st = {"found": found, "new": min(new, found) if found else new, "known": max(0, found - new),
+              "reused": self._reused, "credits": self._credits, "secs": int(time.time() - self._t0),
+              "stopped": self.stop_flag.is_set()}
+        self.run_stats = st
+        bits = [f"{st['found']} found", f"{st['new']} new"]
+        if st["known"]:
+            bits.append(f"{st['known']} already in the database")
+        if st["reused"]:
+            bits.append(f"{st['reused']} taken from the Live Stream (not downloaded again)")
+        if st["credits"] is not None:
+            bits.append(f"{st['credits']} credits")
+        m, sec = divmod(st["secs"], 60)
+        bits.append(f"{m} min {sec} s" if m else f"{sec} s")
+        self.log("📊 This run: " + " · ".join(bits))
 
     def stop(self):
         """Stop the running job. It finishes the articles / pages it is reading right now and saves what it collected
@@ -643,9 +681,11 @@ class Job:
                 return max(lo, min(hi, int(a.get(k, d))))
             except (TypeError, ValueError):
                 return d
+        since = str(options.get("since") or "")
         cfg = {"mode": "keyword", "platforms": names, "queries": "\n".join(kws),
                "limit": num("limit", 30, 1, 1000), "budget": num("budget", 200, 0, 1_000_000),
-               "time_from": f"{start} 00:00", "time_to": f"{end} 23:59", "strict": True,
+               "time_from": since if re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", since) else f"{start} 00:00",
+               "time_to": f"{end} 23:59", "strict": True, "skip_known": bool(options.get("stop_known")),
                "lang": options.get("x_lang") if options.get("x_lang") in ("id", "en") else "",
                "neg_use": bool(excl), "neg_kw": ", ".join(excl), "dedup": True,
                "fillid": full,                                   # account IDs / pictures: extra look-ups
@@ -681,11 +721,14 @@ class Job:
                 self.total, self.done = total, min(done or 0, total)
             if label:
                 self.current = label[:160]
+        if self._smart:
+            cfg["skip_known"] = True
         self._quiet = True
         try:
             files = runner.run(cfg, self.log, progress, self.stop_flag, OUTPUT_DIR, APP_DATA)
         finally:
             self._quiet = False
+            self._credits = runner.LAST_USE.get("credits")
         b["files"] = files
         rows = []
         for f in files:
@@ -695,16 +738,19 @@ class Job:
             b["links"][:] = rows
             for kw in kws:
                 st = {"keyword": kw, "platform": "api", "status": "ok",
-                      "count": sum(1 for r in rows if r["keyword"] == kw), "note": "API"}
+                      "count": sum(1 for r in rows if kw in r["keywords"]), "note": "API"}
                 b["statuses"].append(st)
             b["version"] += 1
         if files:
             try:
                 from . import archive
                 n = sum(archive.import_file(os.path.join(OUTPUT_DIR, f))[1] for f in files if f.endswith(".xlsx"))
+                self._api_new = n
                 self.log(f"🗄 Reporting database: {n} new")
             except Exception as e:  # noqa: BLE001
                 self.log(f"⚠ Reporting database not updated: {str(e)[:120]}")
+        else:
+            self._api_new = 0
         self.log(("⏹ Stopped. " if self.stop_flag.is_set() else "✅ Done. ") + f"{len(rows)} posts"
                  + (f" → {', '.join(x for x in files if x.endswith('.xlsx'))}" if files else " — no file (nothing found)"))
 
@@ -770,6 +816,9 @@ class Job:
             ctx = launch_context(pw, PROFILE_DIR)
             crawler = KeywordCrawler(ctx, self.log, self.stop_flag, start_utc, end_utc)
             crawler.debug_dir = os.path.join(OUTPUT_DIR, "debug")
+            if opt.stop_known or self._smart:
+                from . import archive
+                crawler.known_fn = archive.known_urls        # stop scrolling where earlier runs already got to
             self._check_logins(ctx, [p for p in plats if p != "youtube"])
             for i, (kw, plat) in enumerate(tasks):
                 if self.stop_flag.is_set():
@@ -782,6 +831,12 @@ class Job:
                     res = getattr(crawler, f"search_{plat}")(kw, opt)
                     if opt.detail == "full" and res.posts:
                         fresh = [p for p in res.posts if p.url not in seen]     # skip links already read for another keyword
+                        if self._new_only and fresh:                  # only-new files: posts earlier runs delivered
+                            from . import archive                     # are left out anyway — not opened again
+                            known = archive.known_urls([p.url for p in fresh])
+                            if known:
+                                fresh = [p for p in fresh if p.url not in known]
+                                self.log(f"   ⏭ {len(known)} post(s) already collected by an earlier run — not opened again")
                         if self._fill_details(crawler, plat, fresh, label):
                             stopped = True
                             res.note = (res.note + "; " if res.note else "") + "stopped while reading details"
@@ -1045,6 +1100,7 @@ class Job:
                 raise RuntimeError(miss)
             rows, extra, stat = news_multi.run(kws, f"{d_start:%Y-%m-%d}", f"{d_end:%Y-%m-%d}", opt, tz, self.log,
                                                self.stop_flag, APP_DATA, OUTPUT_DIR, on_row=live)
+            self._reused = stat.get("reused_stream", 0)
             with self.lock:                                   # the final rows (with the engine's sentiment) replace the live copies
                 final = {_key(r["url"]) for r in rows} & live_keys   # a live article missing from the end stays
                 for k in final:
@@ -1145,6 +1201,7 @@ class Job:
         self.current = f"Reading {len(links)} pasted links"
         rows, stat = news_multi.import_links(links, tz, self.log, self.stop_flag, APP_DATA, OUTPUT_DIR, force,
                                              on_row=live)
+        self._reused = stat.get("reused_stream", 0)
         with self.lock:                           # the final rows (with sentiment) replace the live copies
             for r in rows:
                 r["keywords"] = [r["keyword"]]
@@ -1220,18 +1277,23 @@ class Job:
                 self.current = label[:160]
         self._quiet = True
         self.log(f"API scraper — {cfg.get('mode', 'keyword')} · {cfg.get('platform') or ''}".rstrip(" ·"))
+        if self._smart:
+            cfg = {**cfg, "skip_known": True}
         try:
             files = runner.run(cfg, self.log, progress, self.stop_flag, OUTPUT_DIR, APP_DATA)
         finally:
             self._quiet = False
+            self._credits = runner.LAST_USE.get("credits")
         self.api_files = files
         if files:
             self.log("✅ Files in Exports: " + ", ".join(files))
             try:
                 from . import archive
+                self._api_new = 0
                 for f in files:
                     if f.endswith(".xlsx"):
                         _k, n = archive.import_file(os.path.join(OUTPUT_DIR, f))
+                        self._api_new += n
                         self.log(f"🗄 Reporting database: {n} new row(s) from {f}")
             except Exception as e:  # noqa: BLE001
                 self.log(f"⚠ Reporting database not updated: {str(e)[:120]}")

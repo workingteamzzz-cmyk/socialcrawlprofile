@@ -655,6 +655,8 @@ def save_checkpoint(rows, force=False):
         pass
 
 SEEN_FILE = "seen_ids.json"
+# skip what earlier runs collected (set by the dashboard for scheduled runs): ids = load_seen_ids() of the run's start
+KNOWN = {"on": False, "ids": set(), "stops": 0}
 
 def _seen_path():
     try:
@@ -916,6 +918,12 @@ def scrape(platform, term, max_items, since_d, until_d, want_raw, log, s_ep=None
             if len(rows) >= max_items:
                 break
         page += 1
+        if KNOWN["on"] and new >= 5:
+            _pl = platform.split(" ")[0]
+            if all(f"{_pl}:{r.get('id') or r.get('text','')[:60]}" in KNOWN["ids"] for r in rows[-new:]):
+                log(f"  {platform}: 1 halaman penuh sudah pernah diambil -> stop pagination (hemat kredit), {len(rows)} rows")
+                KNOWN["stops"] += 1
+                break
         if s_ep and not cfg.get("dates") and page_dated >= 5 and page_inrange == 0:
             log(f"  {platform}: 1 halaman penuh di luar rentang waktu -> stop pagination (hemat kredit), {len(rows)} rows")
             break
@@ -2999,6 +3007,7 @@ def on_click(b):
         _lang_out = {"n": 0}
         _neg_out = {"n": 0}
         CURPHASE["name"] = "keyword search"
+        _by_key = {}
         for plat, term, rows, buf in parallel_map(_run_task, tasks, workers=4, progress=_psearch):
             print(f"\n=== {plat} :: {term} ===")
             for line in buf:
@@ -3006,6 +3015,10 @@ def on_click(b):
             for r in rows:
                 key = (r["platform"], r["id"] or r["text"][:50])
                 if key in seen:
+                    _first = _by_key.get(key)                    # one post, many keywords: keep them all
+                    if _first is not None and r.get("query") and \
+                            r["query"] not in [x.strip() for x in str(_first.get("query") or "").split(",")]:
+                        _first["query"] = f"{_first['query']}, {r['query']}" if _first.get("query") else r["query"]
                     continue
                 if STRICT_KW["on"] and r.get("type") != "comment" and \
                    not _text_matches_terms(r.get("text", ""), STRICT_KW["terms"]):
@@ -3023,6 +3036,7 @@ def on_click(b):
                         if s_ep and _ep < s_ep: _filtered_out["n"] += 1; continue
                         if u_ep and _ep >= u_ep: _filtered_out["n"] += 1; continue
                 seen.add(key)
+                _by_key[key] = r
                 allrows.append(r)
             save_checkpoint(allrows)
         save_checkpoint(allrows, force=True)
@@ -3043,16 +3057,31 @@ def on_click(b):
             allrows = [r for r in allrows if _in_tf(r)]
             if _b - len(allrows):
                 print(f"\u23F1\uFE0F Time filter (semua mode): {_b - len(allrows)} baris di luar rentang dibuang.")
-        _seenk, _uniq = set(), []
+        _seenk, _uniq = {}, []
         for r in allrows:
             k = (r.get("platform"), r.get("type"),
                  str(r.get("id") or r.get("url") or (r.get("text") or "")[:80]))
             if k in _seenk:
+                _q0, _q1 = str(_seenk[k].get("query") or ""), str(r.get("query") or "")   # one post, many keywords
+                if _q1 and _q1 not in [x.strip() for x in _q0.split(",")]:
+                    _seenk[k]["query"] = f"{_q0}, {_q1}" if _q0 else _q1
                 continue
-            _seenk.add(k); _uniq.append(r)
+            _seenk[k] = r; _uniq.append(r)
         if len(_uniq) < len(allrows):
             print(f"\U0001F9F9 Dedup global: {len(allrows) - len(_uniq)} baris duplikat dibuang.")
         allrows = _uniq
+        if KNOWN["on"] and allrows and not delta_w.value:
+            # posts collected by earlier runs stay in the file, but get no paid look-ups again (comments, followers,
+            # user ID) — what costs the credits after the search itself
+            _prev = load_seen_ids()
+            _keyed = [(f"{r['platform']}:{r.get('id') or r.get('text','')[:60]}", r) for r in allrows]
+            _nk = 0
+            for _k, _r in _keyed:
+                if _k in _prev:
+                    _r["_known"] = True; _nk += 1
+            if _nk:
+                print(f"\u267B\uFE0F {_nk} post(s) already collected by earlier runs \u2192 no extra look-ups for them (saves credits).")
+            save_seen_ids(_prev | {k for k, _ in _keyed})
         if delta_w.value and allrows:
             prev = load_seen_ids()
             keyed = [(f"{r['platform']}:{r.get('id') or r.get('text','')[:60]}", r) for r in allrows]
@@ -3063,7 +3092,7 @@ def on_click(b):
             allrows = fresh
             save_seen_ids(prev | {k for k, _ in keyed})
         if comments_w.value and allrows:
-            post_rows = [r for r in allrows if r.get("type") != "comment" and r.get("url")
+            post_rows = [r for r in allrows if r.get("type") != "comment" and r.get("url") and not r.get("_known")
                          and (COMMENTS_EP.get(r["platform"])
                               or r["platform"] == "Threads"
                               or (r["platform"] == "Twitter" and TWITTER_API_KEY.strip() and r.get("id")))]
@@ -3122,7 +3151,7 @@ def on_click(b):
             need = set()
             for r in allrows:
                 ident = r.get("_profile") or r.get("username")
-                if not ident or not PROFILE_EP.get(r["platform"]):
+                if not ident or not PROFILE_EP.get(r["platform"]) or r.get("_known"):
                     continue
                 need_foll = foll_w.value and r.get("type") != "comment" and not r.get("followers")
                 need_id = fillid_w.value and (not r.get("user_id") or not r.get("profile_image"))

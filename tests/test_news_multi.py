@@ -329,3 +329,34 @@ def test_bulk_links_read_every_pasted_article(tmp_path, monkeypatch, fake_net):
                     "https://radarbogor.id/2026/11/10/listrik-padam-lagi"}
     assert archive.stats()["online"]["items"] == 2
     assert j.results_view("news")["statuses"][0]["note"].startswith("2 of 3 links read")
+
+
+def test_news_search_takes_articles_the_live_stream_already_read(tmp_path, monkeypatch, fake_net):
+    """A link the Live Stream already read is not downloaded again: its text comes from the stream's database."""
+    import zlib
+
+    from crawler import job, paths, stream
+    from crawler.medmas import pipeline
+    monkeypatch.setattr(job, "OUTPUT_DIR", str(tmp_path / "out"))
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    url = "https://www.detik.com/jabar/berita/d-1/pemadaman-listrik-bogor"
+    s = stream.Stream(str(tmp_path / "data" / "stream"))
+    with s.lock:
+        s._db.execute("INSERT INTO articles(key, url, domain, title, status, discovered, fetched, pub_date, pub_time, "
+                      "content, author) VALUES (?,?,?,?, 'success', 1, 1, '2026-11-09', '20:15', ?, 'Rina')",
+                      (stream.norm_key(url), url, "detik.com", "Pemadaman Listrik di Bogor", zlib.compress(ARTICLE.encode())))
+        s._db.commit()
+    fetched = []
+    real = pipeline.extract_article
+    monkeypatch.setattr(pipeline, "extract_article", lambda u, timeout=20: fetched.append(u) or real(u, timeout))
+    j = job.Job()
+    assert j.start_news(["pemadaman listrik"], "2026-11-09", "2026-11-10", "WIB",
+                        {"engine": "multi", "template": "online"}) is None
+    t = time.time()
+    while j.running and time.time() - t < 60:
+        time.sleep(0.1)
+    st = j.state()
+    assert not st["error"]
+    assert url not in fetched and fetched                                   # the other links were downloaded
+    assert j.run_stats["reused"] == 1 and any("taken from the Live Stream" in x for x in st["logs"])
+    assert any(x.startswith("[") and "📊 This run:" in x for x in st["logs"]) and j.run_stats["new"] >= 1

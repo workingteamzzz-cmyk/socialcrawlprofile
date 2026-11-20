@@ -285,11 +285,14 @@ class BrowserCrawler:
         except Stopped as e:
             raise Stopped(list(found.values()) or e.posts) from None
 
+    known_fn = None                 # set by a scheduled run: links -> the ones earlier runs already collected
+
     def _scroll_loop(self, found, extract, older_needed, idle_limit, max_rounds, cap, keep=None):
-        idle = 0
+        idle = known_rounds = 0
         for _ in range(max_rounds):
             self._check_stop()
             before = len(found)
+            had = set(found)
             for p in extract():
                 old = found.get(p.url)
                 if old is not None and p.listed and not old.listed:
@@ -309,6 +312,17 @@ class BrowserCrawler:
             idle = idle + 1 if len(found) == before else 0
             if idle >= idle_limit:
                 break
+            if self.known_fn is not None:                # early stop: two screens in a row hold only known posts
+                fresh = [u for u in found if u not in had]
+                if len(fresh) >= 3:
+                    try:
+                        all_known = len(self.known_fn(fresh)) == len(fresh)
+                    except Exception:  # noqa: BLE001
+                        all_known = False
+                    known_rounds = known_rounds + 1 if all_known else 0
+                    if known_rounds >= 2:
+                        self.log("   ⏭ Only posts collected by earlier runs from here on — stopped scrolling")
+                        break
             self._scroll()
             self._pause()
         return list(found.values())

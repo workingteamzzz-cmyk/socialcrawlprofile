@@ -33,6 +33,7 @@ class SearchOptions:
     exact: bool = False                 # wrap multi-word keywords in quotes (X, YouTube, Facebook)
     exclude: list[str] = field(default_factory=list)   # words to exclude (all platforms: query + reading each result)
     must_mention: bool = True           # drop results whose text does not mention the keyword at all
+    stop_known: bool = False            # stop scrolling once a whole screen holds only posts earlier runs collected
     x_lang: str = ""                    # "", "id", "en"
     x_no_replies: bool = True
     x_no_reposts: bool = True
@@ -64,6 +65,7 @@ class SearchOptions:
             detail="full" if d.get("detail") == "full" or d.get("template") == "medsos" else "links",
             must_mention=bool(d.get("must_mention", True)),
             template="medsos" if d.get("template") == "medsos" else "standard",
+            stop_known=bool(d.get("stop_known", False)),
         )
 
 

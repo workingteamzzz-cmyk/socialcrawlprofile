@@ -308,8 +308,9 @@ def test_keyword_search_with_the_api_engine(tmp_path, fake_api, monkeypatch):
     j = job.Job()
     assert "API key" in j.start_keywords(["listrik"], "2026-11-01", "2026-11-02", "WIB", ["tiktok"], {"engine": "api"})
     settings.save(api_key="test-key-123")
-    day = time.strftime("%Y-%m-%d")
-    err = j.start_keywords(["listrik"], day, day, "WIB", ["tiktok"],
+    from datetime import datetime, timedelta, timezone
+    wib = datetime.fromtimestamp(NOW, timezone(timedelta(hours=7))).date()   # posts near midnight: a day each side
+    err = j.start_keywords(["listrik"], str(wib - timedelta(days=1)), str(wib + timedelta(days=1)), "WIB", ["tiktok"],
                            {"engine": "api", "api": {"detail": "full", "budget": 20, "limit": 10}})
     assert err is None
     t = time.time()
@@ -324,3 +325,25 @@ def test_keyword_search_with_the_api_engine(tmp_path, fake_api, monkeypatch):
     assert all(r["keyword"] == "listrik" and r["url"].startswith("https://") for r in rows)
     assert archive.stats()["medsos"]["items"] == 2
     assert any("credit cap 20" in x for x in st["logs"])
+
+
+def test_api_runs_skip_what_earlier_runs_collected(tmp_path, fake_api):
+    """One post found by two keywords: one row, both keywords. A later scheduled run: known posts get no paid
+    look-ups, and the run reports its credits."""
+    settings.save(api_key="test-key-123")
+    out = tmp_path / "out"
+    cfg = {"mode": "keyword", "platforms": ["TikTok (keyword)"], "queries": "listrik\npln", "limit": 10, "budget": 50,
+           "fillid": True, "skip_known": True}
+    logs = []
+    files = runner.run(cfg, logs.append, lambda *a: None, threading.Event(), str(out), str(tmp_path / "data"))
+    ws = openpyxl.load_workbook(out / [f for f in files if f.endswith(".xlsx")][0])["Sheet1"]
+    head = [c.value for c in ws[1]]
+    rows = [dict(zip(head, [c.value for c in r])) for r in ws.iter_rows(min_row=2)]
+    assert len(rows) == 2 and all(r["Query"] == "listrik, pln" for r in rows)       # merged, not doubled
+    assert runner.LAST_USE["credits"] >= 2
+    logs.clear()
+    runner.run(cfg, logs.append, lambda *a: None, threading.Event(), str(out), str(tmp_path / "data"))
+    assert any("already collected by earlier runs" in x for x in logs)
+    from crawler.job import _api_rows
+    got = _api_rows(str(out / [f for f in files if f.endswith(".xlsx")][0]), ["listrik", "pln"])
+    assert got[0]["keywords"] == ["listrik", "pln"] and got[0]["keyword"] == "listrik, pln"

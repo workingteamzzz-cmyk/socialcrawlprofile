@@ -241,6 +241,8 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
 .exp-row{display:flex;align-items:center;gap:12px}.exp-row+.exp-row{border-top:1px solid var(--line)}
 .exp-ck{width:16px;height:16px;flex:none;accent-color:var(--accent)}
 .exp-rm{flex:none;color:var(--faint)}.exp-rm:hover{color:var(--bad)}
+.cl-prev{margin:14px 0 4px;padding:10px 12px;border-radius:8px;background:var(--panel-2);border:1px solid var(--line);font-size:13px}
+.cl-step{display:flex;gap:12px;padding:14px 0;border-top:1px solid var(--line);margin-top:10px}.cl-step > b{width:26px;height:26px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;flex:none}
 .exports a:hover{text-decoration:none;color:var(--accent)}
 .exports small{color:var(--muted);font-size:12px;display:block}
 
@@ -1146,6 +1148,27 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
         <div class="card-bd exports" id="exports" style="padding-top:6px"></div>
         <div class="card-bd" style="display:flex;gap:8px;align-items:center;padding-top:0"><span class="hint" id="expPage"></span>
           <button class="btn sm" id="expPrev" style="margin-left:auto">Previous</button><button class="btn sm" id="expNext">Next</button></div></div>
+      <div class="card need-admin" style="margin-top:16px"><div class="card-hd"><h3>Free up space by period</h3><span class="hd-note">save a period elsewhere (e.g. Google Drive), then delete it from the server</span></div>
+        <div class="card-bd">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+            <div class="field" style="margin:0"><label for="clStart">From</label><input type="date" id="clStart"></div>
+            <div class="field" style="margin:0"><label for="clEnd">To</label><input type="date" id="clEnd"></div>
+            <button class="btn" id="clCheck" style="height:40px">Check the period</button></div>
+          <div id="clPrev" class="cl-prev" hidden></div>
+          <div id="clSteps" hidden>
+            <div class="cl-step"><b>1</b><div><div style="font-weight:600">Download everything of the period</div><small class="hint">One Excel (Online layout) with every article — save it to your Drive before deleting.</small>
+              <div style="margin-top:8px"><button class="btn primary" id="clExport"><svg class="i"><use href="#i-dl"/></svg>Make the Excel</button> <span class="hint" id="clExpMsg"></span></div></div></div>
+            <div class="cl-step"><b>2</b><div><div style="font-weight:600">Delete the period from the server</div>
+              <div style="display:flex;gap:16px;flex-wrap:wrap;margin:8px 0"><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="clA" checked> Stream articles</label>
+                <label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="clR" checked> Reporting database rows</label>
+                <label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="clF" checked> Result files made in the period</label></div>
+              <button class="btn danger" id="clDelete">Delete the period</button> <span class="hint" id="clDelMsg"></span>
+              <small class="hint" style="display:block;margin-top:6px">Deleted articles are never read again by the stream. The database reuses the freed space for new articles.</small></div></div>
+          </div>
+          <div class="cl-step" style="margin-top:6px"><b>↺</b><div><div style="font-weight:600">Restore a period from its backup</div><small class="hint">Changed your mind? Upload the Excel you saved (any Online file: “All_articles…”, “Media_…”, “Stream_All…”) — its articles come back to News Stream, Explore and Reports. A Medsos file goes back to Reports.</small>
+            <div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><input type="file" id="clFile" accept=".xlsx"><button class="btn" id="clRestore">Upload &amp; restore</button><span class="hint" id="clResMsg"></span></div>
+            <div class="me-bar" style="background:var(--soft);margin-top:8px;max-width:420px" hidden id="clBarW"><span id="clBar" style="width:0;background:var(--accent)"></span></div></div></div>
+        </div></div>
       <div class="card need-op" style="margin-top:16px">
         <div class="card-hd"><h3>Fix Google News links in a file</h3></div>
         <div class="card-bd">
@@ -3124,6 +3147,60 @@ $('arBody').addEventListener('click', async e => {
   if ('ard' in b.dataset && confirm(`Delete the archive of ${j.domain} and its ${fmt(j.read)} articles? Excel files already made stay in Exports.`)){ await api('/api/archive/delete', {id: j.id}); loadArchive(); }
 });
 setInterval(() => { if (document.visibilityState === 'visible' && $('p-media').classList.contains('on')) loadArchive(); }, 15000);
+
+/* ---------- free up space by period ---------- */
+const fsz = b => b >= 1e9 ? (b / 1e9).toFixed(1) + ' GB' : (b / 1e6).toFixed(0) + ' MB';
+let CL = null;
+async function clCheck(){
+  const st = $('clStart').value, en = $('clEnd').value; if (!st || !en) return toast('Choose the period');
+  const d = await api(`/api/cleanup?start=${st}&end=${en}`);
+  if (!d || d.ok === false) return toast((d && d.error) || 'Could not check');
+  CL = d.preview; $('clPrev').hidden = false; $('clSteps').hidden = false;
+  $('clPrev').innerHTML = `<b>${dShort(st)} ${st.slice(0, 4)} – ${dShort(en)} ${en.slice(0, 4)}</b>: ${fmt(CL.articles)} stream articles (≈ ${fsz(CL.articles_bytes)}, ${fmt(CL.readable)} readable) · ${fmt(CL.report_rows)} report rows · ${fmt(CL.files)} result files (${fsz(CL.files_bytes)})`;
+  clStatus();
+}
+async function clStatus(){
+  const d = await api('/api/cleanup'); if (!d || !d.status) return; const ex = d.status.export || {}, de = d.status.delete || {};
+  $('clExpMsg').innerHTML = ex.running ? `Making the Excel… ${fmt(ex.done || 0)} of ${fmt(ex.total || 0)}` : ex.error ? esc('Not made: ' + ex.error)
+    : ex.file ? `Ready: <a href="/download/${encodeURIComponent(ex.file)}">${esc(ex.file)}</a> (${fmt(ex.rows)} articles)${ex.note ? ' — ' + esc(ex.note) : ''}` : '';
+  $('clDelMsg').textContent = de.running ? `Deleting… ${fmt(de.articles || 0)} articles so far` : de.error ? 'Stopped: ' + de.error
+    : de.finished ? `Deleted ${fmt(de.articles)} articles, ${fmt(de.report_rows)} report rows, ${fmt(de.files)} files.` : '';
+  if (ex.running || de.running) setTimeout(clStatus, 2000); else if (de.finished && clStatus.wasDeleting){ clStatus.wasDeleting = false; loadExports(); }
+  if (de.running) clStatus.wasDeleting = true;
+}
+$('clCheck').onclick = clCheck;
+$('clExport').onclick = async () => { const r = await api('/api/cleanup/export', {start: $('clStart').value, end: $('clEnd').value});
+  if (!r || r.ok === false) return toast((r && r.error) || 'Not started'); setTimeout(clStatus, 500); };
+$('clDelete').onclick = async () => {
+  if (!CL) return; const st = $('clStart').value, en = $('clEnd').value;
+  const what = [$('clA').checked && `${fmt(CL.articles)} stream articles`, $('clR').checked && `${fmt(CL.report_rows)} report rows`, $('clF').checked && `${fmt(CL.files)} result files`].filter(Boolean);
+  if (!what.length) return toast('Choose what to delete');
+  const typed = prompt(`Delete from the server, for good:\n• ${what.join('\n• ')}\nPeriod ${st} – ${en}\n\nDid you save the Excel to your Drive? Type DELETE to go on.`);
+  if ((typed || '').trim().toUpperCase() !== 'DELETE') return toast('Nothing deleted');
+  const r = await api('/api/cleanup/delete', {start: st, end: en, articles: $('clA').checked, reports: $('clR').checked, files: $('clF').checked});
+  if (!r || r.ok === false) return toast((r && r.error) || 'Not started'); setTimeout(clStatus, 500); };
+['clStart', 'clEnd'].forEach(id => $(id).addEventListener('change', () => { $('clSteps').hidden = true; $('clPrev').hidden = true; }));
+
+$('clRestore').onclick = async () => {
+  const f = $('clFile').files[0]; if (!f) return toast('Choose the backup Excel first');
+  const id = [...crypto.getRandomValues(new Uint8Array(12))].map(b => b.toString(16).padStart(2, '0')).join(''), step = 8 * 1024 * 1024;
+  $('clBarW').hidden = false; $('clRestore').disabled = true;
+  try {
+    for (let off = 0; off < f.size || off === 0; off += step){
+      const last = off + step >= f.size;
+      const r = await fetch(`/api/restore/chunk?id=${id}&offset=${off}&final=${last ? 1 : 0}`, {method: 'POST', headers: {'Content-Type': 'application/octet-stream'}, body: f.slice(off, off + step)}).then(x => x.json());
+      if (!r || r.ok === false) throw new Error((r && r.error) || 'upload failed');
+      $('clBar').style.width = Math.min(100, Math.round((off + step) * 100 / f.size)) + '%';
+      $('clResMsg').textContent = last ? 'Uploaded — restoring…' : `Uploading… ${fsz(Math.min(f.size, off + step))} of ${fsz(f.size)}`;
+      if (last) break;
+    }
+    const poll = async () => { const d = await api('/api/cleanup'); const re_ = (d.status || {}).restore || {};
+      if (re_.running){ $('clResMsg').textContent = `Restoring… ${fmt(re_.rows || 0)} rows read`; return setTimeout(poll, 1500); }
+      $('clResMsg').textContent = re_.error ? 'Not restored: ' + re_.error : `Restored: ${fmt(re_.articles)} articles back in the stream, ${fmt(re_.report_rows)} rows in Reports.`;
+      $('clRestore').disabled = false; };
+    poll();
+  } catch (e){ $('clResMsg').textContent = 'Stopped: ' + e.message; $('clRestore').disabled = false; }
+};
 
 /* ---------- reports ---------- */
 let TOPICS = [];

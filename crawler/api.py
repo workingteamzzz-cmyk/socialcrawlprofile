@@ -303,6 +303,14 @@ class ArchiveIn(BaseModel):
     gap: float = Field(1.5, description="seconds between two pages of this outlet (polite: 1.5)")
 
 
+class CleanupIn(BaseModel):
+    start: str = Field(..., description="YYYY-MM-DD")
+    end: str = Field(..., description="YYYY-MM-DD")
+    articles: bool = Field(True, description="the stream's articles of the period (and their search entries)")
+    reports: bool = Field(True, description="the reporting database's rows of the period")
+    files: bool = Field(True, description="result files made in the period (the backup just made is kept)")
+
+
 class FeedRef(BaseModel):
     id: str
 
@@ -820,6 +828,54 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
             daily_cap=body.daily_cap, monthly_cap=body.monthly_cap,
             cleared=[k for k, v in (("api", body.clear_api_key), ("twitter", body.clear_twitter)) if v])
         return {"ok": True, **pub}
+
+    # ---------- free up space by period ----------
+    @app.get("/api/cleanup", tags=["files"], dependencies=admin_only, summary="What a period holds, and progress")
+    def cleanup_get(start: str = "", end: str = ""):
+        from . import cleanup
+        out = {"status": cleanup.status()}
+        if start and end:
+            try:
+                out["preview"] = cleanup.preview(start, end)
+            except ValueError as e:
+                return {"ok": False, "error": str(e)}
+        return {"ok": True, **out}
+
+    @app.post("/api/cleanup/export", tags=["files"], dependencies=admin_only,
+              summary="Every article of a period as one Excel (to keep it elsewhere)")
+    def cleanup_export(body: CleanupIn, request: Request):
+        from . import cleanup
+        try:
+            out = cleanup.start_export(body.start, body.end)
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        log(request, "exported a period for backup", period=f"{body.start}..{body.end}")
+        return out
+
+    @app.post("/api/cleanup/delete", tags=["files"], dependencies=admin_only,
+              summary="Delete a period from the server: articles, report rows, result files")
+    def cleanup_delete(body: CleanupIn, request: Request):
+        from . import cleanup
+        try:
+            out = cleanup.start_delete(body.start, body.end, body.model_dump())
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        log(request, "DELETED a period from the server", period=f"{body.start}..{body.end}",
+            parts=",".join(k for k in ("articles", "reports", "files") if getattr(body, k)))
+        return out
+
+    @app.post("/api/restore/chunk", tags=["files"], dependencies=admin_only,
+              summary="Restore a period from its backup Excel — sent in pieces (raw bytes), the last one with final=1")
+    async def restore_chunk(request: Request, id: str, offset: int = 0, final: int = 0):
+        from . import cleanup
+        data = await request.body()
+        try:
+            out = cleanup.upload_chunk(id, offset, data, bool(final))
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        if final:
+            log(request, "restored a backup Excel", upload=id)
+        return out
 
     # ---------- media archive: one outlet over months / years ----------
     @app.get("/api/archive", tags=["media archive"], dependencies=op, summary="Media archive jobs and their progress")

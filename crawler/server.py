@@ -129,6 +129,17 @@ class Handler(BaseHTTPRequestHandler):
             from . import overview as ov
             from .paths import SERVER_MODE
             return self._json(ov.build(SERVER_MODE))
+        if u.path == "/api/cleanup":
+            from . import cleanup
+            qs = parse_qs(u.query)
+            out = {"ok": True, "status": cleanup.status()}
+            st, en = qs.get("start", [""])[0], qs.get("end", [""])[0]
+            if st and en:
+                try:
+                    out["preview"] = cleanup.preview(st, en)
+                except ValueError as e:
+                    return self._json({"ok": False, "error": str(e)})
+            return self._json(out)
         if u.path == "/api/archive":
             from . import backfill, stream
             return self._json({"jobs": backfill.jobs(stream.get()),
@@ -222,11 +233,19 @@ class Handler(BaseHTTPRequestHandler):
         if origin and urlparse(origin).hostname not in ("127.0.0.1", "localhost"):
             return self._json({"error": "forbidden"}, 403)
         n = int(self.headers.get("Content-Length") or 0)
+        u = urlparse(self.path)
+        if u.path == "/api/restore/chunk":                    # raw bytes, not JSON
+            from . import cleanup
+            qs = parse_qs(u.query)
+            try:
+                return self._json(cleanup.upload_chunk(qs.get("id", [""])[0], int(qs.get("offset", ["0"])[0] or 0),
+                                                       self.rfile.read(n), qs.get("final", ["0"])[0] == "1"))
+            except ValueError as e:
+                return self._json({"ok": False, "error": str(e)})
         try:
             data = json.loads(self.rfile.read(n) or b"{}")
         except ValueError:
             data = {}
-        u = urlparse(self.path)
         if u.path == "/api/login":
             err = JOB.start_login()
         elif u.path == "/api/start":
@@ -291,6 +310,14 @@ class Handler(BaseHTTPRequestHandler):
                         bool(data.get("clear")))})
                 r = media_db.send_report()
                 return self._json({"ok": True, "file": r["file"], "access": r["access"], "tiers": r["tiers"]})
+            except ValueError as e:
+                return self._json({"ok": False, "error": str(e)})
+        elif u.path in ("/api/cleanup/export", "/api/cleanup/delete"):
+            from . import cleanup
+            try:
+                if u.path.endswith("export"):
+                    return self._json(cleanup.start_export(str(data.get("start") or ""), str(data.get("end") or "")))
+                return self._json(cleanup.start_delete(str(data.get("start") or ""), str(data.get("end") or ""), data))
             except ValueError as e:
                 return self._json({"ok": False, "error": str(e)})
         elif u.path.startswith("/api/archive/"):

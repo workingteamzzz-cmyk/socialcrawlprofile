@@ -377,6 +377,19 @@ With a token: `Authorization: Bearer <token>` and `X-Collector-Signature: sha256
 answer counts as delivered; otherwise the articles wait in an outbox and are sent again (30 s, 2 min, 10 min, 30 min,
 then hourly for a day). *Test* sends one sample now; the table shows sent / waiting / last error per client.
 
+## Free up space by period (back up, delete, restore)
+
+Everything is kept on the server until an admin deletes it. Exports → **Free up space by period**:
+
+1. Choose a period (e.g. 1 Oct – 1 Nov 2026) → **Check the period**: how many stream articles (≈ size), report rows
+   and result files it holds.
+2. **Make the Excel**: every article of the period in one Online file — save it to Google Drive.
+3. **Delete the period** (type DELETE to confirm): the stream's articles (and their search entries), the reporting
+   database's rows and the result files made in the period (the backup just made is kept). Deleted articles are
+   remembered so the stream never reads them again. The database reuses the freed space for new articles.
+4. Changed your mind? **Restore a period from its backup**: upload the Excel (sent in 8 MB pieces, so a big month is
+   fine) — its articles come back to News Stream, Explore and Reports (a Medsos file goes back to Reports).
+
 ## Media archive (every article of one outlet over months or years)
 
 Media Database → **Media archive** (or *Archive* on an outlet's row): an outlet, a period (e.g. two years) and a speed.

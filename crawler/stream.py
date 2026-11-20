@@ -31,13 +31,13 @@ WIB = timezone(timedelta(hours=7))
 DEFAULTS = {"enabled": False, "threads": 8, "discovery_threads": 8, "rss_minutes": 10, "sitemap_minutes": 60,
             "catchup_days": 2, "catchup_hour": 1, "weekly_report": True, "report_weekday": 0, "report_hour": 7,
             "health_on_start": True, "health_weekday": 6, "health_hour": 2,
-            "top_n": 1000, "semi_hours": 4, "rare_hours": 24, "inactive_days": 3, "dead_days": 7,
+            "top_n": 1000, "top2_n": 2000, "active2_hours": 2, "semi_hours": 4, "rare_hours": 24, "inactive_days": 3, "dead_days": 7,
             "retention_days": 7, "max_age_hours": 48, "all_links": True, "old_per_check": 1000, "homepage": True, "domain_gap": 1.5, "rss": True, "sitemaps": True,
             "keywords": [], "robots": True, "exclude_domains": []}
 LIMITS = {"threads": (2, 64), "discovery_threads": (2, 48), "rss_minutes": (2, 240), "sitemap_minutes": (10, 720),
           "old_per_check": (0, 20000),
           "catchup_days": (0, 7), "catchup_hour": (0, 23), "health_weekday": (0, 6), "health_hour": (0, 23), "report_weekday": (0, 6), "report_hour": (0, 23),
-          "top_n": (50, 20000), "semi_hours": (1, 48), "rare_hours": (2, 168), "inactive_days": (1, 30),
+          "top_n": (50, 20000), "top2_n": (0, 20000), "active2_hours": (1, 24), "semi_hours": (1, 48), "rare_hours": (2, 168), "inactive_days": (1, 30),
           "dead_days": (1, 60),
           "retention_days": (1, 90), "max_age_hours": (6, 168)}
 # Tiers — how often an outlet is checked, from how much it published (new articles found) in the last days:
@@ -48,7 +48,7 @@ LIMITS = {"threads": (2, 64), "discovery_threads": (2, 48), "rss_minutes": (2, 2
 #   dead      unreachable 3 times in a row                    every `dead_days` (7 days)
 #   new       never checked yet                               checked once right away, then classified
 # Recomputed every 10 minutes; an outlet that suddenly publishes is promoted at once (semi at least).
-TIERS = ("active", "semi", "rare", "inactive", "dead", "new")
+TIERS = ("active", "active2", "semi", "rare", "inactive", "dead", "new")
 MAX_INTERVAL = 6 * 3600
 DEAD_INTERVAL = 24 * 3600
 SCHEMA = """
@@ -154,7 +154,8 @@ class Stream:
         self._db.execute("PRAGMA synchronous=NORMAL")
         self._db.executescript(SCHEMA)
         for sql in ("ALTER TABLE hourly ADD COLUMN skipped INTEGER DEFAULT 0",          # databases from v23
-                    "ALTER TABLE sources ADD COLUMN tier TEXT DEFAULT 'new'"):
+                    "ALTER TABLE sources ADD COLUMN tier TEXT DEFAULT 'new'",
+                    "ALTER TABLE articles ADD COLUMN sentiment TEXT DEFAULT ''"):            # databases before v33
             try:
                 self._db.execute(sql)
             except sqlite3.OperationalError:
@@ -286,10 +287,12 @@ class Stream:
 
     def interval(self, kind: str, tier: str) -> float:
         c = self.cfg
-        sm = {"active": c["sitemap_minutes"] * 60, "semi": c["semi_hours"] * 3600, "rare": c["rare_hours"] * 3600,
+        sm = {"active": c["sitemap_minutes"] * 60, "active2": c.get("active2_hours", 2) * 3600,
+              "semi": c["semi_hours"] * 3600, "rare": c["rare_hours"] * 3600,
               "inactive": c["inactive_days"] * 86400, "dead": c["dead_days"] * 86400, "new": c["sitemap_minutes"] * 60}
         if kind == "rss":                                   # a feed is almost free to check (304): more often
-            return {"active": c["rss_minutes"] * 60, "semi": min(sm["semi"], 3600)}.get(tier, sm[tier])
+            return {"active": c["rss_minutes"] * 60, "active2": min(sm["active2"], 1800),
+                    "semi": min(sm["semi"], 3600)}.get(tier, sm[tier])
         return sm[tier]
 
     def tier_of(self, src) -> str:
@@ -333,12 +336,13 @@ class Stream:
                                              "HAVING SUM(n) > 0", (d30,))}
         ranked = sorted(c7, key=lambda d: -c7[d])
         top = set(ranked[:self.cfg["top_n"]])
+        top2 = set(ranked[self.cfg["top_n"]:self.cfg["top_n"] + self.cfg.get("top2_n", 2000)])
         rows = self.rq("SELECT domain, MAX(CASE WHEN kind='sitemap' THEN fails END) f, MAX(checked) c FROM sources "
                        "GROUP BY domain")                      # a broken RSS feed alone never makes an outlet dead
         tiers = {}
         for r in rows:
             d = r["domain"]
-            tiers[d] = ("active" if d in top else "semi" if d in c7 else "rare" if d in c30 else
+            tiers[d] = ("active" if d in top else "active2" if d in top2 else "semi" if d in c7 else "rare" if d in c30 else
                         "dead" if (r["f"] or 0) >= 3 else "inactive" if r["c"] else "new")
         with self.lock:
             self.tiers = tiers
@@ -347,7 +351,7 @@ class Stream:
                 if doms:
                     self._db.executemany("UPDATE sources SET tier=? WHERE domain=?", [(t, d) for d in doms])
             for kind in ("rss", "sitemap"):                 # promoted: the next check comes sooner
-                for t in ("active", "semi", "rare"):
+                for t in ("active", "active2", "semi", "rare"):
                     self._db.execute("UPDATE sources SET next_check = MIN(next_check, checked + ?) "
                                      "WHERE kind=? AND tier=? AND checked > 0", (self.interval(kind, t), kind, t))
             self._db.commit()
@@ -639,6 +643,14 @@ class Stream:
                 if keyword_match(kw, res["title"], res["content"], slug) and \
                         not keyword_excluded(kw, res["title"], res["content"], slug):
                     matched.append(kw)
+        sentiment = ""
+        if status == "success":
+            try:
+                from .templates import analyze
+                sentiment = (analyze(f"{res.get('title') or ''}. {res.get('summary') or ''}")[0] or "neutral").lower()
+            except Exception:  # noqa: BLE001
+                sentiment = ""
+        self.x("UPDATE articles SET sentiment=? WHERE key=?", (sentiment, job["key"]))
         self.x("UPDATE articles SET status=?, fetched=?, pub_date=?, pub_time=?, title=?, author=?, summary=?, content=?,"
                " image=?, influencer=?, persons=?, matched=?, error=? WHERE key=?",
                (status, time.time(), d, t, res.get("title") or job.get("title") or "", res.get("author") or "",
@@ -723,7 +735,7 @@ class Stream:
         ev = self.stop_event
         last_purge = last_tiers = 0.0
         while not ev.is_set():
-            for name, step in (("counts", self.flush_counts), ("queue", self.refill)):
+            for name, step in (("counts", self.flush_counts), ("queue", self.refill), ("sentiment", self.fill_sentiment)):
                 try:
                     step()
                 except Exception as e:  # noqa: BLE001  each step on its own: one failing never stops the others
@@ -746,6 +758,25 @@ class Stream:
             self.flush_counts()
         except Exception:  # noqa: BLE001
             pass
+
+    def fill_sentiment(self, n: int = 300) -> int:
+        """Articles read before sentiment was kept get theirs, a few hundred at a time."""
+        rows = self.rq("SELECT key, title, summary FROM articles WHERE status='success' AND "
+                       "(sentiment IS NULL OR sentiment='') LIMIT ?", (n,))
+        if not rows:
+            return 0
+        from .templates import analyze
+        vals = []
+        for r in rows:
+            try:
+                v = (analyze(f"{r['title'] or ''}. {r['summary'] or ''}")[0] or "neutral").lower()
+            except Exception:  # noqa: BLE001
+                v = "neutral"
+            vals.append((v, r["key"]))
+        with self.lock:
+            self._db.executemany("UPDATE articles SET sentiment=? WHERE key=?", vals)
+            self._db.commit()
+        return len(vals)
 
     def purge(self, ev=None) -> int:
         """Articles older than retention_days leave, in small chunks (the readers never wait long); their keys stay in

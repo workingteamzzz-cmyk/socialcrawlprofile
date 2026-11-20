@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 WIB = timezone(timedelta(hours=7))
 _LOCK = threading.RLock()
 _CACHE: dict = {"t": 0.0, "stats": {}}
-TIER_LABEL = {"active": "Active", "semi": "Semi-active", "rare": "Rare", "inactive": "Inactive", "dead": "Unreachable",
+TIER_LABEL = {"active": "Active", "active2": "Active 2", "semi": "Semi-active", "rare": "Rare", "inactive": "Inactive", "dead": "Unreachable",
               "new": "Not checked yet"}
 ACCESS_LABEL = {"ok": "Readable", "partial": "Partly readable", "blocked": "Cannot be read", "paywall": "Paywall?",
                 "robots": "Refused by robots.txt", "unreachable": "Site unreachable", "quiet": "No new articles", "pending": "Not read yet",
@@ -398,7 +398,7 @@ def report(out_dir: str) -> dict:
         ws.append([ACCESS_LABEL[k], cnt.get(k, 0)])
     ws.append([])
     ws.append(["Activity", "Outlets"])
-    for k in ("active", "semi", "rare", "inactive", "dead", "new"):
+    for k in ("active", "active2", "semi", "rare", "inactive", "dead", "new"):
         ws.append([TIER_LABEL[k], tiers.get(k, 0)])
     ws.column_dimensions["A"].width, ws.column_dimensions["B"].width = 28, 14
     cols = ["Domain", "Name", "Activity", "New articles (7 days)", "Per day", "Last article", "Access", "Read",

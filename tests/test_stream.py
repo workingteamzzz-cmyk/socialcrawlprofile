@@ -107,7 +107,7 @@ def test_quiet_and_dead_sources_are_checked_less_often(st, monkeypatch):
 
 def test_tiers_from_the_last_seven_days(st):
     from crawler import stream
-    st.cfg = stream.save_settings({"top_n": 50})
+    st.cfg = stream.save_settings({"top_n": 50, "top2_n": 20})
     day = datetime.now(WIB)
     rows = []
     for i in range(80):                                              # 80 outlets published this week, 0..79 articles
@@ -121,9 +121,9 @@ def test_tiers_from_the_last_seven_days(st):
         st.x("INSERT INTO sources(id, kind, domain, url, next_check, interval, checked) VALUES (?,?,?,?,?,?,?)",
              (f"sm:{d}", "sitemap", d, "", time.time() + 9 * 86400, 9 * 86400, 0 if d == "baru.id" else time.time() - 3600))
     got = st.compute_tiers()
-    assert got["active"] == 50 and got["semi"] == 30 and got["rare"] == 1 and got["inactive"] == 1 and got["new"] == 1
+    assert got["active"] == 50 and got["active2"] == 20 and got["semi"] == 10 and got["rare"] == 1 and got["inactive"] == 1 and got["new"] == 1
     tier = {r["domain"]: r for r in st.q("SELECT domain, tier, next_check FROM sources")}
-    assert tier["m0.id"]["tier"] == "active" and tier["m60.id"]["tier"] == "semi" and tier["lama.id"]["tier"] == "rare"
+    assert tier["m0.id"]["tier"] == "active" and tier["m55.id"]["tier"] == "active2" and tier["m75.id"]["tier"] == "semi" and tier["lama.id"]["tier"] == "rare"
     assert tier["m0.id"]["next_check"] < time.time() + 3600 + 5        # promoted: checked within the hour, not in 9 days
     assert tier["sepi.id"]["next_check"] > time.time() + 8 * 86400    # inactive: left alone
     assert st.status()["tiers"]["active"] == 50

@@ -329,6 +329,35 @@ Measured on a 4-CPU test machine with local test sites: ~37 articles/second (≈
 core. On the real internet the pace is set by how many articles the media publish and how fast their sites answer; the
 page shows the live pace and the "per day at this pace" figure.
 
+## News Stream (reading view) and the client API
+
+**News Stream** (sidebar, News) reads the articles the Live Stream collected like a news app: filters on the left
+(report topic, start / end date, sentiment, newest / oldest, grid or list, a keyword query with `AND` `OR` `NOT`
+`"phrase"` `( )` `prefix*`), positive / negative / neutral shares on top, article cards in the middle, the full article on
+the right with the keywords highlighted. New matching articles are announced every 30 seconds ("↑ 5 new articles").
+
+### Giving a client's dashboard the data (API)
+
+1. Users → add a **viewer** user for the client (e.g. `klien-pln`), then **New API key** — give the key to the client
+   privately. Viewers can read, never change anything; delete the user to cut the access.
+2. The client's system calls the server with the key in the `X-API-Key` header:
+
+```bash
+curl -H "X-API-Key: <the client's key>" "https://app.workingteamzzz.id/api/articles?q=pln%20AND%20(padam%20OR%20gangguan)&start=2026-11-20&end=2026-11-20&sentiment=negative&page=1&size=50"
+```
+
+   - `GET /api/articles` — `q`, `topic` (a Reports topic id or name), `start`, `end` (YYYY-MM-DD), `sentiment`
+     (`positive` / `negative` / `neutral`), `sort` (`newest` / `oldest`), `page`, `size` (≤ 100). Returns the total,
+     the sentiment shares and the articles (title, url, media, date, time, image, summary, sentiment, keywords).
+   - `GET /api/articles/one?key=…` — one article in full (paragraphs, author, spokespersons, people).
+   - Also: `/api/search`, `/api/stories` (top stories), `/api/dashboard` (trend, top media), `/api/report` (Excel).
+     The full, clickable list is at `https://<server>/docs` after signing in.
+3. A dashboard that calls the API **from the browser** (JavaScript on another website) also needs its address in
+   `.env`: `CLIENT_ORIGINS=https://dashboard.klien.id` (comma separated), then restart. Server-to-server calls (their
+   backend, n8n, Power BI, Looker Studio connectors) need nothing more.
+4. Pushing instead of pulling: a schedule can send each run's results to the client's webhook (Schedules → results
+   sent to …).
+
 ## Explore (search everything, top stories, spike alerts)
 
 - **Search** every article the live stream read (title + summary, SQLite full-text index, kept as long as the stream

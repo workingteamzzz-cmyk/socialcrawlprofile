@@ -244,6 +244,8 @@ class StreamSettings(BaseModel):
     max_age_hours: int | None = Field(None, description="only articles published in the last … hours")
     domain_gap: float | None = Field(None, description="seconds between two pages of the same outlet")
     top_n: int | None = Field(None, description="active outlets = the top N of the last 7 days")
+    top2_n: int | None = Field(None, description="'Active 2' = the next N outlets")
+    active2_hours: int | None = Field(None, description="'Active 2' sitemaps checked every … hours")
     catchup_days: int | None = Field(None, description="late-article sweep: the last N days (0 = off)")
     catchup_hour: int | None = Field(None, description="hour of the day (WIB) the sweep runs")
     catchup_now: bool | None = Field(None, description="run the late-article sweep now")
@@ -371,6 +373,7 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
     (None = any)."""
     from .paths import SERVER_MODE
     keys = {"admin": api_keys} if isinstance(api_keys, str) else dict(api_keys or {})
+    client_origins = [o.strip() for o in os.environ.get("CLIENT_ORIGINS", "").split(",") if o.strip()]
     from .users import Users, UserError, allowed
     users = Users(users_path) if users_path else None
 
@@ -388,6 +391,10 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
                               "YouTube, Threads and Facebook, and news links from Google — without platform APIs. "
                               "One job runs at a time: start it, poll `/api/status`, then read `/api/results` or "
                               "download the Excel file.")
+    if client_origins:                     # a client's dashboard in the browser may read the API (X-API-Key)
+        from fastapi.middleware.cors import CORSMiddleware
+        app.add_middleware(CORSMiddleware, allow_origins=client_origins, allow_methods=["GET"],
+                           allow_headers=["X-API-Key"], allow_credentials=False)
 
     def client_ip(request: Request) -> str:
         return request.client.host if request.client else "?"
@@ -509,7 +516,7 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
         h.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
         if request.url.path != "/docs":       # the docs page loads Swagger UI from a CDN
             h.setdefault("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; "
-                         "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; "
+                         "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self'; "
                          "frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
         if secure_cookie:
             h.setdefault("Strict-Transport-Security", "max-age=31536000")
@@ -791,6 +798,26 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
             daily_cap=body.daily_cap, monthly_cap=body.monthly_cap,
             cleared=[k for k, v in (("api", body.clear_api_key), ("twitter", body.clear_twitter)) if v])
         return {"ok": True, **pub}
+
+    # ---------- news stream reader / client API ----------
+    @app.get("/api/articles", tags=["client API"], dependencies=auth,
+             summary="Articles the live stream read: query (AND / OR / NOT, \"phrase\", ( )), report topic, dates, "
+                     "sentiment; with sentiment counts. For a client's dashboard: send X-API-Key.")
+    def articles_get(q: str = "", topic: str = "", start: str = "", end: str = "", sentiment: str = "",
+                     sort: str = "newest", page: int = 1, size: int = 24):
+        from . import reader
+        try:
+            return {"ok": True, **reader.articles(q[:500], topic[:100], start, end, sentiment, sort, page, size)}
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+
+    @app.get("/api/articles/one", tags=["client API"], dependencies=auth, summary="One article in full")
+    def article_get(key: str):
+        from . import reader
+        try:
+            return {"ok": True, **reader.article(key[:600])}
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
 
     # ---------- insights: search, top stories, spikes ----------
     @app.get("/api/search", tags=["insights"], dependencies=auth,

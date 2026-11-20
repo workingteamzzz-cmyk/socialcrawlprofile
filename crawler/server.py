@@ -129,6 +129,18 @@ class Handler(BaseHTTPRequestHandler):
             from . import overview as ov
             from .paths import SERVER_MODE
             return self._json(ov.build(SERVER_MODE))
+        if u.path in ("/api/articles", "/api/articles/one"):
+            from . import reader
+            qs = parse_qs(u.query)
+            g = lambda k, d="": qs.get(k, [d])[0]  # noqa: E731
+            try:
+                if u.path == "/api/articles/one":
+                    return self._json({"ok": True, **reader.article(g("key")[:600])})
+                return self._json({"ok": True, **reader.articles(g("q")[:500], g("topic")[:100], g("start"), g("end"),
+                                                                   g("sentiment"), g("sort", "newest"),
+                                                                   int(g("page", "1") or 1), int(g("size", "24") or 24))})
+            except ValueError as e:
+                return self._json({"ok": False, "error": str(e)})
         if u.path in ("/api/search", "/api/stories", "/api/insights"):
             from . import insights
             qs = parse_qs(u.query)

@@ -587,6 +587,55 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
 .btn:active{transform:translateY(1px)}
 .card{transition:box-shadow .15s}
 .kpi:hover,.dgrid > .card:hover{box-shadow:0 4px 14px rgba(16,24,40,.07)}
+/* ================= News Stream reader ================= */
+.rd-wrap{display:grid;grid-template-columns:280px minmax(0,1fr) 420px;gap:16px;align-items:start}
+.rd-filters,.rd-detail{position:sticky;top:68px;max-height:calc(100vh - 84px);overflow:auto;margin:0}
+.rd-topic{display:flex;justify-content:space-between;gap:10px;border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin-bottom:14px;background:var(--panel-2)}
+.rd-topic small{display:block;font-size:11px;color:var(--faint);margin-bottom:2px}
+.rd-topic select{border:0;background:transparent;color:var(--accent);font-weight:600;padding:0;font-size:14px;max-width:150px}
+.rd-topic b{color:var(--accent);font-size:16px}
+.rd-view{display:flex}.rd-view button{flex:1;text-align:center}
+.rd-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:14px}
+.rd-kpi{display:flex;gap:12px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;box-shadow:var(--shadow)}
+.rd-kpi small{display:block;font-size:12px;color:var(--muted)}.rd-kpi b{display:block;font-size:22px;font-weight:650;letter-spacing:-.02em}
+.rd-kpi span:last-child{font-size:12px;color:var(--faint)}
+.rd-face{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;flex:none}
+.rd-face svg.i{width:22px;height:22px}
+.rd-face.pos{background:var(--ok-soft);color:var(--ok)}.rd-face.neg{background:var(--bad-soft);color:var(--bad)}.rd-face.neu{background:var(--soft);color:var(--muted)}
+.rd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px}
+.rd-filters input[type=date]{min-width:0;width:100%;padding-left:8px;padding-right:6px;font-size:13px}
+.rd-new[hidden]{display:none}
+.rd-grid.list{grid-template-columns:minmax(0,1fr)}
+.rd-card{display:flex;gap:14px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;cursor:pointer;box-shadow:var(--shadow);transition:border-color .12s,box-shadow .12s}
+.rd-card:hover{box-shadow:0 4px 14px rgba(16,24,40,.08)}
+.rd-card.on{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.rd-thumb{width:128px;height:92px;border-radius:8px;object-fit:cover;flex:none;background:var(--soft)}
+.rd-grid.list .rd-thumb{width:120px;height:78px}
+.rd-noimg{display:grid;place-items:center;color:var(--faint)}
+.rd-body{min-width:0;display:flex;flex-direction:column;gap:5px}
+.rd-body .badge{align-self:flex-start}
+.rd-body h4{margin:2px 0 2px;font-size:13.5px;font-weight:600;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.rd-body small{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:12px}
+.rd-body small svg.i,.rd-dmeta svg.i{width:13px;height:13px;color:var(--faint)}
+.rd-tier{margin-left:6px;padding:0 6px;border-radius:4px;background:var(--soft);font-size:11px}
+.rd-more{text-align:center;color:var(--faint);font-size:12.5px;padding:18px}
+.rd-new{all:unset;display:block;text-align:center;cursor:pointer;margin:0 0 12px;padding:8px;border-radius:8px;background:var(--accent-soft);color:var(--accent);font-weight:600;font-size:13px}
+.rd-none,.rd-empty{grid-column:1/-1;display:flex;flex-direction:column;align-items:center;gap:6px;padding:60px 20px;color:var(--muted);text-align:center}
+.rd-none svg.i,.rd-empty svg.i{width:22px;height:22px;padding:12px;border-radius:50%;background:var(--accent-soft);color:var(--accent);box-sizing:content-box}
+.rd-detail{padding:18px 20px}
+.rd-dhead{display:flex;align-items:center;gap:6px}.rd-dhead .badge{margin-right:auto}
+.rd-close{display:none}
+.rd-detail h2{font-size:17px;line-height:1.4;margin:12px 0 8px;font-weight:650}
+.rd-dmeta{display:flex;flex-wrap:wrap;gap:12px;font-size:12.5px;color:var(--muted);margin-bottom:12px}.rd-dmeta span{display:flex;align-items:center;gap:5px}
+.rd-dimg{width:100%;border-radius:10px;margin-bottom:14px;max-height:280px;object-fit:cover}
+.rd-text p{font-size:13.5px;line-height:1.75;text-align:justify;margin:0 0 12px;color:var(--text)}
+.rd-text mark,.rd-detail h2 mark{background:var(--accent-soft);color:var(--accent);padding:1px 4px;border-radius:4px}
+.rd-people{border-top:1px solid var(--line);padding-top:10px;margin-top:6px;font-size:12.5px}.rd-people small{display:block;color:var(--faint);margin-top:6px}
+@media (max-width:1300px){.rd-wrap{grid-template-columns:260px minmax(0,1fr)}
+  .rd-detail{position:fixed;top:0;right:0;bottom:0;width:min(480px,100vw);max-height:none;z-index:60;border-radius:0;transform:translateX(105%);transition:transform .2s;box-shadow:-10px 0 30px rgba(16,24,40,.18)}
+  .rd-detail.open{transform:none}.rd-close{display:inline-flex}}
+@media (max-width:860px){.rd-wrap{grid-template-columns:minmax(0,1fr)}.rd-filters{position:static;max-height:none}.rd-grid{grid-template-columns:minmax(0,1fr)}
+  .rd-kpis{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.rd-kpi{padding:10px;gap:8px}.rd-face{display:none}.rd-thumb{width:110px;height:78px}}
 </style>
 </head>
 <body>
@@ -623,6 +672,10 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
   <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
   <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></symbol>
   <symbol id="i-radio" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8"/></symbol>
+  <symbol id="i-pos" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8.5 14a4.5 4.5 0 0 0 7 0"/><path d="M9 9.5h.01M15 9.5h.01"/></symbol>
+  <symbol id="i-neg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8.5 16a4.5 4.5 0 0 1 7 0"/><path d="M9 9.5h.01M15 9.5h.01"/></symbol>
+  <symbol id="i-neu" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8.5 15h7"/><path d="M9 9.5h.01M15 9.5h.01"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
   <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11 12 4l9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/></symbol>
   <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/></symbol>
   <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
@@ -647,6 +700,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
       <div class="sep">News</div>
       <button data-p="nwsearch"><svg class="i"><use href="#i-news"/></svg>News Search</button>
       <button data-p="nwlinks"><svg class="i"><use href="#i-link"/></svg>News Links<span class="count" id="navNews">0</span></button>
+      <button data-p="reader"><svg class="i"><use href="#i-file"/></svg>News Stream</button>
       <button data-p="stream"><svg class="i"><use href="#i-radio"/></svg>Live Stream<span class="count" id="navStream"></span></button>
       <button data-p="explore"><svg class="i"><use href="#i-trophy"/></svg>Explore</button>
       <button data-p="media"><svg class="i"><use href="#i-building"/></svg>Media Database</button>
@@ -1107,6 +1161,39 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
     </section>
 
 
+    <!-- NEWS STREAM (reader) -->
+    <section class="page" id="p-reader">
+      <div class="pagehead"><div><h1>News Stream</h1><p>Articles streaming in from the registered media, filtered as you set — new ones show up by themselves.</p></div>
+        <div class="actions"><span class="pill run" id="rdLive"><i></i>Live</span></div></div>
+      <div class="rd-wrap">
+        <aside class="card rd-filters"><div class="card-bd" style="padding-top:16px">
+          <div class="rd-topic"><div><small>Active topic</small><select id="rdTopic"><option value="">All articles</option></select></div>
+            <div style="text-align:right"><small>Total news</small><b id="rdTotal">–</b></div></div>
+          <div style="display:grid;grid-template-columns:minmax(0,1fr);gap:0">
+            <div class="field"><label for="rdStart">Start date</label><input type="date" id="rdStart"></div>
+            <div class="field"><label for="rdEnd">End date</label><input type="date" id="rdEnd"></div></div>
+          <div class="field"><label for="rdSent">Sentiment</label><select id="rdSent"><option value="">All</option><option value="positive">Positive</option><option value="negative">Negative</option><option value="neutral">Neutral</option></select></div>
+          <div class="field"><label for="rdSort">Sort</label><select id="rdSort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></div>
+          <div class="field"><label>View</label><div class="seg rd-view" id="rdView"><button data-v="grid" class="on">Grid</button><button data-v="list">List</button></div></div>
+          <div class="field"><label for="rdQ">Keyword</label><textarea id="rdQ" rows="4" placeholder='pln AND (padam OR gangguan) NOT promo'></textarea>
+            <small class="hint">AND · OR · NOT · "exact phrase" · ( ) · prefix*</small></div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px"><button class="btn" id="rdReset">Reset</button><button class="btn primary" id="rdGo"><svg class="i"><use href="#i-search"/></svg>Filter</button></div>
+          <p class="hint" id="rdMsg" style="margin:10px 0 0"></p>
+        </div></aside>
+        <div class="rd-main">
+          <div class="rd-kpis">
+            <div class="rd-kpi"><span class="rd-face pos"><svg class="i"><use href="#i-pos"/></svg></span><div><small>Positive</small><b id="rdPos">–</b><span id="rdPosN"></span></div></div>
+            <div class="rd-kpi"><span class="rd-face neg"><svg class="i"><use href="#i-neg"/></svg></span><div><small>Negative</small><b id="rdNeg">–</b><span id="rdNegN"></span></div></div>
+            <div class="rd-kpi"><span class="rd-face neu"><svg class="i"><use href="#i-neu"/></svg></span><div><small>Neutral</small><b id="rdNeu">–</b><span id="rdNeuN"></span></div></div>
+          </div>
+          <button class="rd-new" id="rdNew" hidden></button>
+          <div class="rd-grid" id="rdList"></div>
+          <div class="rd-more" id="rdMore"></div>
+        </div>
+        <aside class="card rd-detail" id="rdDetail"><div class="rd-empty"><svg class="i"><use href="#i-file"/></svg><b>Pick an article</b><small>Its full text shows here, with your keywords highlighted.</small></div></aside>
+      </div>
+    </section>
+
     <!-- LIVE STREAM -->
     <section class="page" id="p-stream">
       <div class="pagehead"><div><h1>Live News Stream</h1><p>Always on: reads every new article from the registered media (RSS feeds + outlet sitemaps) within minutes, keeps them <span id="lsStRet">7</span> days, and sends the ones matching a keyword or report topic to Home and Reports at once.</p></div>
@@ -1136,6 +1223,8 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
           <div class="field"><label for="lsSfRss">RSS feeds of active outlets: every (minutes)</label><input id="lsSfRss" type="number" min="2" max="240"></div>
           <div class="field"><label for="lsSfTop">Active outlets = the top … of the last 7 days</label><input id="lsSfTop" type="number" min="50" max="20000"></div>
           <div class="field"><label for="lsSfSm">Active: check every (minutes)</label><input id="lsSfSm" type="number" min="10" max="720"></div>
+          <div class="field"><label for="lsSfTop2">Active 2 = the next … outlets</label><input id="lsSfTop2" type="number" min="0" max="20000"></div>
+          <div class="field"><label for="lsSfA2">Active 2: check every (hours)</label><input id="lsSfA2" type="number" min="1" max="24"></div>
           <div class="field"><label for="lsSfSemi">Semi-active: every (hours)</label><input id="lsSfSemi" type="number" min="1" max="48"></div>
           <div class="field"><label for="lsSfRare">Rare (nothing in 7 days): every (hours)</label><input id="lsSfRare" type="number" min="2" max="168"></div>
           <div class="field"><label for="lsSfIn">Inactive (nothing in 30 days): every (days)</label><input id="lsSfIn" type="number" min="1" max="30"></div>
@@ -1197,7 +1286,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
       </div>
       <div class="card"><div class="card-hd" style="flex-wrap:wrap;gap:8px"><h3>Outlets</h3>
           <input class="search" id="mdQ" placeholder="Search domain or name…" style="margin-left:auto;max-width:220px;height:36px;padding-top:0;padding-bottom:0">
-          <select class="select" id="mdTier" style="max-width:170px;height:36px;padding-top:0;padding-bottom:0"><option value="">Every activity</option><option value="active">Active</option><option value="semi">Semi-active</option><option value="rare">Rare</option><option value="inactive">Inactive</option><option value="dead">Unreachable</option><option value="new">Not checked yet</option></select>
+          <select class="select" id="mdTier" style="max-width:170px;height:36px;padding-top:0;padding-bottom:0"><option value="">Every activity</option><option value="active">Active</option><option value="active2">Active 2</option><option value="semi">Semi-active</option><option value="rare">Rare</option><option value="inactive">Inactive</option><option value="dead">Unreachable</option><option value="new">Not checked yet</option></select>
           <select class="select" id="mdAcc" style="max-width:180px;height:36px;padding-top:0;padding-bottom:0"><option value="">Every access</option><option value="ok">Readable</option><option value="partial">Partly readable</option><option value="blocked">Cannot be read</option><option value="paywall">Paywall?</option><option value="robots">Refused by robots.txt</option><option value="unreachable">Site unreachable</option><option value="quiet">No new articles</option><option value="pending">Not read yet</option><option value="excluded">Excluded</option><option value="unknown">Not checked yet</option></select>
           <select class="select" id="mdSort" style="max-width:150px;height:36px;padding-top:0;padding-bottom:0"><option value="activity">Busiest first</option><option value="name">A–Z</option></select></div>
         <div class="tbl-wrap"><table class="tbl dtbl"><thead><tr><th>Outlet</th><th style="width:130px">Activity</th><th style="width:110px">Articles / day</th><th style="width:170px">Access</th><th style="width:110px">Read / failed</th><th style="width:150px">Last article</th><th style="width:170px"></th></tr></thead><tbody id="mdBody"></tbody></table></div>
@@ -1632,6 +1721,7 @@ function go(p){
   if (p === 'report') loadReport();
   if (p === 'home') loadHome();
   if (p === 'stream') loadStream();
+  if (p === 'reader') initReader();
   if (p === 'media') loadMedia();
   if (p === 'explore') loadExplore();
   if (p === 'apikeys'){ loadApKeys(); loadTg(); loadSafety(); }
@@ -2468,7 +2558,7 @@ $('tgTest').onclick = async () => {
 
 /* ---------- look: icon colours, page header icons, new-search menu, tabs, home, me ---------- */
 const NAV_IC = {home: '#f59e0b', collect: '#22c55e', accounts: '#3b82f6', results: '#06b6d4', status: '#22c55e', kwsearch: '#8b5cf6',
-  kwlinks: '#06b6d4', nwsearch: '#3b82f6', nwlinks: '#06b6d4', stream: '#22c55e', media: '#a855f7', explore: '#f59e0b', apiscrape: '#f43f5e', apikeys: '#f59e0b', report: '#10b981',
+  kwlinks: '#06b6d4', nwsearch: '#3b82f6', nwlinks: '#06b6d4', stream: '#22c55e', media: '#a855f7', reader: '#0ea5e9', explore: '#f59e0b', apiscrape: '#f43f5e', apikeys: '#f59e0b', report: '#10b981',
   schedules: '#f97316', exports: '#64748b', users: '#ec4899', log: '#94a3b8'};
 document.querySelectorAll('#nav button[data-p]').forEach(b => { if (NAV_IC[b.dataset.p]) b.style.setProperty('--ic', NAV_IC[b.dataset.p]); });
 document.querySelectorAll('section.page').forEach(sec => {
@@ -2656,7 +2746,8 @@ async function loadStream(){
   const sr = d.sources || {}, row = (k, label) => { const x = sr[k] || {}; return `<div class="hs-foot" style="border-top:0;padding:4px 0"><span><b style="font-size:13px!important">${label}</b></span><b>${fmt(x.n || 0)}</b></div>
     <div class="hs-foot"><span>checked so far</span><b>${fmt(x.checked || 0)}</b></div><div class="hs-foot"><span>with new articles</span><b>${fmt(x.productive || 0)}</b></div><div class="hs-foot"><span>unreachable</span><b>${fmt(x.dead || 0)}</b></div>`; };
   const tr = d.tiers || {}, every = m => m >= 1440 ? `${+(m / 1440).toFixed(1)} day${m >= 2880 ? 's' : ''}` : m >= 60 ? `${+(m / 60).toFixed(1)} h` : `${m} min`;
-  const tiers = [['active', `Active (top ${fmt(cfg.top_n)})`, every(cfg.sitemap_minutes), '#16a34a'], ['semi', 'Semi-active', every(cfg.semi_hours * 60), '#2a78d6'],
+  const tiers = [['active', `Active (top ${fmt(cfg.top_n)})`, every(cfg.sitemap_minutes), '#16a34a'],
+    ['active2', `Active 2 (next ${fmt(cfg.top2_n || 0)})`, every((cfg.active2_hours || 2) * 60), '#14b8a6'], ['semi', 'Semi-active', every(cfg.semi_hours * 60), '#2a78d6'],
     ['rare', 'Rare', every(cfg.rare_hours * 60), '#e0a100'], ['inactive', 'Inactive', every(cfg.inactive_days * 1440), '#8a92a3'],
     ['dead', 'Unreachable', every(cfg.dead_days * 1440), '#d03b3b'], ['new', 'Not checked yet', 'first check soon', '#c3c2b7']];
   $('lsStEngines').innerHTML = `<div class="sub-hd" style="margin-top:0;padding-top:0;border:0">Outlets by activity</div>` +
@@ -2688,7 +2779,7 @@ async function loadStream(){
     $('lsSfOld').value = cfg.old_per_check; $('lsSfAll').checked = cfg.all_links !== false; $('lsSfHome').checked = cfg.homepage !== false;
     $('lsSfHDay').value = cfg.health_weekday; $('lsSfHHour').value = cfg.health_hour; $('lsSfHStart').checked = cfg.health_on_start !== false;
     $('lsSfCuD').value = cfg.catchup_days; $('lsSfCuH').value = cfg.catchup_hour;
-    $('lsSfTop').value = cfg.top_n; $('lsSfSemi').value = cfg.semi_hours; $('lsSfRare').value = cfg.rare_hours; $('lsSfIn').value = cfg.inactive_days; $('lsSfDead').value = cfg.dead_days; $('lsSfAge').value = cfg.max_age_hours;
+    $('lsSfTop').value = cfg.top_n; $('lsSfTop2').value = cfg.top2_n; $('lsSfA2').value = cfg.active2_hours; $('lsSfSemi').value = cfg.semi_hours; $('lsSfRare').value = cfg.rare_hours; $('lsSfIn').value = cfg.inactive_days; $('lsSfDead').value = cfg.dead_days; $('lsSfAge').value = cfg.max_age_hours;
     $('lsSfRet').value = cfg.retention_days; $('lsSfGap').value = cfg.domain_gap; $('lsSfKw').value = (cfg.keywords || []).join('\n');
     $('lsSfUseRss').checked = !!cfg.rss; $('lsSfUseSm').checked = !!cfg.sitemaps; $('lsSfRobots').checked = cfg.robots !== false;
     $('lsSfEx').value = (cfg.exclude_domains || []).join('\n'); }
@@ -2709,7 +2800,7 @@ $('lsSfSave').onclick = async () => {
     old_per_check: +$('lsSfOld').value, all_links: $('lsSfAll').checked, homepage: $('lsSfHome').checked,
     health_weekday: +$('lsSfHDay').value, health_hour: +$('lsSfHHour').value, health_on_start: $('lsSfHStart').checked,
     catchup_days: +$('lsSfCuD').value, catchup_hour: +$('lsSfCuH').value,
-    top_n: +$('lsSfTop').value, semi_hours: +$('lsSfSemi').value, rare_hours: +$('lsSfRare').value, inactive_days: +$('lsSfIn').value, dead_days: +$('lsSfDead').value,
+    top_n: +$('lsSfTop').value, top2_n: +$('lsSfTop2').value, active2_hours: +$('lsSfA2').value, semi_hours: +$('lsSfSemi').value, rare_hours: +$('lsSfRare').value, inactive_days: +$('lsSfIn').value, dead_days: +$('lsSfDead').value,
     rss: $('lsSfUseRss').checked, sitemaps: $('lsSfUseSm').checked, robots: $('lsSfRobots').checked, exclude_domains: $('lsSfEx').value});
   $('lsSfMsg').textContent = r && r.ok ? 'Saved.' : (r && r.error) || 'Not saved'; loadStream.filled = false; loadStream(); };
 $('lsExport').onclick = async () => { const r = await api('/api/stream/export', {day: $('lsDay').value});
@@ -2721,7 +2812,7 @@ document.addEventListener('mousemove', e => { const t = e.target.closest && e.ta
 
 /* ---------- media database ---------- */
 let MD = {page: 1}, MDROWS = [];
-const TIERL = {active: ['Active', '#16a34a'], semi: ['Semi-active', '#2a78d6'], rare: ['Rare', '#e0a100'], inactive: ['Inactive', '#8a92a3'], dead: ['Unreachable', '#d03b3b'], new: ['Not checked yet', '#c3c2b7']};
+const TIERL = {active: ['Active', '#16a34a'], active2: ['Active 2', '#14b8a6'], semi: ['Semi-active', '#2a78d6'], rare: ['Rare', '#e0a100'], inactive: ['Inactive', '#8a92a3'], dead: ['Unreachable', '#d03b3b'], new: ['Not checked yet', '#c3c2b7']};
 const ACCL = {ok: ['Readable', 'b-ok'], partial: ['Partly readable', 'b-warn'], blocked: ['Cannot be read', 'b-bad'], paywall: ['Paywall?', 'b-warn'],
   robots: ['Refused by robots.txt', 'b-bad'], unreachable: ['Site unreachable', 'b-bad'], quiet: ['No new articles', 'b-neu'], pending: ['Not read yet', 'b-neu'], excluded: ['Excluded', 'b-neu'], unknown: ['Not checked yet', 'b-neu']};
 async function loadMedia(){
@@ -2839,6 +2930,99 @@ $('exXls').onclick = async () => { const q = $('exQ').value.trim(); if (!q) retu
 $('exSpSave').onclick = async () => { const r = await api('/api/insights', {spike_alerts: $('exSpOn').checked, spike_factor: +$('exSpF').value, spike_min: +$('exSpMin').value});
   $('exSpMsg').textContent = r && r.ok ? 'Saved.' : (r && r.error) || 'Not saved'; };
 setInterval(() => { if (document.visibilityState === 'visible' && $('p-explore').classList.contains('on')){ exStories(); exStatus(); } }, 60000);
+
+/* ---------- news stream reader ---------- */
+let RD = {page: 1, rows: [], key: null, matching: 0, loading: false, terms: [], view: ls.get('rd_view', 'grid')};
+const SENT = {positive: ['b-ok', 'Positive'], negative: ['b-bad', 'Negative'], neutral: ['b-neu', 'Neutral']};
+const TIERN = {active: 'Active', active2: 'Active 2', semi: 'Semi', rare: 'Rare', inactive: 'Inactive', dead: 'Down', new: 'New'};
+function rdParams(page){
+  return new URLSearchParams({q: $('rdQ').value.trim(), topic: $('rdTopic').value, start: $('rdStart').value, end: $('rdEnd').value,
+    sentiment: $('rdSent').value, sort: $('rdSort').value, page, size: 24});
+}
+function rdTerms(){
+  const q = $('rdQ').value + ' ' + ($('rdTopic').selectedOptions[0]?.dataset.kw || '');
+  const out = []; q.replace(/"([^"]+)"|(-?[\p{L}\p{N}*]+)/gu, (m, ph, w) => {
+    if (ph) out.push(ph); else if (w && !/^(AND|OR|NOT)$/.test(w) && !w.startsWith('-') && w.length > 1) out.push(w.replace(/\*$/, ''));
+    return m; });
+  return [...new Set(out.map(t => t.toLowerCase()))];
+}
+const rdHi = txt => { let h = esc(txt); for (const t of RD.terms){ const re = new RegExp('(' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi'); h = h.replace(re, '<mark>$1</mark>'); } return h; };
+const rdWhen = r => `${r.pub_date ? new Date(r.pub_date + 'T00:00:00').toLocaleDateString([], {day: '2-digit', month: 'short', year: 'numeric'}) : ''} ${r.pub_time || ''}`.trim();
+function rdCard(r){
+  return `<div class="rd-card${r.key === RD.key ? ' on' : ''}" data-k="${esc(r.key)}" tabindex="0">
+    ${r.image ? `<img class="rd-thumb" src="${esc(r.image)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : '<div class="rd-thumb rd-noimg"><svg class="i"><use href="#i-file"/></svg></div>'}
+    <div class="rd-body"><span class="badge ${SENT[r.sentiment][0]}">${SENT[r.sentiment][1]}</span>
+      <h4>${esc(r.title || r.url)}</h4>
+      <small><svg class="i"><use href="#i-cal"/></svg>${rdWhen(r)}${r.tier ? ` <span class="rd-tier">${TIERN[r.tier] || esc(r.tier)}</span>` : ''}</small>
+      <small><svg class="i"><use href="#i-building"/></svg>${esc(r.domain)}</small></div></div>`;
+}
+async function loadReader(reset = true){
+  if (RD.loading) return; RD.loading = true;
+  if (reset){ RD.page = 1; RD.terms = rdTerms(); }
+  $('rdMsg').textContent = '';
+  const d = await api('/api/articles?' + rdParams(RD.page));
+  RD.loading = false;
+  if (!d || d.ok === false){ $('rdMsg').textContent = (d && d.error) || 'Could not load'; if (reset) $('rdList').innerHTML = ''; return; }
+  RD.matching = d.matching; RD.rows = reset ? d.rows : RD.rows.concat(d.rows);
+  $('rdTotal').textContent = fmt(d.total);
+  for (const [k, id] of [['positive', 'Pos'], ['negative', 'Neg'], ['neutral', 'Neu']]){
+    $('rd' + id).textContent = d.sentiment[k].pct + '%'; $('rd' + id + 'N').textContent = `${fmt(d.sentiment[k].n)} news`; }
+  const html = d.rows.map(rdCard).join('');
+  if (reset) $('rdList').innerHTML = html || `<div class="rd-none"><svg class="i"><use href="#i-search"/></svg><b>No article matches</b><small>Widen the dates or the keyword — or start the Live Stream so articles come in.</small></div>`;
+  else $('rdList').insertAdjacentHTML('beforeend', html);
+  $('rdList').querySelectorAll('img.rd-thumb').forEach(img => img.onerror = () => { const p = document.createElement('div'); p.className = 'rd-thumb rd-noimg'; p.innerHTML = '<svg class="i"><use href="#i-file"/></svg>'; img.replaceWith(p); });
+  $('rdMore').textContent = RD.rows.length < RD.matching ? 'Loading more…' : (RD.rows.length ? `All ${fmt(RD.matching)} shown` : '');
+  RD.first = RD.rows[0] && RD.rows[0].key; $('rdNew').hidden = true;
+  if (reset && RD.rows.length && innerWidth > 1300)          // the new filter's words highlighted in the open article too
+    rdOpen(RD.key && RD.rows.some(r => r.key === RD.key) ? RD.key : RD.rows[0].key);
+}
+async function rdOpen(key){
+  RD.key = key; document.querySelectorAll('.rd-card').forEach(c => c.classList.toggle('on', c.dataset.k === key));
+  const box = $('rdDetail'); box.classList.add('open');
+  const a = await api('/api/articles/one?key=' + encodeURIComponent(key));
+  if (!a || a.ok === false){ box.innerHTML = `<div class="rd-empty"><b>${esc((a && a.error) || 'Not found')}</b></div>`; return; }
+  box.innerHTML = `<div class="rd-dhead"><span class="badge ${SENT[a.sentiment][0]}">${SENT[a.sentiment][1]}</span>
+      <a class="iconbtn" href="${esc(a.url)}" target="_blank" rel="noopener" title="Open the original"><svg class="i"><use href="#i-ext"/></svg></a>
+      <button class="iconbtn rd-close" title="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
+    <h2>${rdHi(a.title)}</h2>
+    <div class="rd-dmeta"><span><svg class="i"><use href="#i-building"/></svg>${esc(a.domain)}</span><span><svg class="i"><use href="#i-cal"/></svg>${esc(rdWhen({pub_date: a.date, pub_time: a.time}))}</span>${a.author ? `<span>${esc(a.author)}</span>` : ''}</div>
+    ${a.image ? `<img class="rd-dimg" src="${esc(a.image)}" alt="" referrerpolicy="no-referrer">` : ''}
+    <div class="rd-text">${a.paragraphs.map(p => `<p>${rdHi(p)}</p>`).join('')}</div>
+    ${a.persons || a.influencer ? `<div class="rd-people">${a.influencer ? `<small>Spokesperson</small><div>${esc(a.influencer)}</div>` : ''}${a.persons ? `<small>People</small><div>${esc(a.persons)}</div>` : ''}</div>` : ''}
+    ${a.matched ? `<div style="margin-top:10px">${a.matched.split(', ').map(k => `<span class="badge b-ok">${esc(k)}</span>`).join(' ')}</div>` : ''}`;
+  box.querySelector('.rd-dimg')?.addEventListener('error', e => e.target.remove());
+  box.scrollTop = 0;
+}
+$('rdList').addEventListener('click', e => { const c = e.target.closest('.rd-card'); if (c) rdOpen(c.dataset.k); });
+$('rdList').addEventListener('keydown', e => { const c = e.target.closest('.rd-card'); if (c && e.key === 'Enter') rdOpen(c.dataset.k); });
+$('rdDetail').addEventListener('click', e => { if (e.target.closest('.rd-close')) $('rdDetail').classList.remove('open'); });
+$('rdGo').onclick = () => loadReader(true);
+$('rdQ').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) loadReader(true); });
+['rdTopic', 'rdSent', 'rdSort', 'rdStart', 'rdEnd'].forEach(id => $(id).addEventListener('change', () => loadReader(true)));
+$('rdReset').onclick = () => { const t = new Date().toISOString().slice(0, 10); $('rdStart').value = $('rdEnd').value = t; $('rdQ').value = '';
+  $('rdTopic').value = ''; $('rdSent').value = ''; $('rdSort').value = 'newest'; loadReader(true); };
+document.querySelectorAll('#rdView button').forEach(b => { b.classList.toggle('on', b.dataset.v === RD.view);
+  b.onclick = () => { RD.view = b.dataset.v; ls.set('rd_view', RD.view); document.querySelectorAll('#rdView button').forEach(x => x.classList.toggle('on', x === b));
+    $('rdList').classList.toggle('list', RD.view === 'list'); }; });
+$('rdList').classList.toggle('list', RD.view === 'list');
+new IntersectionObserver(es => { if (es[0].isIntersecting && RD.rows.length && RD.rows.length < RD.matching && !RD.loading){ RD.page++; loadReader(false); } })
+  .observe($('rdMore'));
+$('rdNew').onclick = () => { window.scrollTo({top: 0, behavior: 'smooth'}); loadReader(true); };
+setInterval(async () => {                                // live: tell when new articles match the filter
+  if (document.visibilityState !== 'visible' || !$('p-reader').classList.contains('on') || !RD.first) return;
+  const d = await api('/api/articles?' + rdParams(1));
+  if (!d || !d.rows) return;
+  const i = d.rows.findIndex(r => r.key === RD.first), n = i < 0 ? d.rows.length : i;
+  if (n > 0 && $('rdSort').value === 'newest'){ $('rdNew').hidden = false; $('rdNew').textContent = `↑ ${n}${n === d.rows.length ? '+' : ''} new article(s) — show`; }
+}, 30000);
+async function initReader(){
+  if (!initReader.done){ initReader.done = true;
+    const t = new Date().toISOString().slice(0, 10); $('rdStart').value = $('rdStart').value || t; $('rdEnd').value = $('rdEnd').value || t;
+    const tp = await api('/api/report/topics');
+    (tp.topics || []).forEach(x => { const o = document.createElement('option'); o.value = x.id; o.textContent = x.name; o.dataset.kw = (x.keywords || []).join(' '); $('rdTopic').append(o); });
+  }
+  loadReader(true);
+}
 
 /* ---------- reports ---------- */
 let TOPICS = [];

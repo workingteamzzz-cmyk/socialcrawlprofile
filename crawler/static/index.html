@@ -515,7 +515,7 @@ body{font-feature-settings:"tnum" 1,"cv11" 1;letter-spacing:-.003em}
 .legend-row span{display:flex;align-items:center;gap:6px}.legend-row i{width:10px;height:3px;border-radius:2px}
 .chart svg{display:block;overflow:visible}
 .g-2-1 > .card{display:flex;flex-direction:column}.g-2-1 > .card > .card-bd{flex:1;display:flex;flex-direction:column}
-#chTrend{flex:1;min-height:260px;position:relative}#chTrend svg{position:absolute;inset:0}
+#chTrend,#lsChStream{flex:1;min-height:260px;position:relative}#chTrend svg,#lsChStream svg{position:absolute;inset:0}
 .chart .grid{stroke:var(--gridc);stroke-width:1}.chart .base{stroke:var(--axc);stroke-width:1}
 .chart .ax{fill:var(--faint);font-size:11px}
 .chart .cross{stroke:var(--axc);stroke-width:1;stroke-dasharray:3 3}
@@ -590,6 +590,7 @@ body{font-feature-settings:"tnum" 1,"cv11" 1;letter-spacing:-.003em}
   <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></symbol>
   <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
   <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></symbol>
+  <symbol id="i-radio" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8"/></symbol>
   <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11 12 4l9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/></symbol>
   <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/></symbol>
   <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
@@ -614,6 +615,7 @@ body{font-feature-settings:"tnum" 1,"cv11" 1;letter-spacing:-.003em}
       <div class="sep">News</div>
       <button data-p="nwsearch"><svg class="i"><use href="#i-news"/></svg>News Search</button>
       <button data-p="nwlinks"><svg class="i"><use href="#i-link"/></svg>News Links<span class="count" id="navNews">0</span></button>
+      <button data-p="stream"><svg class="i"><use href="#i-radio"/></svg>Live Stream<span class="count" id="navStream"></span></button>
       <div class="sep need-op">API scraper</div>
       <button data-p="apiscrape" class="need-op"><svg class="i"><use href="#i-pulse"/></svg>API Scraper</button>
       <button data-p="apikeys" class="need-admin"><svg class="i"><use href="#i-shield"/></svg>Settings</button>
@@ -1065,6 +1067,40 @@ body{font-feature-settings:"tnum" 1,"cv11" 1;letter-spacing:-.003em}
     </section>
 
 
+    <!-- LIVE STREAM -->
+    <section class="page" id="p-stream">
+      <div class="pagehead"><div><h1>Live News Stream</h1><p>Always on: reads every new article from the registered media (RSS feeds + outlet sitemaps) within minutes, keeps them <span id="lsStRet">7</span> days, and sends the ones matching a keyword or report topic to Home and Reports at once.</p></div>
+        <div class="actions"><span class="pill" id="lsStPill"><i></i><span id="lsStState">Stopped</span></span>
+          <button class="btn primary need-admin" id="lsStToggle">Start stream</button></div></div>
+      <div class="kpis">
+        <div class="kpi"><small>Articles read today</small><b id="lsSRead">–</b><span class="kpi-sub" id="lsSReadS"></span></div>
+        <div class="kpi"><small>Current pace</small><b id="lsSPace">–</b><span class="kpi-sub" id="lsSPaceS"></span></div>
+        <div class="kpi"><small>Keyword matches today</small><b id="lsSMatch">–</b><span class="kpi-sub" id="lsSMatchS"></span></div>
+        <div class="kpi"><small>Waiting to be read</small><b id="lsSQueue">–</b><span class="kpi-sub" id="lsSQueueS"></span></div>
+      </div>
+      <div class="dgrid g-2-1">
+        <div class="card viz"><div class="card-hd"><h3>Articles read per hour</h3><div class="legend-row"><span><i style="background:var(--s1)"></i>Read</span><span><i style="background:var(--s2)"></i>Keyword matches</span></div></div>
+          <div class="card-bd"><div class="chart" id="lsChStream"></div></div></div>
+        <div class="card"><div class="card-hd"><h3>Engines</h3></div><div class="card-bd" id="lsStEngines"></div></div>
+      </div>
+      <div class="card"><div class="card-hd"><h3>Latest articles</h3><input class="search" id="lsStQ" placeholder="Filter by title or keyword…" style="margin-left:auto;max-width:280px;height:32px"></div>
+        <div class="tbl-wrap"><table class="tbl dtbl"><thead><tr><th style="width:110px">Published</th><th>Title</th><th style="width:180px">Media</th><th style="width:200px">Keyword</th></tr></thead><tbody id="lsStBody"></tbody></table></div></div>
+      <div class="card need-admin" style="margin-top:16px"><div class="card-hd"><h3>Stream settings</h3><span class="hd-note">admins</span></div><div class="card-bd">
+        <div class="grid2" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px">
+          <div class="field"><label for="lsSfThreads">Article readers (threads)</label><input id="lsSfThreads" type="number" min="2" max="64"></div>
+          <div class="field"><label for="lsSfRss">Check each RSS feed every (minutes)</label><input id="lsSfRss" type="number" min="2" max="240"></div>
+          <div class="field"><label for="lsSfSm">Check each outlet sitemap every (minutes)</label><input id="lsSfSm" type="number" min="10" max="720"></div>
+          <div class="field"><label for="lsSfAge">Only articles from the last (hours)</label><input id="lsSfAge" type="number" min="6" max="168"></div>
+          <div class="field"><label for="lsSfRet">Keep articles in the stream for (days)</label><input id="lsSfRet" type="number" min="1" max="90"></div>
+          <div class="field"><label for="lsSfGap">Pause between pages of one outlet (seconds)</label><input id="lsSfGap" type="number" min="0.5" max="30" step="0.5"></div>
+        </div>
+        <div class="field" style="margin-top:12px"><label for="lsSfKw">Stream keywords (one per line; every report topic is added automatically)</label><textarea id="lsSfKw" rows="4" placeholder="banjir&#10;pemadaman listrik&#10;&quot;air bersih&quot; NOT iklan"></textarea></div>
+        <div style="display:flex;gap:18px;margin:6px 0 14px;flex-wrap:wrap"><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfUseRss"> RSS engine</label><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="lsSfUseSm"> Sitemap engine</label></div>
+        <button class="btn primary" id="lsSfSave">Save settings</button> <span class="hint" id="lsSfMsg"></span>
+        <p class="hint">Quiet outlets are checked less often (up to every 6 h) and unreachable ones once a day, so the busy outlets get the attention. One page at a time per outlet, with the pause above — nobody is hammered. More readers = faster, as long as the server has CPU to spare.</p>
+      </div></div>
+    </section>
+
     <!-- API SCRAPER (the team's Social Scraper, via ScrapeCreators / Twitter API) -->
     <section class="page" id="p-apiscrape">
       <div class="pagehead"><div><h1>API Scraper</h1><p>The team's Social Scraper (v58): posts from TikTok, YouTube, Threads, Instagram, Facebook and Twitter through the scraping API — complete with User ID, Username, Follower, User Image, engagement, and <b>Sentiment &amp; Emotion</b>. Uses API credits. Output: the team's Excel (Sheet1 + Rekap + Codebook) in Exports.</p></div></div>
@@ -1467,6 +1503,7 @@ function go(p){
   if (p === 'apiscrape') loadApInfo();
   if (p === 'report') loadReport();
   if (p === 'home') loadHome();
+  if (p === 'stream') loadStream();
   if (p === 'apikeys'){ loadApKeys(); loadTg(); loadSafety(); }
 }
 document.querySelectorAll('#nav button').forEach(b => b.onclick = () => go(b.dataset.p));
@@ -2262,7 +2299,7 @@ $('tgTest').onclick = async () => {
 
 /* ---------- look: icon colours, page header icons, new-search menu, tabs, home, me ---------- */
 const NAV_IC = {home: '#f59e0b', collect: '#22c55e', accounts: '#3b82f6', results: '#06b6d4', status: '#22c55e', kwsearch: '#8b5cf6',
-  kwlinks: '#06b6d4', nwsearch: '#3b82f6', nwlinks: '#06b6d4', apiscrape: '#f43f5e', apikeys: '#f59e0b', report: '#10b981',
+  kwlinks: '#06b6d4', nwsearch: '#3b82f6', nwlinks: '#06b6d4', stream: '#22c55e', apiscrape: '#f43f5e', apikeys: '#f59e0b', report: '#10b981',
   schedules: '#f97316', exports: '#64748b', users: '#ec4899', log: '#94a3b8'};
 document.querySelectorAll('#nav button[data-p]').forEach(b => { if (NAV_IC[b.dataset.p]) b.style.setProperty('--ic', NAV_IC[b.dataset.p]); });
 document.querySelectorAll('section.page').forEach(sec => {
@@ -2405,6 +2442,64 @@ function updateMe(st){
 setInterval(() => { if (document.visibilityState === 'visible') api('/api/overview').then(d => d && d.stats && updateMe(d.stats)); }, 60000);
 
 (function clock(){ const t = $('tbClock'); if (t) t.textContent = new Date().toLocaleString([], {weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'}); setTimeout(clock, 30000); })();
+
+/* ---------- live news stream ---------- */
+let ST = null;
+function drawStream(d){
+  const box = $('lsChStream'); box.innerHTML = '';
+  const W = box.clientWidth || 600, H = box.clientHeight || 240, L = 44, R = 10, T = 10, B = 26, n = d.hourly.length;
+  const max = niceMax(Math.max(1, ...d.hourly.map(h => h.read)));
+  const svg = el('svg', {width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Articles read per hour, last 24 hours'}, box);
+  const y = v => T + (H - T - B) * (1 - v / max), bw = (W - L - R) / n;
+  for (let g = 0; g <= 4; g++){ const v = max * g / 4; el('line', {x1: L, x2: W - R, y1: y(v), y2: y(v), class: g ? 'grid' : 'base'}, svg);
+    el('text', {x: L - 8, y: y(v) + 4, 'text-anchor': 'end', class: 'ax'}, svg).textContent = fmt(Math.round(v)); }
+  d.hourly.forEach((h, i) => {
+    const x0 = L + i * bw + 2, w = Math.max(2, bw - 4);
+    if (h.read) el('rect', {x: x0, y: y(h.read), width: w, height: Math.max(1, y(0) - y(h.read)), rx: 3, fill: 'var(--s1)'}, svg);
+    if (h.matched) el('rect', {x: x0 + w * 0.3, y: y(h.matched), width: w * 0.4, height: Math.max(1, y(0) - y(h.matched)), rx: 2, fill: 'var(--s2)'}, svg);
+    if (i % 3 === 0) el('text', {x: x0 + w / 2, y: H - 6, 'text-anchor': 'middle', class: 'ax'}, svg).textContent = h.hour.slice(11) + ':00';
+    const hit = el('rect', {x: L + i * bw, y: T, width: bw, height: H - T - B, fill: 'transparent'}, svg);
+    hit.dataset.tip = `<b>${h.hour.slice(5)}:00</b><div><i style='background:var(--s1)'></i>Read<span>${fmt(h.read)}</span></div><div><i style='background:var(--s2)'></i>Keyword matches<span>${fmt(h.matched)}</span></div><div>Links found<span>${fmt(h.found)}</span></div>`;
+  });
+}
+async function loadStream(){
+  const d = await api('/api/stream?q=' + encodeURIComponent(($('lsStQ').value || '').trim()));
+  if (!d || !d.hourly) return;
+  ST = d; const cfg = d.settings || {};
+  $('lsStPill').classList.toggle('run', d.running); $('lsStState').textContent = d.running ? 'Running' : 'Stopped';
+  $('lsStToggle').textContent = d.running ? 'Stop stream' : 'Start stream'; $('lsStToggle').classList.toggle('primary', !d.running);
+  $('navStream').textContent = d.running ? '●' : '';
+  $('lsStRet').textContent = cfg.retention_days;
+  $('lsSRead').textContent = fmt(d.today.read); $('lsSReadS').textContent = `${fmt(d.today.failed)} could not be read · ${fmt(d.stored)} stored`;
+  $('lsSPace').textContent = fmt(d.per_minute) + ' /min'; $('lsSPaceS').textContent = d.running ? `≈ ${fmt(d.per_day_pace)} per day at this pace` : 'stream is stopped';
+  $('lsSMatch').textContent = fmt(d.today.matched); $('lsSMatchS').textContent = `${d.keywords} keyword(s) incl. report topics`;
+  $('lsSQueue').textContent = fmt(d.queue); $('lsSQueueS').textContent = `${fmt(d.today.found)} new links found today`;
+  const sr = d.sources || {}, row = (k, label) => { const x = sr[k] || {}; return `<div class="hs-foot" style="border-top:0;padding:4px 0"><span><b style="font-size:13px!important">${label}</b></span><b>${fmt(x.n || 0)}</b></div>
+    <div class="hs-foot"><span>checked so far</span><b>${fmt(x.checked || 0)}</b></div><div class="hs-foot"><span>with new articles</span><b>${fmt(x.productive || 0)}</b></div><div class="hs-foot"><span>unreachable (checked daily)</span><b>${fmt(x.dead || 0)}</b></div>`; };
+  $('lsStEngines').innerHTML = row('rss', 'RSS feeds') + '<div style="height:14px"></div>' + row('sitemap', 'Outlet sitemaps') +
+    `<div class="hs-foot" style="margin-top:14px"><span>Readers busy</span><b>${d.readers_busy} / ${cfg.threads}</b></div><div class="hs-foot"><span>Stream database</span><b>${fmt(d.db_mb)} MB</b></div>` +
+    (d.last_error ? `<p class="hint" style="margin-top:10px">Last problem: ${esc(d.last_error)}</p>` : '');
+  drawStream(d);
+  $('lsStBody').innerHTML = d.latest.length ? d.latest.map(r => `<tr><td class="nowrap"><b>${r.pub_date ? dShort(r.pub_date) : '–'}</b><small>${esc(r.pub_time || '')}</small></td>
+    <td><a class="lt-t" href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title || r.url)}</a></td><td class="nowrap">${esc(r.domain)}</td>
+    <td>${r.matched ? r.matched.split(', ').map(k => `<span class="badge b-ok" style="margin:1px">${esc(k)}</span>`).join('') : '<span class="hint">—</span>'}</td></tr>`).join('')
+    : `<tr><td colspan="4" class="empty-s">${d.running ? 'Starting up — the first articles arrive within minutes.' : 'Start the stream to read every new article from the registered media.'}</td></tr>`;
+  if (!loadStream.filled){ loadStream.filled = true;
+    $('lsSfThreads').value = cfg.threads; $('lsSfRss').value = cfg.rss_minutes; $('lsSfSm').value = cfg.sitemap_minutes; $('lsSfAge').value = cfg.max_age_hours;
+    $('lsSfRet').value = cfg.retention_days; $('lsSfGap').value = cfg.domain_gap; $('lsSfKw').value = (cfg.keywords || []).join('\n');
+    $('lsSfUseRss').checked = !!cfg.rss; $('lsSfUseSm').checked = !!cfg.sitemaps; }
+}
+$('lsStToggle').onclick = async () => { if (!ST) return;
+  const r = await api('/api/stream', {enabled: !ST.running}); if (r && r.ok === false) return toast(r.error || 'Not changed');
+  toast(ST.running ? 'Stopping the stream…' : 'Starting the stream…'); setTimeout(loadStream, 1500); };
+$('lsSfSave').onclick = async () => {
+  const r = await api('/api/stream', {threads: +$('lsSfThreads').value, rss_minutes: +$('lsSfRss').value, sitemap_minutes: +$('lsSfSm').value,
+    max_age_hours: +$('lsSfAge').value, retention_days: +$('lsSfRet').value, domain_gap: +$('lsSfGap').value, keywords: $('lsSfKw').value,
+    rss: $('lsSfUseRss').checked, sitemaps: $('lsSfUseSm').checked});
+  $('lsSfMsg').textContent = r && r.ok ? 'Saved.' : (r && r.error) || 'Not saved'; loadStream.filled = false; loadStream(); };
+let _stq; $('lsStQ').addEventListener('input', () => { clearTimeout(_stq); _stq = setTimeout(loadStream, 300); });
+setInterval(() => { if (document.visibilityState === 'visible' && $('p-stream').classList.contains('on')) loadStream(); }, 10000);
+document.addEventListener('mousemove', e => { const t = e.target.closest && e.target.closest('#lsChStream [data-tip]'); if (t) tip(e, t.dataset.tip); else if (e.target.closest && e.target.closest('#lsChStream')) tip(); });
 
 /* ---------- reports ---------- */
 let TOPICS = [];

@@ -286,6 +286,24 @@ layout (Username from the link, Post ID, Sentiment & Emotion); *Full article* op
 and the account; empty IDs / followers are filled with the API when it is set up. Runs on the browser engine (Google
 may ask for a verification).
 
+## Live News Stream (always on, every new article)
+
+**Live Stream** (sidebar, News) is not a search that starts and ends: once an admin presses *Start stream* it keeps
+running (also after a restart) and reads every new article from the registered media:
+
+- **RSS engine** — every working RSS feed of the media dictionary (curated + all feeds the multi-source engine has
+  discovered) is checked every 10 minutes; an unchanged feed answers "304 not modified" (almost free).
+- **Sitemap engine** — every outlet's news sitemap (~12,000 outlets) every 30 minutes; outlets with nothing new are
+  checked less often (up to every 6 h), unreachable ones once a day, so the busy outlets get the attention.
+- **Readers** — 16 threads (2–64) read the new articles newest-first: one page at a time per outlet with a pause
+  between pages, so no outlet is hammered.
+- Every article read is kept in the stream database (7 days, adjustable). Articles matching a **stream keyword or any
+  report topic** go to the reporting database at once — Home dashboard, Reports, Excel.
+
+Measured on a 4-CPU test machine with local test sites: ~37 articles/second (≈ 3 million/day) using less than one CPU
+core. On the real internet the pace is set by how many articles the media publish and how fast their sites answer; the
+page shows the live pace and the "per day at this pace" figure.
+
 ## Google News links (news.google.com / rss) → the media's own link
 
 Every news search turns Google News links into the media's own links. Whatever the browser could not decode gets a

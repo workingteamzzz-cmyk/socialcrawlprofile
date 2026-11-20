@@ -108,6 +108,10 @@ class Handler(BaseHTTPRequestHandler):
             from . import overview as ov
             from .paths import SERVER_MODE
             return self._json(ov.build(SERVER_MODE))
+        if u.path == "/api/stream":
+            from . import stream
+            qs = parse_qs(u.query)
+            return self._json(stream.get().status(30, qs.get("q", [""])[0].strip()[:100]))
         if u.path == "/api/safety":
             from . import safety
             return self._json(safety.status())
@@ -200,6 +204,12 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"ok": ok, "error": None if ok else "That schedule no longer exists."})
                 err = get().run_now(data.get("id", ""))
             except ScheduleError as e:
+                return self._json({"ok": False, "error": str(e)})
+        elif u.path == "/api/stream":
+            from . import stream
+            try:
+                return self._json({"ok": True, **stream.apply(data)})
+            except ValueError as e:
                 return self._json({"ok": False, "error": str(e)})
         elif u.path == "/api/safety":
             from . import safety

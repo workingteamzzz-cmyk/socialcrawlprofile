@@ -111,6 +111,8 @@ def main():
     from crawler import telegram_bot
     telegram_bot.start()                     # idles until a bot token is set (dashboard or .env)
     print("Telegram bot: ready (token from API settings or TELEGRAM_BOT_TOKEN)")
+    from crawler import stream
+    stream.autostart()                       # the live news stream runs again if an admin left it on
     print(f"Schedules: {len(sched.items)}")
     print(f"Data folder: {os.path.dirname(paths.LISTS_DIR)}  ·  server mode: {'on' if paths.SERVER_MODE else 'off'}")
     print(f"Access keys: {', '.join(sorted(keys)) or '-'}  ·  user accounts: {'yes' if has_users else 'none yet'}  ·  "

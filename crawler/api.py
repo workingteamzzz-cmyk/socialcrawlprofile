@@ -234,6 +234,20 @@ class SafetySettings(BaseModel):
     release: str | None = Field(None, description="let a resting site go now: google, instagram, x, tiktok, …")
 
 
+class StreamSettings(BaseModel):
+    enabled: bool | None = Field(None, description="start (true) / stop (false) the live news stream")
+    threads: int | None = Field(None, description="article readers (2-64)")
+    discovery_threads: int | None = None
+    rss_minutes: int | None = Field(None, description="each RSS feed checked every … minutes")
+    sitemap_minutes: int | None = Field(None, description="each outlet's sitemap checked every … minutes (quiet ones less)")
+    retention_days: int | None = Field(None, description="articles kept in the stream database for … days")
+    max_age_hours: int | None = Field(None, description="only articles published in the last … hours")
+    domain_gap: float | None = Field(None, description="seconds between two pages of the same outlet")
+    rss: bool | None = None
+    sitemaps: bool | None = None
+    keywords: list[str] | str | None = Field(None, description="stream keywords (report topics are added)")
+
+
 class TelegramSettings(BaseModel):
     token: str = Field("", description="the bot token from @BotFather (kept on the server, shown back as …last 4)")
     chats: str | None = Field(None, description="chat ids, comma separated (groups start with -)")
@@ -714,6 +728,23 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
             daily_cap=body.daily_cap, monthly_cap=body.monthly_cap,
             cleared=[k for k, v in (("api", body.clear_api_key), ("twitter", body.clear_twitter)) if v])
         return {"ok": True, **pub}
+
+    # ---------- live news stream ----------
+    @app.get("/api/stream", tags=["stream"], dependencies=auth, summary="Live news stream: pace, sources, latest articles")
+    def stream_get(q: str = "", latest: int = 30):
+        from . import stream
+        return stream.get().status(max(1, min(latest, 200)), q.strip()[:100])
+
+    @app.post("/api/stream", tags=["stream"], dependencies=admin_only, summary="Start / stop the stream, set its numbers")
+    def stream_set(body: StreamSettings, request: Request):
+        from . import stream
+        try:
+            out = stream.apply(body.model_dump(exclude_none=True))
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        log(request, "changed the news stream", **{k: v for k, v in body.model_dump(exclude_none=True).items()
+                                                   if k != "keywords"})
+        return {"ok": True, **out}
 
     # ---------- safe mode ----------
     @app.get("/api/safety", tags=["safe mode"], dependencies=auth, summary="Safe mode: pages used today, resting sites")

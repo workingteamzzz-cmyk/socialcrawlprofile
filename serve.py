@@ -11,7 +11,7 @@ Environment:
   Keys or at least one user account are required unless HOST is 127.0.0.1.
   ALLOWED_IPS          optional: only these addresses/networks may connect, e.g. "203.0.113.7,198.51.100.0/24"
   SESSION_DAYS         how long a dashboard sign-in lasts (default 7)
-  RETENTION_DAYS       delete result files older than this many days (default 30; 0 = keep)
+  RETENTION_DAYS       delete result files older than this many days (default 0 = keep forever)
   DEBUG_RETENTION_DAYS delete page copies in outputs/debug older than this (default 7; 0 = keep)
   COLLECTOR_SERVER     1 = no screen: hidden browser, logins by cookie import, verifications solved from the dashboard
   CAPTCHA_WAIT_MINUTES how long a verification waits for a person before that search is skipped (default 10)
@@ -98,7 +98,7 @@ def main():
         paths.migrate()
     except Exception as e:  # noqa: BLE001
         print(f"Note: could not prepare the data folders ({e}). Continuing.")
-    days = float(os.environ.get("RETENTION_DAYS", "30") or 0)
+    days = float(os.environ.get("RETENTION_DAYS", "0") or 0)
     debug_days = float(os.environ.get("DEBUG_RETENTION_DAYS", "7") or 0)
     retention.start(paths.OUTPUT_DIR, days, debug_days)
     app = create_app(keys or None, secure_cookie=os.environ.get("COOKIE_SECURE", "") in ("1", "true", "yes"),

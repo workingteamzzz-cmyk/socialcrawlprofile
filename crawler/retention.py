@@ -1,6 +1,6 @@
 """Keep less data around on a server: result files and page copies older than a set number of days are deleted.
 
-RETENTION_DAYS        result files (Excel/CSV) — default 30; 0 keeps them forever
+RETENTION_DAYS        result files (Excel/CSV) — default 0: kept forever (admins delete them in Exports)
 DEBUG_RETENTION_DAYS  page copies in outputs/debug (they can show account names) — default 7; 0 keeps them
 """
 from __future__ import annotations

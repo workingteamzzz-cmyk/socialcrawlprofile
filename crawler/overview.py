@@ -85,9 +85,9 @@ def build(server_mode: bool) -> dict:
     add("ok" if active else "warn", f"{len(active)} schedule(s) running" if active else "No schedule yet",
         f"next at {time.strftime('%d %b %H:%M', time.localtime(nxt))}" if nxt else "Search pages → Schedule it")
 
-    days = float(os.environ.get("RETENTION_DAYS", "30") or 0)
+    days = float(os.environ.get("RETENTION_DAYS", "0") or 0)
     add("ok", f"Result files kept {days:g} days" if days else "Result files kept forever",
-        "the reporting database keeps everything")
+        "admins delete them in Exports when they want; the reporting database keeps everything")
 
     today = _today_counts()
     try:

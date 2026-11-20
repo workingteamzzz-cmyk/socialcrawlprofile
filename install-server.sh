@@ -50,6 +50,10 @@ fi
 KEYS_FILE="${KEYS_FILE:-/root/post-link-collector-keys.txt}"
 if [ -f .env ]; then
   bold "2/4  Settings already exist (.env) — keeping them."
+  if grep -qE '^RETENTION_DAYS=30$' .env; then          # result files are now kept until an admin deletes them
+    sed -i 's/^RETENTION_DAYS=30$/RETENTION_DAYS=0/' .env
+    echo "    Result files: now kept forever (delete them in Exports)."
+  fi
   DOMAIN=$(grep -E '^DOMAIN=' .env | cut -d= -f2-)
 else
   bold "2/4  Who may use it, and at which address"
@@ -94,7 +98,7 @@ NOTIFY_WEBHOOK_URL=
 RESULTS_WEBHOOK_URL=
 RESULTS_WEBHOOK_TOKEN=
 SESSION_DAYS=7
-RETENTION_DAYS=30
+RETENTION_DAYS=0
 DEBUG_RETENTION_DAYS=7
 EOF
   echo "$names_ok" > .people_pending                # the accounts are made once the app runs (step 4)

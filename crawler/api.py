@@ -283,6 +283,10 @@ class MediaLogin(BaseModel):
     clear: bool = False
 
 
+class OutputsDelete(BaseModel):
+    names: list[str] = Field(..., description="file names as GET /api/outputs lists them")
+
+
 class SearchExport(BaseModel):
     q: str
     days: int = 7
@@ -579,8 +583,16 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
         return JOB.results_view(mode)
 
     @app.get("/api/outputs", tags=["files"], dependencies=auth, summary="Excel files that can be downloaded")
-    def outputs():
-        return {"files": list_outputs()}
+    def outputs(request: Request):
+        return {"files": list_outputs(), "can_delete": getattr(request.state, "role", "") == "admin"}
+
+    @app.post("/api/outputs/delete", tags=["files"], dependencies=admin_only,
+              summary="Delete result files (kept forever otherwise) — admins")
+    def outputs_delete(body: OutputsDelete, request: Request):
+        from .server import delete_outputs
+        gone = delete_outputs(body.names)
+        log(request, "deleted result files", n=len(gone), files=", ".join(gone)[:400])
+        return {"ok": True, "deleted": gone}
 
     @app.get("/download/{name}", tags=["files"], dependencies=auth, summary="Download an Excel/CSV result file")
     def download(name: str, request: Request):

@@ -109,7 +109,8 @@ def test_exports_list_and_delivery_use_the_layout(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "OUTPUT_DIR", str(tmp_path))
     for n in ("20261108_Online_Manual_24.00.xlsx", "news_links_x.xlsx", "random.xlsx"):
         (tmp_path / n).write_text("x")
-    assert sorted(f["name"] for f in server.list_outputs()) == ["20261108_Online_Manual_24.00.xlsx", "news_links_x.xlsx"]
+    assert sorted(f["name"] for f in server.list_outputs()) == ["20261108_Online_Manual_24.00.xlsx", "news_links_x.xlsx",
+                                                               "random.xlsx"]     # every Excel file: kept until deleted
 
     class J:
         data = {"news": {"meta": {"template": "online"}, "links": [

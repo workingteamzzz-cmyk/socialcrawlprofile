@@ -237,8 +237,10 @@ td.cap{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 .toast{position:fixed;bottom:22px;left:50%;transform:translate(-50%,16px);background:#111827;color:#fff;padding:10px 16px;border-radius:10px;font-weight:600;font-size:13px;opacity:0;transition:.25s;pointer-events:none;z-index:60}
 .toast.show{opacity:1;transform:translate(-50%,0)}
-.exports a{display:flex;align-items:center;gap:12px;padding:10px 0;color:var(--text)}
-.exports a+a{border-top:1px solid #f3f4f6}
+.exports a{display:flex;align-items:center;gap:12px;padding:10px 0;color:var(--text);flex:1;min-width:0}
+.exp-row{display:flex;align-items:center;gap:12px}.exp-row+.exp-row{border-top:1px solid var(--line)}
+.exp-ck{width:16px;height:16px;flex:none;accent-color:var(--accent)}
+.exp-rm{flex:none;color:var(--faint)}.exp-rm:hover{color:var(--bad)}
 .exports a:hover{text-decoration:none;color:var(--accent)}
 .exports small{color:var(--muted);font-size:12px;display:block}
 
@@ -1081,7 +1083,13 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
     <!-- EXPORTS -->
     <section class="page" id="p-exports">
       <div class="pagehead"><div><h1>Exports</h1><p>Excel files from earlier collections — saved in <b id="outDir">Documents/Post Link Collector/outputs</b>.</p></div></div>
-      <div class="card"><div class="card-bd exports" id="exports" style="padding-top:14px"></div></div>
+      <div class="card"><div class="card-hd" style="flex-wrap:wrap;gap:8px"><h3>Files</h3><span class="hd-note" id="expInfo"></span>
+          <input class="search" id="expQ" placeholder="Search file names…" style="margin-left:auto;max-width:240px;height:34px">
+          <span class="exp-admin" style="display:none;gap:8px"><button class="btn sm" id="expAll">Select all shown</button>
+          <button class="btn sm danger" id="expDel" disabled>Delete selected</button></span></div>
+        <div class="card-bd exports" id="exports" style="padding-top:6px"></div>
+        <div class="card-bd" style="display:flex;gap:8px;align-items:center;padding-top:0"><span class="hint" id="expPage"></span>
+          <button class="btn sm" id="expPrev" style="margin-left:auto">Previous</button><button class="btn sm" id="expNext">Next</button></div></div>
       <div class="card need-op" style="margin-top:16px">
         <div class="card-hd"><h3>Fix Google News links in a file</h3></div>
         <div class="card-bd">
@@ -1875,15 +1883,47 @@ function renderResults(){
 ['rPlat','sFilter'].forEach(id => $(id).addEventListener('change', renderResults));
 async function refreshResults(){ results = await api('/api/results?mode=profiles'); renderResults(); }
 
+let EXP = {files: [], page: 1, sel: new Set(), canDel: false};
+const fsize = b => b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
 async function loadExports(){
   const d = await api('/api/outputs');
-  $('exports').innerHTML = d.files.length ? d.files.map(f => {
-    const m = f.name.match(/(post|keyword|news)_links_(\d{8})-(\d{8})_/); const fd = s => nice(`${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`);
-    return `<a href="/download/${encodeURIComponent(f.name)}"><span class="pin">${icon('i-file', 'width:16px;height:16px')}</span>
-      <span style="flex:1;min-width:0"><b>${m ? ({keyword: 'Keyword search · ', news: 'News · ', post: 'Profiles · '}[m[1]]) + fd(m[2]) + ' – ' + fd(m[3]) : esc(f.name)}</b><small>${esc(f.name)} · ${(f.size / 1024).toFixed(0)} KB</small></span>
-      <small>${new Date(f.mtime * 1000).toLocaleString('en-GB', {day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'})}</small>${icon('i-dl')}</a>`;
-  }).join('') : emptyBox('No exports yet.', 'i-file');
+  if (!d || !d.files) return;
+  EXP.files = d.files; EXP.canDel = !!d.can_delete;
+  EXP.sel = new Set([...EXP.sel].filter(n => d.files.some(f => f.name === n)));
+  document.querySelector('.exp-admin').style.display = EXP.canDel ? 'inline-flex' : 'none';
+  drawExports();
 }
+function drawExports(){
+  const q = ($('expQ').value || '').trim().toLowerCase(), list = EXP.files.filter(f => !q || f.name.toLowerCase().includes(q));
+  const per = 50, pages = Math.max(1, Math.ceil(list.length / per)); EXP.page = Math.min(EXP.page, pages);
+  const shown = list.slice((EXP.page - 1) * per, EXP.page * per);
+  $('expInfo').textContent = `${fmt(EXP.files.length)} file(s) · ${fsize(EXP.files.reduce((a, f) => a + f.size, 0))} · kept until deleted`;
+  $('exports').innerHTML = shown.length ? shown.map(f => {
+    const m = f.name.match(/(post|keyword|news)_links_(\d{8})-(\d{8})_/); const fd = s => nice(`${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`);
+    return `<div class="exp-row">${EXP.canDel ? `<input type="checkbox" class="exp-ck" data-n="${esc(f.name)}" ${EXP.sel.has(f.name) ? 'checked' : ''} aria-label="Select ${esc(f.name)}">` : ''}
+      <a href="/download/${encodeURIComponent(f.name)}"><span class="pin">${icon('i-file', 'width:16px;height:16px')}</span>
+      <span style="flex:1;min-width:0"><b>${m ? ({keyword: 'Keyword search · ', news: 'News · ', post: 'Profiles · '}[m[1]]) + fd(m[2]) + ' – ' + fd(m[3]) : esc(f.name)}</b><small>${esc(f.name)} · ${fsize(f.size)}</small></span>
+      <small>${new Date(f.mtime * 1000).toLocaleString('en-GB', {day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit'})}</small>${icon('i-dl')}</a>
+      ${EXP.canDel ? `<button class="iconbtn exp-rm" data-n="${esc(f.name)}" title="Delete this file">${icon('i-x')}</button>` : ''}</div>`;
+  }).join('') : emptyBox(q ? 'No file matches.' : 'No exports yet.', 'i-file');
+  $('expPage').textContent = list.length > per ? `Page ${EXP.page} of ${pages}` : '';
+  $('expPrev').style.display = $('expNext').style.display = list.length > per ? '' : 'none';
+  $('expPrev').disabled = EXP.page <= 1; $('expNext').disabled = EXP.page >= pages;
+  $('expDel').disabled = !EXP.sel.size; $('expDel').textContent = EXP.sel.size ? `Delete selected (${EXP.sel.size})` : 'Delete selected';
+}
+async function deleteFiles(names){
+  if (!names.length || !confirm(`Delete ${names.length} file(s) from the server for good?\n\nFiles you already downloaded stay on your computer; the reporting database (Reports) keeps all the data.`)) return;
+  const r = await api('/api/outputs/delete', {names});
+  if (!r || r.ok === false) return toast((r && r.error) || 'Not deleted');
+  toast(`${r.deleted.length} file(s) deleted`); names.forEach(n => EXP.sel.delete(n)); loadExports();
+}
+$('exports').addEventListener('change', e => { const c = e.target.closest('.exp-ck'); if (!c) return;
+  c.checked ? EXP.sel.add(c.dataset.n) : EXP.sel.delete(c.dataset.n); drawExports(); });
+$('exports').addEventListener('click', e => { const b = e.target.closest('.exp-rm'); if (b){ e.preventDefault(); deleteFiles([b.dataset.n]); } });
+$('expAll').onclick = () => { document.querySelectorAll('.exp-ck').forEach(c => EXP.sel.add(c.dataset.n)); drawExports(); };
+$('expDel').onclick = () => deleteFiles([...EXP.sel]);
+$('expQ').addEventListener('input', () => { EXP.page = 1; drawExports(); });
+$('expPrev').onclick = () => { EXP.page--; drawExports(); }; $('expNext').onclick = () => { EXP.page++; drawExports(); };
 
 /* ---------- keyword search ---------- */
 const KW_PLATS = [

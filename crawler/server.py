@@ -14,17 +14,38 @@ STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
 
 def list_outputs() -> list[dict]:
-    """The result files that can be downloaded, newest first."""
+    """Every result file that can be downloaded (all of them — they are kept until someone deletes them), newest
+    first. The CSV twin of an Excel file is not listed separately."""
     files = []
     if os.path.isdir(OUTPUT_DIR):
         for name in os.listdir(OUTPUT_DIR):
-            if name.endswith(".xlsx") and (name.startswith(("post_links_", "keyword_links_", "news_links_"))
-                                           or re.match(r"\d{8}_(Online|Medsos)_", name)) \
-                    or re.search(r"_decoded\.(xlsx|csv|txt)$", name) or re.match(r"(Data|Report_).+\.xlsx$", name):
-                st = os.stat(os.path.join(OUTPUT_DIR, name))
+            if name.endswith(".xlsx") or re.search(r"_decoded\.(csv|txt)$", name):
+                try:
+                    st = os.stat(os.path.join(OUTPUT_DIR, name))
+                except OSError:
+                    continue
                 files.append({"name": name, "size": st.st_size, "mtime": int(st.st_mtime)})
     files.sort(key=lambda f: f["mtime"], reverse=True)
-    return files[:40]
+    return files
+
+
+def delete_outputs(names: list[str]) -> list[str]:
+    """Delete result files (and the CSV twin of an Excel file). Only plain file names inside the results folder."""
+    gone = []
+    for n in names or []:
+        n = os.path.basename(str(n))
+        if not n or not n.endswith((".xlsx", ".csv", ".txt")) or n.startswith("."):
+            continue
+        for f in {n, n[:-5] + ".csv" if n.endswith(".xlsx") else n}:
+            p = os.path.join(OUTPUT_DIR, f)
+            if os.path.isfile(p):
+                try:
+                    os.remove(p)
+                    if f == n:
+                        gone.append(n)
+                except OSError:
+                    pass
+    return gone
 
 
 def logins_info() -> dict:
@@ -161,7 +182,7 @@ class Handler(BaseHTTPRequestHandler):
             mode = parse_qs(u.query).get("mode", ["profiles"])[0]
             return self._json(JOB.results_view(mode))
         if u.path == "/api/outputs":
-            return self._json({"files": list_outputs()})
+            return self._json({"files": list_outputs(), "can_delete": True})
         if u.path.startswith("/download/"):
             name = os.path.basename(unquote(u.path[len("/download/"):]))
             path = os.path.join(OUTPUT_DIR, name)
@@ -251,6 +272,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True, "file": r["file"], "access": r["access"], "tiers": r["tiers"]})
             except ValueError as e:
                 return self._json({"ok": False, "error": str(e)})
+        elif u.path == "/api/outputs/delete":
+            return self._json({"ok": True, "deleted": delete_outputs(list(data.get("names") or []))})
         elif u.path == "/api/stream/export":
             from . import stream
             return self._json(stream.start_export(str(data.get("day") or "")))

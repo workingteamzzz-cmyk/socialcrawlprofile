@@ -539,7 +539,7 @@ JSON endpoints for scripts, n8n, Power Query and the like, and interactive docs 
 | Guessing is blocked | 10 wrong keys from one address in 10 minutes → that address is refused for a while. The server refuses to start without keys (16+ characters each). |
 | Optional office-only access | `ALLOWED_IPS=203.0.113.7,198.51.100.0/24` — everyone else gets "forbidden", even with a key. |
 | Audit log | Who signed in, started/stopped what, imported cookies (which platforms, never the values), downloaded which file, changed which list — in the dashboard (*Exports → Access log*), `GET /api/audit` and `/data/audit.log`. |
-| Less data kept | Result files are deleted after `RETENTION_DAYS` (30), page copies after `DEBUG_RETENTION_DAYS` (7). |
+| Data kept | Result files are kept until an admin deletes them (Exports → select → Delete); `RETENTION_DAYS` > 0 deletes older ones automatically. Page copies (they can show account names) are deleted after `DEBUG_RETENTION_DAYS` (7). |
 | Locked-down container | Runs as a normal user, read-only system files, no extra privileges (`cap_drop: ALL`, `no-new-privileges`), memory/process limits. Only `/data` is writable. |
 | Security headers | Content-Security-Policy, no framing, no referrer, no caching of API answers, no server banner. |
 | Secrets stay out of the image | Keys live only in `.env` on the server (excluded from the image and from git). |

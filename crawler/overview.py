@@ -32,6 +32,17 @@ def _today_counts() -> dict:
         return {}
 
 
+def disk() -> dict:
+    """The data folder's disk: total / used / free (bytes) and the share used."""
+    import shutil
+    from .paths import APP_DATA
+    try:
+        du = shutil.disk_usage(APP_DATA if os.path.isdir(APP_DATA) else "/")
+    except OSError:
+        return {}
+    return {"total": du.total, "used": du.used, "free": du.free, "used_pct": round(du.used * 100 / du.total, 1)}
+
+
 def build(server_mode: bool) -> dict:
     from . import safety, telegram_bot
     from .apiscraper import settings as api_settings
@@ -85,6 +96,17 @@ def build(server_mode: bool) -> dict:
     add("ok" if active else "warn", f"{len(active)} schedule(s) running" if active else "No schedule yet",
         f"next at {time.strftime('%d %b %H:%M', time.localtime(nxt))}" if nxt else "Search pages → Schedule it")
 
+    try:                                              # everything is kept: watch the disk
+        import shutil
+        from .paths import APP_DATA
+        du = shutil.disk_usage(APP_DATA if os.path.isdir(APP_DATA) else "/")
+        free_pct = du.free * 100 / du.total
+        add("ok" if free_pct >= 20 else "warn" if free_pct >= 8 else "bad",
+            f"Disk: {du.free / 1e9:.1f} GB free ({free_pct:.0f} %)",
+            "articles and files are kept for good — delete old Exports or archives, or enlarge the disk, before it fills"
+            if free_pct < 20 else "room enough")
+    except OSError:
+        pass
     days = float(os.environ.get("RETENTION_DAYS", "0") or 0)
     add("ok", f"Result files kept {days:g} days" if days else "Result files kept forever",
         "admins delete them in Exports when they want; the reporting database keeps everything")
@@ -96,6 +118,7 @@ def build(server_mode: bool) -> dict:
     except Exception:  # noqa: BLE001
         used = {"today": 0}
     return {"checks": checks, "passed": sum(1 for c in checks if c["state"] == "ok"), "total": len(checks),
+            "disk": disk(),
             "stats": {"articles_today": today.get("online", 0), "posts_today": today.get("medsos", 0),
                       "credits_today": used.get("today", 0), "credits_cap": pub["daily_cap"],
                       "schedules": len(active), "next_run": int(nxt)}}

@@ -312,3 +312,21 @@ def test_restart_never_leaves_old_threads_and_purged_links_are_not_read_again(st
     assert st.add_found([{"url": "https://a.id/berita/baru-sekali-ini", "domain": "a.id"}], "rss") == 1
     st.recent.extend([time.time()] * 10)
     assert st.status()["per_minute"] == 2.0
+
+
+
+def test_articles_kept_for_good_by_default(tmp_path, monkeypatch):
+    import json
+    from crawler import paths, stream
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    assert stream.settings()["retention_days"] == 0
+    os.makedirs(tmp_path / "data" / "stream", exist_ok=True)
+    (tmp_path / "data" / "stream" / "settings.json").write_text(json.dumps({"retention_days": 7, "threads": 8}))
+    assert stream.settings()["retention_days"] == 0                      # the old default switched once
+    stream.save_settings({"retention_days": 7})
+    assert stream.settings()["retention_days"] == 7                      # a deliberate choice stays
+    s = stream.Stream(str(tmp_path / "data" / "stream2"))
+    s.cfg = {**stream.settings(), "retention_days": 0}
+    s.x("INSERT INTO articles(key, url, discovered, status) VALUES ('a','u',?, 'success')", (time.time() - 400 * 86400,))
+    assert s.purge() == 0 and s.q("SELECT COUNT(*) n FROM articles")[0]["n"] == 1
+    s.stop()

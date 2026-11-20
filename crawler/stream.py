@@ -32,14 +32,14 @@ DEFAULTS = {"enabled": False, "threads": 8, "discovery_threads": 8, "rss_minutes
             "catchup_days": 2, "catchup_hour": 1, "weekly_report": True, "report_weekday": 0, "report_hour": 7,
             "health_on_start": True, "health_weekday": 6, "health_hour": 2,
             "top_n": 1000, "top2_n": 2000, "active2_hours": 2, "semi_hours": 4, "rare_hours": 24, "inactive_days": 3, "dead_days": 7,
-            "retention_days": 7, "max_age_hours": 48, "all_links": True, "old_per_check": 1000, "homepage": True, "domain_gap": 1.5, "rss": True, "sitemaps": True,
+            "retention_days": 0, "max_age_hours": 48, "all_links": True, "old_per_check": 1000, "homepage": True, "domain_gap": 1.5, "rss": True, "sitemaps": True,
             "keywords": [], "robots": True, "exclude_domains": []}
 LIMITS = {"threads": (2, 64), "discovery_threads": (2, 48), "rss_minutes": (2, 240), "sitemap_minutes": (10, 720),
           "old_per_check": (0, 20000),
           "catchup_days": (0, 7), "catchup_hour": (0, 23), "health_weekday": (0, 6), "health_hour": (0, 23), "report_weekday": (0, 6), "report_hour": (0, 23),
           "top_n": (50, 20000), "top2_n": (0, 20000), "active2_hours": (1, 24), "semi_hours": (1, 48), "rare_hours": (2, 168), "inactive_days": (1, 30),
           "dead_days": (1, 60),
-          "retention_days": (1, 90), "max_age_hours": (6, 168)}
+          "retention_days": (0, 3650), "max_age_hours": (6, 168)}
 # Tiers — how often an outlet is checked, from how much it published (new articles found) in the last days:
 #   active    the top `top_n` outlets of the last 7 days     sitemap every `sitemap_minutes` (60), RSS every `rss_minutes` (10)
 #   semi      published in the last 7 days, not in the top    every `semi_hours` (4 h), RSS every hour
@@ -106,6 +106,14 @@ def settings() -> dict:
             got = json.load(f)
     except (OSError, ValueError):
         got = {}
+    mark = os.path.join(_dir(), "retention_v33.done")
+    if got and got.get("retention_days") == 7 and not os.path.exists(mark):
+        got["retention_days"] = 0                               # the old 7-day default: articles are now kept for good
+        try:
+            _write_settings({**DEFAULTS, **{k: v for k, v in got.items() if k in DEFAULTS}})
+            open(mark, "w").close()
+        except OSError:
+            pass
     out = dict(DEFAULTS)
     out.update({k: v for k, v in (got or {}).items() if k in DEFAULTS})
     return out
@@ -814,8 +822,11 @@ class Stream:
     def purge(self, ev=None) -> int:
         """Articles older than retention_days leave, in small chunks (the readers never wait long); their keys stay in
         `seen` for 60 days so the same old links are not read again every week."""
-        cut = time.time() - self.cfg["retention_days"] * 86400
         n = 0
+        if not self.cfg.get("retention_days"):                 # 0 = articles are kept for good (the default)
+            self.x("DELETE FROM hourly WHERE hour < ?", ((datetime.now(WIB) - timedelta(days=400)).strftime("%Y-%m-%d"),))
+            return 0
+        cut = time.time() - self.cfg["retention_days"] * 86400
         while not (ev and ev.is_set()):
             with self.lock:
                 rows = self._db.execute("SELECT rowid, key, discovered FROM articles WHERE discovered < ? AND "
@@ -1183,6 +1194,7 @@ class Stream:
                 "health": {**dict(self.health), "last_result": json.loads(self.meta("health_result") or "{}")},
                 "catchup": {**dict(self.catchup), "last": self.meta("catchup_last"),
                             "last_result": json.loads(self.meta("catchup_result") or "{}")},
+                "disk": __import__("crawler.overview", fromlist=["disk"]).disk(),
                 "readers_busy": len(self.busy_domains), "last_error": self.last_error, "export": dict(self.export),
                 "days": self.days_with_articles(),
                 "latest": [dict(r) for r in rows]}

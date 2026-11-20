@@ -758,6 +758,8 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
           <span class="lbl">Checks passed</span><b id="hPassed">–</b>
           <div class="segbar" id="hSeg"></div>
           <div class="legend"><div><i style="background:var(--ok)"></i>Passed<b id="hOk">0</b></div><div><i style="background:#e0a100"></i>Needs review<b id="hWarn">0</b></div><div><i style="background:var(--bad)"></i>Action needed<b id="hBad">0</b></div></div>
+          <div class="hs-foot" style="flex-wrap:wrap"><span>Disk free</span><b id="kDisk">–</b>
+            <div class="me-bar" style="flex-basis:100%;background:var(--soft);margin-top:6px"><span id="kDiskBar" style="width:0"></span></div></div>
           <div class="hs-foot"><span>API credits today</span><b id="kC">–</b></div><div class="hs-foot"><span>Schedules running</span><b id="kS">–</b></div><div class="hs-foot"><span>Next run</span><b id="kN">–</b></div>
         </div></div>
       </div>
@@ -1196,7 +1198,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
 
     <!-- LIVE STREAM -->
     <section class="page" id="p-stream">
-      <div class="pagehead"><div><h1>Live News Stream</h1><p>Always on: reads every new article from the registered media (RSS feeds + outlet sitemaps) within minutes, keeps them <span id="lsStRet">7</span> days, and sends the ones matching a keyword or report topic to Home and Reports at once.</p></div>
+      <div class="pagehead"><div><h1>Live News Stream</h1><p>Always on: reads every new article from the registered media (RSS feeds + outlet sitemaps) within minutes, keeps them <span id="lsStRet">for good</span>, and sends the ones matching a keyword or report topic to Home and Reports at once.</p></div>
         <div class="actions"><span class="pill" id="lsStPill"><i></i><span id="lsStState">Stopped</span></span>
           <button class="btn primary need-admin" id="lsStToggle">Start stream</button></div></div>
       <div class="kpis">
@@ -1248,7 +1250,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
           <div class="field"><label for="lsSfCuD">Late articles: sweep the last … days (0 = off)</label><input id="lsSfCuD" type="number" min="0" max="7"></div>
           <div class="field"><label for="lsSfCuH">Late-article sweep runs daily at (hour, WIB)</label><input id="lsSfCuH" type="number" min="0" max="23"></div>
           <div class="field"><label for="lsSfAge">Only articles from the last (hours)</label><input id="lsSfAge" type="number" min="6" max="168"></div>
-          <div class="field"><label for="lsSfRet">Keep articles in the stream for (days)</label><input id="lsSfRet" type="number" min="1" max="90"></div>
+          <div class="field"><label for="lsSfRet">Keep articles for (days — 0 = for good)</label><input id="lsSfRet" type="number" min="0" max="3650"></div>
           <div class="field"><label for="lsSfGap">Pause between pages of one outlet (seconds)</label><input id="lsSfGap" type="number" min="0.5" max="30" step="0.5"></div>
         </div>
         <div class="field" style="margin-top:12px"><label for="lsSfKw">Stream keywords (one per line; every report topic is added automatically)</label><textarea id="lsSfKw" rows="4" placeholder="banjir&#10;pemadaman listrik&#10;&quot;air bersih&quot; NOT iklan"></textarea></div>
@@ -2701,6 +2703,7 @@ async function loadHome(){
   if (!d || !d.checks) return;
   const st = d.stats || {};
   $('kC').textContent = fmt(st.credits_today || 0) + (st.credits_cap ? ' / ' + fmt(st.credits_cap) : '');
+  diskShow(d.disk, 'kDisk', 'kDiskBar');
   $('kS').textContent = fmt(st.schedules || 0);
   $('kN').textContent = st.next_run ? new Date(st.next_run * 1000).toLocaleString([], {day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'}) : '—';
   $('hPassed').textContent = `${d.passed} of ${d.total}`;
@@ -2722,6 +2725,14 @@ const openChecks = () => { go('home'); $('hCkCard').open = true; setTimeout(() =
 $('tbBell').onclick = openChecks; $('hOpen').onclick = openChecks;
 document.addEventListener('mousemove', e => { const t = e.target.closest && e.target.closest('#p-home [data-tip]'); if (t) tip(e, t.dataset.tip); else if (!e.target.closest('#chTrend')) tip(); });
 let _rz; addEventListener('resize', () => { clearTimeout(_rz); _rz = setTimeout(() => { if (D_DATA && $('p-home').classList.contains('on')) drawTrend(D_DATA); }, 150); });
+const gb = b => (b / 1e9).toFixed(b >= 1e11 ? 0 : 1) + ' GB';
+function diskShow(dk, id, bar){
+  if (!dk || !dk.total) return;
+  $(id).textContent = `${gb(dk.free)} of ${gb(dk.total)}`;
+  const el = $(bar); el.style.width = dk.used_pct + '%';
+  el.style.background = dk.used_pct >= 92 ? 'var(--bad)' : dk.used_pct >= 80 ? '#e0a100' : 'var(--ok)';
+  el.parentElement.title = `${dk.used_pct}% used`;
+}
 function updateMe(st){
   const name = (ME && ME.who && ME.who !== 'local' && ME.who) || 'Working Teamz';
   $('sbName').textContent = name + (ME && ME.who !== 'local' ? ' · ' + ROLE : '');
@@ -2761,7 +2772,7 @@ async function loadStream(){
   $('lsStPill').classList.toggle('run', d.running); $('lsStState').textContent = d.running ? 'Running' : 'Stopped';
   $('lsStToggle').textContent = d.running ? 'Stop stream' : 'Start stream'; $('lsStToggle').classList.toggle('primary', !d.running);
   $('navStream').textContent = d.running ? '●' : '';
-  $('lsStRet').textContent = cfg.retention_days;
+  $('lsStRet').textContent = cfg.retention_days ? cfg.retention_days + ' days' : 'for good';
   $('lsSRead').textContent = fmt(d.today.read); $('lsSReadS').textContent = `${fmt(d.today.failed)} could not be read · ${fmt(d.today.skipped || 0)} skipped (robots.txt / excluded) · ${fmt(d.stored)} stored`;
   $('lsSPace').textContent = fmt(d.per_minute) + ' /min'; $('lsSPaceS').textContent = d.running ? `≈ ${fmt(d.per_day_pace)} per day at this pace` : 'stream is stopped';
   $('lsSMatch').textContent = fmt(d.today.matched); $('lsSMatchS').textContent = `${d.keywords} keyword(s) incl. report topics`;
@@ -2786,7 +2797,8 @@ async function loadStream(){
       return `<div class="sub-hd">Late articles (last ${cfg.catchup_days} days, daily ${String(cfg.catchup_hour).padStart(2, '0')}:00)</div><p class="hint" style="margin:4px 0 6px">${st}</p>` +
         (d.running && !c.running ? '<button class="btn sm need-admin" id="lsCatchup">Run the sweep now</button>' : ''); })() +
     '<div style="height:14px"></div>' + row('rss', 'RSS feeds') + '<div style="height:14px"></div>' + row('sitemap', 'Outlet sitemaps') +
-    `<div class="hs-foot" style="margin-top:14px"><span>Readers busy</span><b>${d.readers_busy} / ${cfg.threads}</b></div><div class="hs-foot"><span>Stream database</span><b>${fmt(d.db_mb)} MB</b></div>` +
+    `<div class="hs-foot" style="margin-top:14px"><span>Readers busy</span><b>${d.readers_busy} / ${cfg.threads}</b></div><div class="hs-foot"><span>Stream database</span><b>${d.db_mb >= 1000 ? (d.db_mb / 1000).toFixed(1) + ' GB' : fmt(d.db_mb) + ' MB'}</b></div>` +
+    (d.disk && d.disk.total ? `<div class="hs-foot" style="flex-wrap:wrap"><span>Disk free</span><b>${gb(d.disk.free)} of ${gb(d.disk.total)}</b><div class="me-bar" style="flex-basis:100%;background:var(--soft);margin-top:6px"><span style="width:${d.disk.used_pct}%;background:${d.disk.used_pct >= 92 ? 'var(--bad)' : d.disk.used_pct >= 80 ? '#e0a100' : 'var(--ok)'}"></span></div></div>` : '') +
     (d.last_error ? `<p class="hint" style="margin-top:10px">Last problem: ${esc(d.last_error)}</p>` : '');
   if ($('lsHealth')) $('lsHealth').onclick = async () => { const r = await api('/api/stream', {health_now: true});
     toast(r && r.ok ? 'Checking every site…' : (r && r.error) || 'Not started'); setTimeout(loadStream, 1500); };

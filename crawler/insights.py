@@ -413,7 +413,9 @@ def _loop() -> None:
                 last_purge = time.time()
                 try:
                     from . import stream
-                    purge_index(int(stream.settings().get("retention_days") or 7))
+                    days = int(stream.settings().get("retention_days") or 0)
+                    if days:                                      # 0 = kept for good, like the articles
+                        purge_index(days)
                 except Exception:  # noqa: BLE001
                     pass
             _STATE["error"] = ""

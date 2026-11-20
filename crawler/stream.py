@@ -239,14 +239,30 @@ class Stream:
                          (it.get("time") or "")[:5], now))
         if not rows:
             return 0
+        fresh = []
         with self.lock:
-            before = self._db.total_changes
-            self._db.executemany("INSERT OR IGNORE INTO articles(key, url, domain, title, source, feed_date, feed_time,"
-                                 " discovered) VALUES (?,?,?,?,?,?,?,?)", rows)
+            for row in rows:
+                cur = self._db.execute("INSERT OR IGNORE INTO articles(key, url, domain, title, source, feed_date, "
+                                       "feed_time, discovered) VALUES (?,?,?,?,?,?,?,?)", row)
+                if cur.rowcount:
+                    fresh.append(row)
             self._db.commit()
-            n = self._db.total_changes - before
-            self.counts["found"] += n
-        return n
+            self.counts["found"] += len(fresh)
+            if self.running:                     # straight to the readers, at the front: newest first, no waiting
+                for key, url, dom, title, _src, fd, ft, _t in fresh:
+                    self._enqueue({"key": key, "url": url, "domain": dom, "title": title, "feed_date": fd,
+                                   "feed_time": ft}, front=True)
+        return len(fresh)
+
+    def _enqueue(self, job: dict, front: bool = False) -> None:
+        if job["key"] in self.queued:
+            return
+        self.queued.add(job["key"])
+        dom = job["domain"] or norm_key(job["url"]).split("/")[0]
+        if dom not in self.by_domain:
+            self.by_domain[dom] = deque()
+            self.rr.appendleft(dom) if front else self.rr.append(dom)
+        (self.by_domain[dom].appendleft if front else self.by_domain[dom].append)(job)
 
     def check_rss(self, src) -> tuple[int, bool, dict]:
         import requests
@@ -333,15 +349,8 @@ class Stream:
                 return
             rows = self._db.execute("SELECT key, url, domain, title, feed_date, feed_time FROM articles "
                                     "WHERE status='new' ORDER BY discovered DESC LIMIT 3000").fetchall()
-            for r in rows:
-                if r["key"] in self.queued:
-                    continue
-                self.queued.add(r["key"])
-                dom = r["domain"] or norm_key(r["url"]).split("/")[0]
-                if dom not in self.by_domain:
-                    self.by_domain[dom] = deque()
-                    self.rr.append(dom)
-                self.by_domain[dom].append(dict(r))
+            for r in rows:                       # left-overs (e.g. after a restart), newest first
+                self._enqueue(dict(r))
 
     def next_job(self):
         """The next article to read: round robin over outlets, one page at a time per outlet, a pause between."""

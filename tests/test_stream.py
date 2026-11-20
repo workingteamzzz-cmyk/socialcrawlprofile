@@ -116,3 +116,16 @@ def test_settings_limits_and_endpoint_roles(tmp_path, monkeypatch):
     r = admin.post("/api/stream", json={"threads": 8, "keywords": "banjir, pln"}, headers=SITE).json()
     assert r["ok"] and r["threads"] == 8 and r["keywords"] == ["banjir", "pln"]
     stream.get().stop()
+
+
+def test_a_found_link_goes_straight_to_the_front_of_the_readers(st):
+    st.running = True
+    try:
+        st.add_found([{"url": "https://a.id/berita/2026/lama-satu-dua", "domain": "a.id"},
+                      {"url": "https://a.id/berita/2026/lama-tiga-empat", "domain": "a.id"}], "rss")
+        st.add_found([{"url": "https://a.id/berita/2026/baru-saja-terbit", "domain": "a.id"}], "rss")
+        dom, job = st.next_job()                                     # no refill needed: queued the moment it was found
+        assert dom == "a.id" and job["url"].endswith("baru-saja-terbit")
+        assert st.add_found([{"url": "https://a.id/berita/2026/baru-saja-terbit", "domain": "a.id"}], "rss") == 0
+    finally:
+        st.running = False

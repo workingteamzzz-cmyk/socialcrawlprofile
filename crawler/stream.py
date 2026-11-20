@@ -70,6 +70,9 @@ CREATE INDEX IF NOT EXISTS a_pub ON articles(status, pub_date);
 CREATE INDEX IF NOT EXISTS a_disc ON articles(discovered);
 CREATE TABLE IF NOT EXISTS seen(key TEXT PRIMARY KEY, t REAL);
 CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
+CREATE TABLE IF NOT EXISTS feed_outbox(id INTEGER PRIMARY KEY AUTOINCREMENT, feed_id TEXT, article TEXT, tries INTEGER,
+  next_try REAL, created REAL);
+CREATE INDEX IF NOT EXISTS fo_next ON feed_outbox(next_try);
 CREATE TABLE IF NOT EXISTS commands(id INTEGER PRIMARY KEY AUTOINCREMENT, cmd TEXT, arg TEXT DEFAULT '', t REAL);
 CREATE TABLE IF NOT EXISTS site_health(domain TEXT PRIMARY KEY, checked REAL, alive INTEGER, sitemaps INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS domain_days(domain TEXT, day TEXT, n INTEGER DEFAULT 0, PRIMARY KEY(domain, day));
@@ -662,6 +665,12 @@ class Stream:
             self.recent.append(time.time())
         elif status == "failed":
             self.bump("failed")
+        if status == "success":
+            try:
+                from . import feeds
+                feeds.match_and_queue(self, job, res, d, t, sentiment)       # client feeds: pushed within seconds
+            except Exception as e:  # noqa: BLE001
+                self.last_error = f"client feeds: {str(e)[:120]}"
         if matched:
             self.bump("matched")
             try:
@@ -758,6 +767,10 @@ class Stream:
             self.flush_counts()
         except Exception:  # noqa: BLE001
             pass
+
+    def _feeds_loop(self) -> None:
+        from . import feeds
+        feeds.sender_loop(self)
 
     def fill_sentiment(self, n: int = 300) -> int:
         """Articles read before sentiment was kept get theirs, a few hundred at a time."""
@@ -1059,7 +1072,8 @@ class Stream:
             self.threads = [threading.Thread(target=self.discovery_loop, daemon=True, name="stream-discovery"),
                             threading.Thread(target=self.catchup_loop, daemon=True, name="stream-catchup"),
                             threading.Thread(target=self.health_loop, daemon=True, name="stream-health"),
-                            threading.Thread(target=self.house_loop, daemon=True, name="stream-house")]
+                            threading.Thread(target=self.house_loop, daemon=True, name="stream-house"),
+                            threading.Thread(target=self._feeds_loop, daemon=True, name="stream-feeds")]
             self.threads += [threading.Thread(target=self.reader_loop, daemon=True, name=f"stream-reader-{i}")
                              for i in range(self.cfg["threads"])]
             for t in self.threads:

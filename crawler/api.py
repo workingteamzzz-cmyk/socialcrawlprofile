@@ -285,6 +285,21 @@ class MediaLogin(BaseModel):
     clear: bool = False
 
 
+class FeedIn(BaseModel):
+    id: str = Field("", description="empty = a new feed")
+    name: str
+    query: str = Field("", description='a query (pln AND (padam OR gangguan) NOT promo) or keywords (pln, listrik padam)')
+    all: bool = Field(False, description="every article the stream reads, no filter")
+    url: str = Field(..., description="the client's webhook (https://…)")
+    token: str = Field("", description="shared secret: Authorization Bearer + X-Collector-Signature (kept, never shown)")
+    clear_token: bool = False
+    enabled: bool = True
+
+
+class FeedRef(BaseModel):
+    id: str
+
+
 class OutputsDelete(BaseModel):
     names: list[str] = Field(..., description="file names as GET /api/outputs lists them")
 
@@ -798,6 +813,37 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
             daily_cap=body.daily_cap, monthly_cap=body.monthly_cap,
             cleared=[k for k, v in (("api", body.clear_api_key), ("twitter", body.clear_twitter)) if v])
         return {"ok": True, **pub}
+
+    # ---------- client feeds: realtime push per article ----------
+    @app.get("/api/feeds", tags=["client API"], dependencies=admin_only, summary="Client feeds (realtime webhooks)")
+    def feeds_get():
+        from . import feeds, stream
+        wait = feeds.waiting(stream.get())
+        return {"feeds": [{**f, "waiting": wait.get(f["id"], 0)} for f in feeds.public()]}
+
+    @app.post("/api/feeds/save", tags=["client API"], dependencies=admin_only, summary="Add or change a client feed")
+    def feeds_save(body: FeedIn, request: Request):
+        from . import feeds
+        try:
+            out = feeds.save(body.model_dump())
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        log(request, "saved a client feed", name=out["name"], url=out["url"])
+        return {"ok": True, "feed": out}
+
+    @app.post("/api/feeds/delete", tags=["client API"], dependencies=admin_only, summary="Delete a client feed")
+    def feeds_delete(body: FeedRef, request: Request):
+        from . import feeds
+        log(request, "deleted a client feed", id=body.id)
+        return {"ok": feeds.delete(body.id)}
+
+    @app.post("/api/feeds/test", tags=["client API"], dependencies=admin_only, summary="Send a sample article now")
+    def feeds_test(body: FeedRef):
+        from . import feeds
+        try:
+            return feeds.test(body.id)
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
 
     # ---------- news stream reader / client API ----------
     @app.get("/api/articles", tags=["client API"], dependencies=auth,

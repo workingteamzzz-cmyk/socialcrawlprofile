@@ -129,6 +129,10 @@ class Handler(BaseHTTPRequestHandler):
             from . import overview as ov
             from .paths import SERVER_MODE
             return self._json(ov.build(SERVER_MODE))
+        if u.path == "/api/feeds":
+            from . import feeds, stream
+            wait = feeds.waiting(stream.get())
+            return self._json({"feeds": [{**f, "waiting": wait.get(f["id"], 0)} for f in feeds.public()]})
         if u.path in ("/api/articles", "/api/articles/one"):
             from . import reader
             qs = parse_qs(u.query)
@@ -282,6 +286,16 @@ class Handler(BaseHTTPRequestHandler):
                         bool(data.get("clear")))})
                 r = media_db.send_report()
                 return self._json({"ok": True, "file": r["file"], "access": r["access"], "tiers": r["tiers"]})
+            except ValueError as e:
+                return self._json({"ok": False, "error": str(e)})
+        elif u.path in ("/api/feeds/save", "/api/feeds/delete", "/api/feeds/test"):
+            from . import feeds
+            try:
+                if u.path == "/api/feeds/save":
+                    return self._json({"ok": True, "feed": feeds.save(data)})
+                if u.path == "/api/feeds/delete":
+                    return self._json({"ok": feeds.delete(str(data.get("id") or ""))})
+                return self._json(feeds.test(str(data.get("id") or "")))
             except ValueError as e:
                 return self._json({"ok": False, "error": str(e)})
         elif u.path == "/api/outputs/delete":

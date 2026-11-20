@@ -358,6 +358,25 @@ curl -H "X-API-Key: <the client's key>" "https://app.workingteamzzz.id/api/artic
 4. Pushing instead of pulling: a schedule can send each run's results to the client's webhook (Schedules → results
    sent to …).
 
+### Realtime push per article (client feeds)
+
+Live Stream → **Client feeds — realtime** (admins): a client's name, what they get — **every article** the stream
+reads (all data), a **query** (`AND` `OR` `NOT` `"phrase"` `( )`) or a plain **keyword list** (comma / one per line =
+any of them) — their **webhook** (https://…) and an optional shared **token**. Every article the
+stream reads that matches is pushed within seconds:
+
+```json
+POST <their webhook>
+{"event": "articles", "feed": {"id": "…", "name": "PLN UID Jabar"}, "sent_at": "…", "count": 2,
+ "articles": [{"key": "…", "url": "…", "media": "detik.com", "title": "…", "date": "2026-11-20", "time": "08:15",
+               "image": "…", "summary": "…", "content": "<p>…</p>", "author": "…", "influencer": "…", "person": "…",
+               "sentiment": "negative", "read_at": "…"}]}
+```
+
+With a token: `Authorization: Bearer <token>` and `X-Collector-Signature: sha256=<HMAC-SHA256 of the body>`. Any 2xx
+answer counts as delivered; otherwise the articles wait in an outbox and are sent again (30 s, 2 min, 10 min, 30 min,
+then hourly for a day). *Test* sends one sample now; the table shows sent / waiting / last error per client.
+
 ## Explore (search everything, top stories, spike alerts)
 
 - **Search** every article the live stream read (title + summary, SQLite full-text index, kept as long as the stream

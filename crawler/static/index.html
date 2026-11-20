@@ -1217,6 +1217,19 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
           <span class="hint" id="lsExpMsg"></span></div></div>
       <div class="card"><div class="card-hd"><h3>Latest articles</h3><input class="search" id="lsStQ" placeholder="Filter by title or keyword…" style="margin-left:auto;max-width:280px;height:32px"></div>
         <div class="tbl-wrap"><table class="tbl dtbl"><thead><tr><th style="width:110px">Published</th><th>Title</th><th style="width:180px">Media</th><th style="width:200px">Keyword</th></tr></thead><tbody id="lsStBody"></tbody></table></div></div>
+      <div class="card need-admin" style="margin-top:16px"><div class="card-hd"><h3>Client feeds — realtime</h3><span class="hd-note">every matching article pushed to the client's server within seconds</span></div>
+        <div class="tbl-wrap"><table class="tbl dtbl"><thead><tr><th>Client</th><th>Query</th><th>Sends to</th><th style="width:190px">Delivery</th><th style="width:220px"></th></tr></thead><tbody id="fdBody"></tbody></table></div>
+        <div class="card-bd" style="border-top:1px solid var(--line);padding-top:14px">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
+            <div class="field"><label for="fdName">Client name</label><input id="fdName" placeholder="e.g. PLN UID Jabar"></div>
+            <div class="field"><label for="fdUrl">Client's webhook (https://…)</label><input id="fdUrl" placeholder="https://api.klien.id/berita"></div>
+            <div class="field"><label for="fdTok">Shared token (optional, kept secret)</label><input id="fdTok" type="password" autocomplete="new-password" placeholder="leave empty to keep the current one"></div></div>
+          <div class="field"><label>What this client gets</label><div class="seg" id="fdMode"><button data-m="q" class="on">Articles matching a query / keywords</button><button data-m="all">Every article (all data)</button></div></div>
+          <div class="field" id="fdQF"><label for="fdQ">Query or keywords</label><textarea id="fdQ" rows="2" placeholder='pln AND (padam OR gangguan OR "listrik mati") NOT promo   —   or keywords: pln, listrik padam, gardu induk'></textarea>
+            <small class="hint">A query uses AND · OR · NOT · "phrase" · ( ). A plain list (comma or one per line) means any of the keywords.</small></div>
+          <div style="display:flex;gap:8px;align-items:center"><button class="btn primary" id="fdSave">Add feed</button><button class="btn" id="fdCancel" style="display:none">Cancel</button><span class="hint" id="fdMsg"></span></div>
+          <p class="hint">The client receives <code>POST</code> JSON <code>{"event": "articles", "feed": {...}, "articles": [{title, url, media, date, time, summary, content, sentiment, influencer, person, image}]}</code> — with a token also <code>Authorization: Bearer …</code> and an <code>X-Collector-Signature</code> (HMAC-SHA256). If their server is down, articles wait and are sent again (30 s … every hour for a day).</p>
+        </div></div>
       <div class="card need-admin" style="margin-top:16px"><div class="card-hd"><h3>Stream settings</h3><span class="hd-note">admins</span></div><div class="card-bd">
         <div class="grid2" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px">
           <div class="field"><label for="lsSfThreads">Article readers (threads)</label><input id="lsSfThreads" type="number" min="2" max="64"></div>
@@ -1720,7 +1733,7 @@ function go(p){
   if (p === 'apiscrape') loadApInfo();
   if (p === 'report') loadReport();
   if (p === 'home') loadHome();
-  if (p === 'stream') loadStream();
+  if (p === 'stream'){ loadStream(); loadFeeds(); }
   if (p === 'reader') initReader();
   if (p === 'media') loadMedia();
   if (p === 'explore') loadExplore();
@@ -3023,6 +3036,39 @@ async function initReader(){
   }
   loadReader(true);
 }
+
+/* ---------- client feeds ---------- */
+let FD = {list: [], edit: ''};
+async function loadFeeds(){
+  if (ROLE !== 'admin') return;
+  const d = await api('/api/feeds'); if (!d || !d.feeds) return; FD.list = d.feeds;
+  $('fdBody').innerHTML = d.feeds.length ? d.feeds.map((f, i) => { let host = f.url; try { host = new URL(f.url).host; } catch (e) {}
+    return `<tr><td><b>${esc(f.name)}</b><br><span class="pill sm ${f.enabled ? '' : 'off'}"><i></i>${f.enabled ? 'On' : 'Paused'}</span></td>
+      <td>${f.all ? '<span class="badge b-ok">Every article</span>' : `<code style="font-size:12px">${esc(f.query)}</code>`}</td><td>${esc(host)}${f.token_set ? '<br><small class="hint">signed (token)</small>' : ''}</td>
+      <td>${fmt(f.sent || 0)} sent${f.waiting ? ` · <b>${fmt(f.waiting)} waiting</b>` : ''}${f.failed ? ` · ${fmt(f.failed)} gave up` : ''}
+        <small>${f.last_error ? '<span style="color:var(--bad)">' + esc(f.last_error) + '</span>' : f.last_ok ? 'last delivered ' + when(f.last_ok) : 'nothing sent yet'}</small></td>
+      <td class="nowrap"><button class="btn sm" data-fdt="${i}">Test</button> <button class="btn sm" data-fde="${i}">Edit</button>
+        <button class="btn sm" data-fdp="${i}">${f.enabled ? 'Pause' : 'Resume'}</button> <button class="btn sm ghost" data-fdd="${i}" style="color:var(--bad)">Delete</button></td></tr>`; }).join('')
+    : '<tr><td colspan="5" class="empty-s">No client feed yet — add one below: a client, the query of the articles they want, their webhook.</td></tr>';
+}
+function fdMode(m){ FD.mode = m; document.querySelectorAll('#fdMode button').forEach(b => b.classList.toggle('on', b.dataset.m === m)); $('fdQF').style.display = m === 'all' ? 'none' : ''; }
+document.querySelectorAll('#fdMode button').forEach(b => b.onclick = () => fdMode(b.dataset.m));
+function fdForm(f){ FD.edit = f ? f.id : ''; $('fdName').value = f ? f.name : ''; $('fdUrl').value = f ? f.url : ''; $('fdQ').value = f ? f.query : ''; $('fdTok').value = ''; fdMode(f && f.all ? 'all' : 'q');
+  $('fdSave').textContent = f ? 'Save changes' : 'Add feed'; $('fdCancel').style.display = f ? '' : 'none'; $('fdMsg').textContent = ''; }
+$('fdSave').onclick = async () => {
+  const cur = FD.list.find(x => x.id === FD.edit);
+  const r = await api('/api/feeds/save', {id: FD.edit, name: $('fdName').value, query: $('fdQ').value, all: FD.mode === 'all', url: $('fdUrl').value, token: $('fdTok').value, enabled: cur ? cur.enabled : true});
+  if (!r || r.ok === false) return $('fdMsg').textContent = (r && r.error) || 'Not saved';
+  toast(FD.edit ? 'Feed saved' : 'Feed added — matching articles are pushed from now on'); fdForm(null); loadFeeds(); };
+$('fdCancel').onclick = () => fdForm(null);
+$('fdBody').addEventListener('click', async e => {
+  const b = e.target.closest('button'); if (!b) return; const i = +(b.dataset.fdt ?? b.dataset.fde ?? b.dataset.fdp ?? b.dataset.fdd); const f = FD.list[i]; if (!f) return;
+  if ('fdt' in b.dataset){ b.disabled = true; const r = await api('/api/feeds/test', {id: f.id}); b.disabled = false;
+    toast(r && r.ok ? `Test delivered to ${f.name}` : `Test failed: ${(r && r.error) || 'no answer'}`); }
+  if ('fde' in b.dataset){ fdForm(f); $('fdName').scrollIntoView({behavior: 'smooth', block: 'center'}); }
+  if ('fdp' in b.dataset){ await api('/api/feeds/save', {id: f.id, name: f.name, query: f.query, all: !!f.all, url: f.url, enabled: !f.enabled}); loadFeeds(); }
+  if ('fdd' in b.dataset && confirm(`Delete the feed “${f.name}”? Articles still waiting for it are dropped.`)){ await api('/api/feeds/delete', {id: f.id}); loadFeeds(); }
+});
 
 /* ---------- reports ---------- */
 let TOPICS = [];

@@ -114,7 +114,7 @@ def test_browser_takes_over_keywords_the_multi_engine_found_nothing_for(tmp_path
     monkeypatch.setattr(job, "OUTPUT_DIR", str(tmp_path / "out"))
     monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
 
-    def fake_multi(kws, start, end, opt, tz, log, stop, data_dir, out_dir):
+    def fake_multi(kws, start, end, opt, tz, log, stop, data_dir, out_dir, on_row=None):
         return ([{"url": "https://a.id/1", "title": "Banjir Bogor", "media": "A", "published": "2026-11-10",
                   "ts": 1, "keyword": "banjir", "text": "Banjir melanda Bogor."}], [], {"batch": "b"})
     monkeypatch.setattr(news_multi, "run", fake_multi)
@@ -226,3 +226,46 @@ def test_online_people_left_empty_when_the_engine_found_none():
                                 "influencer": "", "person": ""}, timezone.utc)
     assert row[cols.index("INFLUENCER")] == "" and row[cols.index("PERSON")] == ""
     assert row[cols.index("URL")] == "https://a.id/x" and row[cols.index("MEDIA")] == "a.id"
+
+
+def test_articles_arrive_live_and_quick_sources_first(tmp_path, monkeypatch, fake_net):
+    """Each accepted article is handed over the moment it is read; quick sources run for every keyword before the
+    slow sitemap sweep; with "only new" the live-saved articles still make it into this run's file."""
+    from crawler import job, news_multi, paths
+    from crawler.medmas import pipeline
+    monkeypatch.setattr(job, "OUTPUT_DIR", str(tmp_path / "out"))
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    calls = []
+    fake = pipeline.collect_links
+
+    def spy(cfg, keyword, log=print, learned=None, db=None, batch=""):
+        calls.append((keyword, cfg.use_sitemap, cfg.use_google_news))
+        return fake(cfg, keyword, log, learned, db=db, batch=batch)
+    monkeypatch.setattr(pipeline, "collect_links", spy)
+    live_at = []
+    orig_run = news_multi.run
+
+    def run(*a, **k):
+        cb = k["on_row"]
+        k["on_row"] = lambda r: (live_at.append((r["url"], j.running)), cb(r))
+        return orig_run(*a, **k)
+    monkeypatch.setattr(news_multi, "run", run)
+    j = job.Job()
+    j._new_only = True
+    assert j.start_news(["pemadaman listrik", "pln"], "2026-11-09", "2026-11-10", "WIB",
+                        {"engine": "multi", "template": "online"}) is None
+    t = time.time()
+    while j.running and time.time() - t < 60:
+        time.sleep(0.1)
+    s = j.state()
+    assert not s["error"], s["error"]
+    detik = "https://www.detik.com/jabar/berita/d-1/pemadaman-listrik-bogor"
+    assert (detik, True) in live_at                                    # handed over while the job was still running
+    # quick pass for both keywords first (no sitemaps), then the slow sweep (sitemaps, no Google News)
+    assert [c[1:] for c in calls[:2]] == [(False, True), (False, True)] and calls[0][0] != calls[1][0]
+    assert [c[1:] for c in calls[2:]] == [(True, False), (True, False)]
+    online = [f for f in s["modes"]["news"]["files"] if "_Online_" in f and f.endswith(".xlsx")]
+    ws = openpyxl.load_workbook(tmp_path / "out" / online[0]).active
+    assert detik in [c.value for c in ws["D"]]                        # saved live, still in this run's file
+    from crawler import archive
+    assert archive.stats()["online"]["items"] >= 1

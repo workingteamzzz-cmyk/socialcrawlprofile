@@ -164,9 +164,111 @@ def _shared_reads(ttl: float = 15 * 60):
     return undo
 
 
+def _live(Database, on_hit, start: str, end: str, include_review: bool):
+    """Every article the engine accepts is handed over the moment it has been read — not at the end of the run —
+    so it reaches the reporting database, the dashboard and the Excel file while the search goes on. Done by
+    wrapping three of the engine's database calls for this run (its code unchanged). Returns an undo function."""
+    from .medmas.extract import looks_like_index_page
+    if on_hit is None:
+        return lambda: None
+    orig_p, orig_a, orig_s = Database.pending_links, Database.save_article, Database.set_status
+    kw_of: dict = {}
+    art: dict = {}
+    lock = threading.Lock()
+    ok = {"success"} | ({"needs_review"} if include_review else set())
+
+    def pending(self, *a, **k):
+        rows = orig_p(self, *a, **k)
+        with lock:
+            for r in rows:
+                kw_of[r[0]] = r[1]
+        return rows
+
+    def save_article(self, url, data):
+        orig_a(self, url, data)
+        with lock:
+            art[url] = data
+
+    def set_status(self, url, status):
+        orig_s(self, url, status)
+        with lock:
+            data = art.pop(url, None) if status in ok else None
+            kw = kw_of.get(url, "")
+        if not data or not kw:
+            return
+        d = str(data.get("date") or "")[:10]
+        if start and end and not (start <= d <= end):
+            return
+        if looks_like_index_page(data.get("title") or "", url):
+            return
+        h = {"url": url, "title": data.get("title") or "", "published_date": d,
+             "published_time": data.get("time") or "", "author": data.get("author") or "",
+             "content": data.get("content") or "", "summary": data.get("summary") or "", "image": data.get("image") or "",
+             "influencer": data.get("influencer") or "", "persons": data.get("persons") or "",
+             "organizations": data.get("organizations") or "", "media": data.get("media") or "", "sentiment": "",
+             "source": "", "status": status, "keyword": kw}
+        try:
+            on_hit(h)
+        except Exception:  # noqa: BLE001  the live copy never stops the engine
+            pass
+    Database.pending_links, Database.save_article, Database.set_status = pending, save_article, set_status
+
+    def undo():
+        Database.pending_links, Database.save_article, Database.set_status = orig_p, orig_a, orig_s
+    return undo
+
+
+def _fast_first(pipeline, cfg, log):
+    """Quick sources first for EVERY keyword (Google News, the known RSS feeds, Bing, GDELT — seconds to a few minutes),
+    then the slow sweep (media sitemaps, looking for new RSS feeds) keyword by keyword. Articles start arriving within
+    minutes instead of after the first keyword's 10-minute sitemap sweep; new feeds are looked for once per run, not
+    once per keyword. Wraps the engine's collect_links for this run; returns undo."""
+    from dataclasses import replace
+    if not (cfg.use_sitemap or cfg.feed_discovery_per_run) or not (
+            cfg.use_google_news or cfg.use_rss or cfg.use_bing or cfg.use_gdelt):
+        return lambda: None
+    orig = pipeline.collect_links
+    fast = replace(cfg, use_sitemap=False, feed_discovery_per_run=0)
+    slow = replace(cfg, use_google_news=False, per_media_harvest=False, use_bing=False, use_gdelt=False,
+                   use_duckduckgo=False)
+    slow_later = replace(slow, feed_discovery_per_run=0)
+    st = {"first": True, "detected": {}}
+
+    def collect(c, keyword, log=log, learned=None, db=None, batch=""):
+        if st["first"]:
+            st["first"] = False
+            log(f"⚡ Quick sources first for all {len(c.keywords)} keyword(s) (Google News, RSS, Bing, GDELT) — "
+                "articles are read and saved while the slower media-sitemap sweep follows.")
+            for kw in c.keywords:
+                if pipeline.STOP.is_set():
+                    break
+                log(f"\n⚡ Quick sources: {kw}")
+                found, det = orig(fast, kw, log, learned, db=db, batch=batch)
+                st["detected"][kw] = det
+                if db is not None and found:
+                    new = pipeline.save_findings(db, kw, found, log, batch=batch, retag=not c.report_new_only)
+                    log(f"   💾 {new} NEW links queued for reading")
+            log("\n🗺️ Slow sweep now: media sitemaps" + (" + looking for new RSS feeds (once this run)"
+                                                          if cfg.feed_discovery_per_run else ""))
+            use = slow
+        else:
+            use = slow_later
+        if pipeline.STOP.is_set():
+            return [], set()
+        det = st["detected"].get(keyword, set())
+        found, d2 = orig(use, keyword, log, set(learned or ()) | det, db=db, batch=batch)
+        return found, set(d2) | det
+    pipeline.collect_links = collect
+
+    def undo():
+        pipeline.collect_links = orig
+    return undo
+
+
 def run(keywords: list[str], start: str, end: str, opt, tz, log, stop_event: threading.Event,
-        data_dir: str, out_dir: str) -> tuple[list[dict], list[str], dict]:
-    """Crawl; returns (news rows, extra files written to out_dir, statistics)."""
+        data_dir: str, out_dir: str, on_row=None) -> tuple[list[dict], list[str], dict]:
+    """Crawl; returns (news rows, extra files written to out_dir, statistics). on_row(row) gets each accepted
+    article the moment it has been read (live), before the run ends."""
     from .medmas import pipeline
     from .medmas.config import Config
     from .medmas.db import Database
@@ -198,8 +300,17 @@ def run(keywords: list[str], start: str, end: str, opt, tz, log, stop_event: thr
                 return
     undo_p = _priority_first(pipeline, Database, list(opt.priority_media))
     undo_r = _shared_reads()
+    undo_f = _fast_first(pipeline, cfg, log) if len(keywords) and getattr(opt, "quick_first", True) else (lambda: None)
+
+    def hit(h):
+        r = _row(h, tz)
+        r["keyword"] = to_dash.get(r["keyword"], keywords[0] if len(keywords) == 1 else r["keyword"])
+        on_row(r)
+    undo_l = _live(Database, hit if on_row else None, start, end, bool(opt.include_review))
 
     def undo():
+        undo_l()
+        undo_f()
         undo_r()
         undo_p()
     if opt.priority_media:

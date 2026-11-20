@@ -244,6 +244,11 @@ stay empty — the app does not use an AI model. Deliveries to another server ca
 
 ## News Search — Multi-source engine (the team's medmascrawler)
 
+**Live results.** Each article is saved the moment it has been read and accepted — into the reporting database (Home
+dashboard, Reports) and the Excel file — not at the end of the run. Quick sources (Google News, the known RSS feeds,
+Bing, GDELT) run first for every keyword; the slow sweep (media sitemaps, looking for new RSS feeds — once per run)
+follows. With "only new" schedules, articles saved live still count as new for that run's file.
+
 News Search has two engines (card **Search engine**):
 
 - **Multi-source (recommended)** — the team's *medmascrawler* (`crawler/medmas`, its code unchanged), no browser and

@@ -2666,6 +2666,10 @@ async function poll(){
     $('btnLogin').disabled = running;
     $('stDot').classList.toggle('run', running);
     $('tbEnv').classList.toggle('run', running);
+    if ((running || poll.wasRunning) && $('p-home').classList.contains('on') && Date.now() - (poll.dashAt || 0) > 15000){
+      poll.dashAt = Date.now(); loadDash();                    // live: articles saved during the run show up here
+    }
+    poll.wasRunning = running;
     const mp = s.modes || {};
     $('stTitle').textContent = running ? (s.kind === 'login' ? 'Login mode' : s.kind === 'decode' ? 'Fixing Google News links' : s.kind === 'apiscrape' ? 'API scraper' : isKw ? 'Keyword search' : isNews ? 'News search' : 'Collecting') : 'Ready';
     $('tbStat').textContent = $('stTitle').textContent;

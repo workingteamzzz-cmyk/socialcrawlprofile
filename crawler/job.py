@@ -233,11 +233,14 @@ class Job:
         rows = list(rows)
         if not getattr(self, "_new_only", False):
             return rows
+        live = [r for r in rows if r.get("_fresh")]          # saved live during this run: new when it was saved
         try:
             from . import archive
-            return archive.only_new(kind, rows, tz)
+            rest = archive.only_new(kind, [r for r in rows if not r.get("_fresh")], tz)
         except Exception:  # noqa: BLE001
-            return rows
+            rest = [r for r in rows if not r.get("_fresh")]
+        keep = {id(x) for x in rest}
+        return [r for r in rows if r.get("_fresh") or id(r) in keep] if live else rest
 
     def _archive(self, kind: str, rows, tz=None) -> None:
         """Every result also goes to the reporting database (archive.py)."""
@@ -855,12 +858,49 @@ class Job:
         self.log(f"News search (multi-source): {', '.join(kws)} — period {d_start:%Y-%m-%d} to {d_end:%Y-%m-%d}")
         self.current = "Multi-source news search"
         extra, stopped, fallback = [], False, []
+        from .news import _key
+        from . import archive
+        live_keys: set = set()
+        fresh_keys: set = set()
+        live_n = [0]
+
+        def live(r):
+            """An article accepted by the engine, the moment it was read: dashboard, database, Excel — right away."""
+            k = _key(r["url"])
+            with self.lock:
+                if k in seen:
+                    return
+            new = True
+            if getattr(self, "_new_only", False):
+                new = bool(archive.only_new("online", [r], tz))
+            archive.add_rows("online", [r], tz)
+            with self.lock:
+                if k in seen:
+                    return
+                r["keywords"] = [r.get("keyword") or ""]
+                if new:
+                    r["_fresh"] = True
+                    fresh_keys.add(k)
+                seen[k] = r
+                b["links"].append(r)
+                live_keys.add(k)
+                b["version"] += 1
+                live_n[0] += 1
+                n = live_n[0]
+                if self._autosave_due():
+                    save(force=True)
+            if n == 1 or n % 10 == 0:
+                self.log(f"   🟢 Live: {n} article(s) already in the dashboard, the reporting database and the Excel file")
         try:
             miss = news_multi.check()
             if miss:
                 raise RuntimeError(miss)
             rows, extra, stat = news_multi.run(kws, f"{d_start:%Y-%m-%d}", f"{d_end:%Y-%m-%d}", opt, tz, self.log,
-                                               self.stop_flag, APP_DATA, OUTPUT_DIR)
+                                               self.stop_flag, APP_DATA, OUTPUT_DIR, on_row=live)
+            with self.lock:                                   # the final rows (with the engine's sentiment) replace the live copies
+                for k in live_keys:
+                    seen.pop(k, None)
+                b["links"][:] = [r for r in b["links"] if _key(r["url"]) not in live_keys]
             stopped = self.stop_flag.is_set()
             for kw in kws:                                    # one status line per keyword, like the browser engine
                 mine = [r for r in rows if r.get("keyword") == kw]
@@ -869,6 +909,10 @@ class Job:
             other = [r for r in rows if r.get("keyword") not in kws]   # links retried from earlier runs
             if other:
                 record(kws[0], Result("ok", other, f"{len(other)} articles from earlier runs' retry queue"))
+            with self.lock:
+                for k in fresh_keys:
+                    if k in seen:
+                        seen[k]["_fresh"] = True
             self.done = self.total
             if extra:
                 self.log("   For checking (Data, Needs Review, Recap): " + ", ".join(extra))

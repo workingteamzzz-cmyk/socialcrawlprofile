@@ -28,7 +28,8 @@ WIB = timezone(timedelta(hours=7))
 _LOCK = threading.RLock()
 _HITS: dict[str, deque] = {}
 SOURCES = ("all", "stream", "reports")
-PUBLIC_FIELDS = ("key", "url", "domain", "title", "pub_date", "pub_time", "image", "summary", "sentiment", "origin")
+PUBLIC_FIELDS = ("key", "url", "domain", "title", "pub_date", "pub_time", "image", "summary", "sentiment", "origin",
+                 "received_at")
 
 
 class ClientError(ValueError):
@@ -202,19 +203,21 @@ _PENDING: dict[str, list] = {}
 def _scope(c: dict, start: str) -> tuple[str, str, str]:
     """The client's fixed filter: (query, topic, start) — a start before the client's 'data from' is moved up."""
     since = c.get("since") or ""
-    if since and (not start or start < since):
+    if since and (not start or start[:10] < since):
         start = since
     return c.get("query") or "", c.get("topic") or "", start
 
 
 def articles(c: dict, q: str = "", start: str = "", end: str = "", sentiment: str = "", sort: str = "newest",
-             page: int = 1, size: int = 24) -> dict:
+             page: int = 1, size: int = 24, last_hours: float = 0, received_since="") -> dict:
     from . import reader
+    if last_hours and float(last_hours or 0) > 0:
+        start = (datetime.now(WIB) - timedelta(hours=min(float(last_hours), 24 * 3650))).strftime("%Y-%m-%d %H:%M")
     query, topic, start = _scope(c, start)
     r = reader.articles(q or "", topic, start, end, sentiment, sort, page, size, c.get("source") or "all",
-                        scope=query)
-    return {"client": c["name"], "total": r["total"], "matching": r["matching"], "page": r["page"],
-            "size": r["size"], "sentiment": r["sentiment"],
+                        scope=query, received_since=received_since)
+    return {"client": c["name"], "server_time": r["server_time"], "total": r["total"], "matching": r["matching"],
+            "page": r["page"], "pages": r["pages"], "size": r["size"], "sentiment": r["sentiment"],
             "rows": [{k: row.get(k) for k in PUBLIC_FIELDS} for row in r["rows"]]}
 
 

@@ -21,7 +21,8 @@ from datetime import datetime, timedelta, timezone
 
 WIB = timezone(timedelta(hours=7))
 _LOCK = threading.RLock()
-_CACHE: dict = {"t": 0.0, "stats": {}}
+_CACHE: dict = {"t": 0.0, "stats": {}, "busy": False, "at": 0.0, "gen": 0}
+_DONE = threading.Condition()
 TIER_LABEL = {"active": "Active", "active2": "Active 2", "semi": "Semi-active", "rare": "Rare", "inactive": "Inactive", "dead": "Unreachable",
               "new": "Not checked yet"}
 ACCESS_LABEL = {"ok": "Readable", "partial": "Partly readable", "blocked": "Cannot be read", "paywall": "Paywall?",
@@ -258,10 +259,8 @@ def _stream_db() -> str:
     return os.path.join(_data(), "stream", "stream.db")
 
 
-def stats(force: bool = False) -> dict:
-    """{domain: {...}} — cached 5 minutes (the stream database can hold a million articles)."""
-    if not force and time.time() - _CACHE["t"] < 300:
-        return _CACHE["stats"]
+def _compute() -> dict | None:
+    """{domain: {...}} from the stream database — None when it is busy (try again shortly)."""
     out: dict = {}
     path = _stream_db()
     if os.path.exists(path):
@@ -304,14 +303,72 @@ def stats(force: bool = False) -> dict:
                 else:
                     x["rss"] += 1
         except sqlite3.Error:
-            # busy (the stream just restarted, a migration is running): keep what we had and try again in 20 s
-            # instead of showing every outlet as 0 for the next 5 minutes
             c.close()
-            _CACHE["t"] = time.time() - 280
-            return _CACHE.get("stats") or out
+            return None                     # busy (the stream just restarted, an index is being built): try again
         c.close()
-    _CACHE.update(t=time.time(), stats=out)
     return out
+
+
+
+def _disk() -> str:
+    return os.path.join(_data(), "stream", "media_stats.json")
+
+
+def _refresh() -> None:
+    """One count at a time (a busy page never starts a second one); the result is kept on disk too, so after a
+    restart the page shows the last numbers at once while fresh ones are counted."""
+    with _LOCK:
+        if _CACHE["busy"]:
+            return
+        _CACHE["busy"] = True
+    try:
+        out = _compute()
+        if out is not None:
+            _CACHE.update(t=time.time(), stats=out, at=time.time())
+            try:
+                os.makedirs(os.path.dirname(_disk()), exist_ok=True)
+                with open(_disk() + ".tmp", "w", encoding="utf-8") as f:
+                    json.dump({"at": _CACHE["at"], "stats": out}, f)
+                os.replace(_disk() + ".tmp", _disk())
+            except OSError:
+                pass
+        else:
+            _CACHE["t"] = max(_CACHE["t"], time.time() - 280)        # busy: again in about 20 s
+    finally:
+        with _DONE:
+            _CACHE["busy"] = False
+            _CACHE["gen"] += 1
+            _DONE.notify_all()
+
+
+def stats(force: bool = False, wait: float = 25) -> dict:
+    """{domain: {...}} — counted at most every 5 minutes, in the background: an expired count is shown while the next
+    one is made (the page never waits for a million-row count). After a change (outlets added / removed) or with
+    force, the caller waits for the new count (up to `wait` seconds)."""
+    if not _CACHE["stats"] and not _CACHE["t"]:
+        try:
+            with open(_disk(), encoding="utf-8") as f:
+                d = json.load(f)
+            _CACHE.update(stats=d.get("stats") or {}, at=float(d.get("at") or 0), t=1.0)   # shown now, renewed below
+        except (OSError, ValueError):
+            pass
+    age_ok = time.time() - _CACHE["t"] < 300
+    if age_ok and not force:
+        return _CACHE["stats"]
+    if _CACHE["t"] and _CACHE["stats"] and not force:          # expired: the old count now, a new one meanwhile
+        threading.Thread(target=_refresh, daemon=True, name="media-stats").start()
+        return _CACHE["stats"]
+    gen0 = _CACHE["gen"]
+    threading.Thread(target=_refresh, daemon=True, name="media-stats").start()
+    end = time.time() + wait
+    with _DONE:
+        while _CACHE["gen"] == gen0 and time.time() < end:      # until a count finishes (or the wait is over)
+            _DONE.wait(min(1.0, max(0.05, end - time.time())))
+    return _CACHE["stats"]
+
+
+def counting() -> dict:
+    return {"computing": bool(_CACHE["busy"]), "counted_at": _CACHE.get("at") or 0}
 
 
 def access(x: dict | None, excluded: bool = False) -> str:
@@ -370,7 +427,7 @@ def listing(q: str = "", tier: str = "", acc: str = "", page: int = 1, size: int
         rows.sort(key=lambda r: (r["domain"] != ql, -r["found7"], r["domain"]))       # the exact domain first
     size = max(10, min(int(size or 50), 500))
     page = max(1, int(page or 1))
-    return {"total": len(rows), "page": page, "size": size, "counts": counts,
+    return {"total": len(rows), "page": page, "size": size, "counts": counts, **counting(),
             "rows": rows[(page - 1) * size: page * size]}
 
 
@@ -380,7 +437,8 @@ def report(out_dir: str) -> dict:
     Cannot be read, Readable, All media) + a short text for Telegram."""
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill
-    _CACHE["t"] = 0
+    if time.time() - _CACHE["t"] > 300:
+        stats(force=True, wait=120)                 # the report waits for a fresh count (not the page)
     allrows, p = [], 1
     while True:
         part = listing(size=500, page=p)

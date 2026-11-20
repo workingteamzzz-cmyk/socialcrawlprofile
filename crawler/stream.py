@@ -778,9 +778,23 @@ class Stream:
             self._db.commit()
         return len(bad)
 
+    def ensure_indexes(self) -> None:
+        """Indexes the dashboard's counts read without touching the articles themselves (Media Database: activity
+        and access per outlet over 7 days — a million rows counted in seconds, not minutes). Built once, here in the
+        stream's own process, never while a page waits."""
+        with self.lock:
+            self._db.execute("CREATE INDEX IF NOT EXISTS a_disc_ds ON articles(discovered, domain, status)")
+            self._db.execute("CREATE INDEX IF NOT EXISTS a_fail_err ON articles(discovered, domain, error) "
+                             "WHERE status='failed'")
+            self._db.commit()
+
     def house_loop(self) -> None:
         ev = self.stop_event
         last_purge = last_tiers = 0.0
+        try:
+            self.ensure_indexes()
+        except Exception as e:  # noqa: BLE001
+            self.last_error = f"indexes: {str(e)[:120]}"
         try:
             self.drop_junk_titles()
         except Exception as e:  # noqa: BLE001

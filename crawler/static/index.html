@@ -1617,10 +1617,19 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
             <div class="card-bd" style="font-size:13.5px">
               <p style="margin:0 0 8px">Every call sends the key in the <code>X-Client-Key</code> header (or <code>Authorization: Bearer …</code>):</p>
               <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px">
-                <li><code>GET /api/client/articles</code> — their articles, newest first. Optional: <code>q</code> (narrows further, AND / OR / NOT), <code>start</code> / <code>end</code> (YYYY-MM-DD), <code>sentiment</code>, <code>sort</code>, <code>page</code>, <code>size</code> (≤ 100). Also the positive / negative / neutral shares.</li>
+                <li><code>GET /api/client/articles</code> — their articles, newest first. Optional: <code>q</code> (narrows further, AND / OR / NOT), <code>start</code> / <code>end</code> (YYYY-MM-DD or YYYY-MM-DD HH:MM, WIB), <code>last_hours</code>, <code>received_since</code>, <code>sentiment</code>, <code>sort</code> (newest / oldest / received), <code>page</code>, <code>size</code> (≤ 100). Also the positive / negative / neutral shares.</li>
                 <li><code>GET /api/client/articles/one?key=…</code> — one article in full (paragraphs, author, spokespersons, people).</li>
                 <li><code>GET /api/client/me</code> — what the key gives.</li>
               </ul>
+              <div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px">
+                <b style="font-size:13px">Hourly, 6-hour and 2-day pulls (late news included)</b>
+                <ul style="margin:6px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:5px">
+                  <li><b>Every hour:</b> <code>?received_since=&lt;server_time of the previous answer&gt;</code> — everything that reached the server since then: fresh news <i>and</i> articles published earlier that arrived late.</li>
+                  <li><b>Every 6 hours:</b> <code>?last_hours=6</code> — published in the last 6 hours (a safety net).</li>
+                  <li><b>Once a day:</b> <code>?last_hours=48</code> — published in the last 2 days (late arrivals).</li>
+                </ul>
+                <p class="hint" style="margin:6px 0 0">Every article has a fixed <code>key</code>: the client stores by key, so an article fetched twice is not doubled. More than 100? Follow <code>pages</code> with <code>page=2, 3…</code></p>
+              </div>
               <p class="hint" style="margin:10px 0 0">Wrong key → 401 · too many calls → 429. <b>New key</b> replaces a leaked one at once; <b>Pause</b> or <b>Delete</b> cuts the access. Prefer pushing instead? Live Stream → Client feeds sends their articles to their server within seconds.</p>
             </div></div>
         </div>
@@ -3023,7 +3032,12 @@ const ACCL = {ok: ['Readable', 'b-ok'], partial: ['Partly readable', 'b-warn'], 
 async function loadMedia(){
   const qs = new URLSearchParams({q: $('mdQ').value.trim(), tier: $('mdTier').value, access: $('mdAcc').value, sort: $('mdSort').value, page: MD.page, size: 50});
   const d = await api('/api/media?' + qs);
-  if (!d || !d.rows) return;
+  const onPage = () => $('p-media') && $('p-media').classList.contains('on');
+  if (!d || !d.rows){                                    // the server was busy: say so and try again by itself
+    $('mdPageInfo').textContent = 'Counting the outlets… trying again in a few seconds';
+    clearTimeout(loadMedia.t); loadMedia.t = setTimeout(() => { if (onPage()) loadMedia(); }, 5000); return; }
+  if (d.computing && !loadMedia.again){ loadMedia.again = true;          // fresh counts on the way: show them when ready
+    clearTimeout(loadMedia.t); loadMedia.t = setTimeout(() => { if (onPage()) loadMedia(); loadMedia.again = false; }, 8000); }
   MDROWS = d.rows; const c = d.counts, t = c.tiers || {}, a = c.access || {};
   $('mdK1').textContent = fmt(c.total); $('mdK1s').textContent = `${fmt(t.new || 0)} not checked yet`;
   $('mdK2').textContent = fmt((t.active || 0) + (t.semi || 0)); $('mdK2s').textContent = `${fmt(t.active || 0)} active · ${fmt(t.semi || 0)} semi · ${fmt(t.rare || 0)} rare`;
@@ -3040,7 +3054,8 @@ async function loadMedia(){
     <td class="nowrap">${admin ? `<button class="btn sm" data-mdarch="${i}" title="Every article of this outlet over a period">Archive</button> <button class="btn sm" data-mdlogin="${i}">Login</button> <button class="btn sm" data-mdrm="${i}">Remove</button>` : ''}</td></tr>`).join('')
     : '<tr><td colspan="7" class="empty-s">No outlet matches.</td></tr>';
   const from = (d.page - 1) * d.size;
-  $('mdPageInfo').textContent = d.total ? `${fmt(from + 1)}–${fmt(Math.min(d.total, from + d.size))} of ${fmt(d.total)}` : '';
+  $('mdPageInfo').textContent = (d.total ? `${fmt(from + 1)}–${fmt(Math.min(d.total, from + d.size))} of ${fmt(d.total)}` : '')
+    + (d.computing ? ' · updating the counts…' : d.counted_at ? ` · counted ${new Date(d.counted_at * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}` : '');
   $('mdPrev').disabled = d.page <= 1; $('mdNext').disabled = from + d.size >= d.total;
   if (!loadMedia.filled){ const s = await api('/api/stream'); if (s && s.settings){ loadMedia.filled = true;
     $('mdWk').checked = s.settings.weekly_report !== false; $('mdWkDay').value = s.settings.report_weekday; $('mdWkHour').value = s.settings.report_hour; } }

@@ -12,7 +12,9 @@ from __future__ import annotations
 import os
 import re
 import sqlite3
+import time
 import zlib
+from datetime import datetime, timedelta, timezone
 
 from .insights import fts_query
 
@@ -57,9 +59,63 @@ def _topic_query(topic: str) -> str:
     return " OR ".join(f"({fts_query(k)})" for k in t["keywords"])
 
 
+WIB = timezone(timedelta(hours=7))
+
+
+def _moment(v: str, what: str) -> tuple[str, str]:
+    """'2026-11-20' or '2026-11-20 06:00' (also 2026-11-20T06:00) -> (date, time or '')."""
+    v = (v or "").strip().replace("T", " ")
+    m = re.fullmatch(r"(\d{4}-\d{2}-\d{2})(?: (\d{2}:\d{2})(?::\d{2})?)?", v)
+    if not m:
+        raise ValueError(f"{what}: a date as YYYY-MM-DD, or a date and time as YYYY-MM-DD HH:MM (WIB).")
+    return m.group(1), m.group(2) or ""
+
+
+def received_epoch(v) -> float:
+    """received_since: epoch seconds, or a date / date-time (WIB unless it carries its own offset)."""
+    v = str(v or "").strip()
+    if not v:
+        return 0.0
+    if re.fullmatch(r"\d{9,11}(\.\d+)?", v):
+        return float(v)
+    try:
+        dt = datetime.fromisoformat(v.replace("Z", "+00:00").replace(" ", "T"))
+    except ValueError:
+        raise ValueError("received_since: epoch seconds, or a date-time like 2026-11-20 06:00 (WIB) / "
+                         "2026-11-20T06:00:00+07:00 — the server_time of the previous answer works as is.")
+    return (dt if dt.tzinfo else dt.replace(tzinfo=WIB)).timestamp()
+
+
+def _period_sql(p: str, start: str, end: str) -> tuple[list[str], list]:
+    """Published-at limits; a time on the start / end day narrows to the minute (an article without a time
+    counts as inside its day)."""
+    w, a = [], []
+    if start:
+        d, t = _moment(start, "start")
+        if t:
+            w.append(f"({p}.pub_date > ? OR ({p}.pub_date = ? AND ({p}.pub_time >= ? OR {p}.pub_time = '')))")
+            a += [d, d, t]
+        else:
+            w.append(f"{p}.pub_date >= ?")
+            a.append(d)
+    if end:
+        d, t = _moment(end, "end")
+        if t:
+            w.append(f"({p}.pub_date < ? OR ({p}.pub_date = ? AND ({p}.pub_time <= ? OR {p}.pub_time = '')))")
+            a += [d, d, t]
+        else:
+            w.append(f"{p}.pub_date <= ?")
+            a.append(d)
+    return w, a
+
+
 def articles(q: str = "", topic: str = "", start: str = "", end: str = "", sentiment: str = "",
              sort: str = "newest", page: int = 1, size: int = 24, source: str = "all", scope: str = "",
-             only_key: str = "") -> dict:
+             only_key: str = "", last_hours: float = 0, received_since="") -> dict:
+    """start / end: published from / to (a date, or a date + time to the minute, WIB); last_hours: published in the
+    last N hours (instead of start); received_since: what reached this server after that moment — fresh news and
+    late arrivals alike, whatever their publication date (use the previous answer's server_time).
+    sort: newest / oldest (by publication) or received (newest arrival first)."""
     """source: "all" = the live stream + the reporting database (News Search / Keyword / scheduled runs, imported
     files), a link in both shown once; "stream" = the live stream only; "reports" = the reporting database only."""
     source = source if source in SOURCES else "all"
@@ -71,19 +127,26 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
     if topic:
         parts.append(f"({_topic_query(topic)})")
     expr = " AND ".join(parts)
-    for v in (start, end):
-        if v and not re.match(r"\d{4}-\d{2}-\d{2}$", v):
-            raise ValueError("Dates as YYYY-MM-DD.")
+    try:
+        last_hours = float(last_hours or 0)
+    except (TypeError, ValueError):
+        raise ValueError("last_hours: a number of hours, e.g. 6 or 48.")
+    if last_hours > 0:
+        start = (datetime.now(WIB) - timedelta(hours=min(last_hours, 24 * 3650))).strftime("%Y-%m-%d %H:%M")
+    since = received_epoch(received_since)
+    now = time.time()
     want_rep = source in ("all", "reports")
     c = _conn(bool(expr) or want_rep and os.path.exists(os.path.join(_dir(), "search.db")))
     try:
         selects, args = [], []
         if source in ("all", "stream"):
             w, a = ["a.status='success'"], []
-            for v, op in ((start, ">="), (end, "<=")):
-                if v:
-                    w.append(f"a.pub_date {op} ?")
-                    a.append(v)
+            pw, pa = _period_sql("a", start, end)
+            w += pw
+            a += pa
+            if since:
+                w.append("a.fetched >= ?")
+                a.append(since)
             if only_key:
                 w.append("a.key = ?")
                 a.append(only_key)
@@ -97,11 +160,10 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
                            f"FROM articles a {join} WHERE {' AND '.join(w)}")
             args += a
         if want_rep and _has_reports(c):
-            w, a = [], []
-            for v, op in ((start, ">="), (end, "<=")):
-                if v:
-                    w.append(f"r.pub_date {op} ?")
-                    a.append(v)
+            w, a = _period_sql("r", start, end)
+            if since:
+                w.append("COALESCE(r.added, 0) >= ?")
+                a.append(since)
             if only_key:
                 w.append("r.skey = ?")
                 a.append(only_key)
@@ -113,7 +175,7 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
             if source == "all":                            # read by the stream too: shown once, from the stream
                 w.append("NOT EXISTS (SELECT 1 FROM articles x WHERE x.key = r.skey AND x.status='success')")
             selects.append("SELECT r.skey key, r.url, r.domain, r.title, r.pub_date, r.pub_time, r.image, r.summary, "
-                           "r.sentiment, r.keywords matched, 0 fetched, 'reports' origin "
+                           "r.sentiment, r.keywords matched, COALESCE(r.added, 0) fetched, 'reports' origin "
                            f"FROM s.rep r {join}{' WHERE ' + ' AND '.join(w) if w else ''}")
             args += a
         counts: dict = {}
@@ -129,8 +191,10 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
                     sw = " WHERE sentiment = ?"
                     sargs.append(sentiment)
                 order = "ASC" if sort == "oldest" else "DESC"
-                rows = c.execute(f"SELECT * FROM ({u}){sw} ORDER BY pub_date {order}, pub_time {order}, "
-                                 f"fetched {order} LIMIT ? OFFSET ?", (*sargs, size, (page - 1) * size)).fetchall()
+                by = "fetched DESC, pub_date DESC" if sort == "received" else \
+                    f"pub_date {order}, pub_time {order}, fetched {order}"
+                rows = c.execute(f"SELECT * FROM ({u}){sw} ORDER BY {by} LIMIT ? OFFSET ?",
+                                 (*sargs, size, (page - 1) * size)).fetchall()
             except sqlite3.OperationalError as e:
                 raise ValueError(f"The query could not be read: {e}")
         tiers = {}
@@ -143,12 +207,18 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
         c.close()
     counts = {k: n for k, n in counts.items() if k in SENTIMENTS} | {
         "neutral": sum(n for k, n in counts.items() if k not in ("positive", "negative"))}
+    out_rows = [{**dict(r), "tier": tiers.get(r["domain"], "")} for r in rows]
     total = sum(counts.values())
     shown = counts.get(sentiment, 0) if sentiment in SENTIMENTS else total
+    for r in out_rows:
+        r["received_at"] = datetime.fromtimestamp(r["fetched"], WIB).isoformat(timespec="seconds") \
+            if r.get("fetched") else ""
     return {"total": total, "matching": shown, "page": page, "size": size, "query": expr, "source": source,
+            "server_time": datetime.fromtimestamp(now, WIB).isoformat(timespec="seconds"),
+            "pages": (shown + size - 1) // size,
             "sentiment": {k: {"n": counts.get(k, 0), "pct": round(counts.get(k, 0) * 100 / total, 1) if total else 0}
                           for k in SENTIMENTS},
-            "rows": [{**dict(r), "tier": tiers.get(r["domain"], "")} for r in rows]}
+            "rows": out_rows}
 
 
 def _report_article(key: str) -> dict:

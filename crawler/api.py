@@ -1014,14 +1014,18 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
         return {"ok": True, **client_api.me(c)}
 
     @app.get("/api/client/articles", tags=["client API"],
-             summary="This client's articles (X-Client-Key): q narrows them further (AND / OR / NOT), start / end "
-                     "(YYYY-MM-DD), sentiment, sort, page, size ≤ 100")
+             summary="This client's articles (X-Client-Key): q narrows them further (AND / OR / NOT); start / end "
+                     "(YYYY-MM-DD or YYYY-MM-DD HH:MM, WIB) or last_hours (published in the last N hours); "
+                     "received_since (what reached the server since then — late arrivals too; pass the previous "
+                     "answer's server_time); sentiment; sort newest / oldest / received; page; size ≤ 100")
     def client_articles(request: Request, q: str = "", start: str = "", end: str = "", sentiment: str = "",
-                        sort: str = "newest", page: int = 1, size: int = 24):
+                        sort: str = "newest", page: int = 1, size: int = 24, last_hours: float = 0,
+                        received_since: str = ""):
         c = _client(request)
         _origin_ok(request, c)
         try:
-            return {"ok": True, **client_api.articles(c, q[:500], start, end, sentiment, sort, page, size)}
+            return {"ok": True, **client_api.articles(c, q[:500], start[:20], end[:20], sentiment, sort, page, size,
+                                                      last_hours, received_since[:40])}
         except ValueError as e:
             return {"ok": False, "error": str(e)}
 
@@ -1070,11 +1074,13 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
                      "or stream / reports): query (AND / OR / NOT, \"phrase\", ( )), report topic, dates, "
                      "sentiment; with sentiment counts. For a client's dashboard: send X-API-Key.")
     def articles_get(q: str = "", topic: str = "", start: str = "", end: str = "", sentiment: str = "",
-                     sort: str = "newest", page: int = 1, size: int = 24, source: str = "all"):
+                     sort: str = "newest", page: int = 1, size: int = 24, source: str = "all", last_hours: float = 0,
+                     received_since: str = ""):
         from . import reader
         try:
-            return {"ok": True, **reader.articles(q[:500], topic[:100], start, end, sentiment, sort, page, size,
-                                                  source[:10])}
+            return {"ok": True, **reader.articles(q[:500], topic[:100], start[:20], end[:20], sentiment, sort, page,
+                                                  size, source[:10], last_hours=last_hours,
+                                                  received_since=received_since[:40])}
         except ValueError as e:
             return {"ok": False, "error": str(e)}
 

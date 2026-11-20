@@ -389,7 +389,11 @@ curl -H "X-Client-Key: wtc_…" "https://app.workingteamzzz.id/api/client/articl
 ```
 
 - `GET /api/client/articles` — their articles: `q` narrows further (never widens), `start` / `end`, `sentiment`, `sort`,
-  `page`, `size` (≤ 100); with the sentiment shares. `GET /api/client/articles/one?key=…` — one of theirs in full.
+  `page`, `size` (≤ 100); with the sentiment shares. `start` / `end` also take a time (`2026-11-20 06:00`, WIB);
+  `last_hours=6` = published in the last 6 hours; `received_since=<server_time of the previous answer>` = everything
+  that reached the server since then, late arrivals included; `sort=received` = newest arrival first. Typical client
+  schedule: hourly `received_since`, every 6 h `last_hours=6`, daily `last_hours=48`; store by `key` (no doubles).
+  `GET /api/client/articles/one?key=…` — one of theirs in full.
   `GET /api/client/me` — what the key gives.
 - The key reaches nothing else: no files, no dashboard, no other client's articles or keywords. Wrong key → 401 (and
   too many wrong keys block the address for a while), too many calls → 429.

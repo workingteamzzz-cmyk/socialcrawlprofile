@@ -85,6 +85,10 @@ def _search_db() -> sqlite3.Connection:
     c.execute("CREATE TABLE IF NOT EXISTS rep(skey TEXT PRIMARY KEY, akey TEXT, url TEXT, domain TEXT, title TEXT, "
               "pub_date TEXT, pub_time TEXT, image TEXT, summary TEXT, sentiment TEXT, keywords TEXT, seen TEXT)")
     c.execute("CREATE INDEX IF NOT EXISTS rep_pub ON rep(pub_date)")
+    try:                                                   # when it reached this server (client API: received_since)
+        c.execute("ALTER TABLE rep ADD COLUMN added REAL")
+    except sqlite3.OperationalError:
+        pass
     c.execute("CREATE VIRTUAL TABLE IF NOT EXISTS rdocs USING fts5(skey UNINDEXED, title, summary, "
               "tokenize='unicode61 remove_diacritics 2')")
     c.commit()
@@ -187,7 +191,13 @@ def index_reports(limit: int = 5000) -> int:
         for i in range(0, len(keys), 500):
             part = keys[i:i + 500]
             db.execute(f"DELETE FROM rdocs WHERE skey IN ({','.join('?' * len(part))})", part)
-        db.executemany("INSERT OR REPLACE INTO rep VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", out)
+        now = time.time()
+        db.executemany("INSERT INTO rep(skey, akey, url, domain, title, pub_date, pub_time, image, summary, sentiment, "
+                       "keywords, seen, added) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(skey) DO UPDATE SET "
+                       "akey=excluded.akey, url=excluded.url, domain=excluded.domain, title=excluded.title, "
+                       "pub_date=excluded.pub_date, pub_time=excluded.pub_time, image=excluded.image, "
+                       "summary=excluded.summary, sentiment=excluded.sentiment, keywords=excluded.keywords, "
+                       "seen=excluded.seen", [(*o, now) for o in out])  # 'added' stays the first arrival
         db.executemany("INSERT INTO rdocs(skey, title, summary) VALUES (?,?,?)", [(o[0], o[4], o[8]) for o in out])
         db.execute("INSERT INTO meta(k, v) VALUES ('rep_cursor', ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
                    (json.dumps([rows[-1]["last_seen"] or "", rows[-1]["key"]]),))

@@ -155,3 +155,23 @@ def test_client_api_key_sees_only_its_own_news(rd, tmp_path, monkeypatch):
     assert admin.post("/api/clients/save", json={**item, "expires": "2020-01-01"}, headers=SITE).json()["ok"]
     assert c.get("/api/client/me", headers={"X-Client-Key": new}).status_code == 401           # expired
     assert admin.post("/api/clients/delete", json={"id": cid}, headers=SITE).json()["ok"] and not client_api.public()
+
+
+def test_time_windows_and_late_arrivals(rd):
+    """Hourly / 6-hour / 2-day pulls: start and end to the minute (WIB), last_hours, and received_since — what reached
+    the server after a moment, late articles too (pass the previous answer's server_time)."""
+    import time as _t
+    assert rd.articles(start="2026-11-20 20:00")["total"] == 2                 # 22:30 and 21:00
+    assert rd.articles(start="2026-11-20T09:30", end="2026-11-20 21:00")["total"] == 2    # 21:00 and 10:00
+    assert rd.articles(start="2026-11-19", end="2026-11-19")["total"] == 1
+    with pytest.raises(ValueError):
+        rd.articles(start="20 Nov")
+    r = rd.articles()
+    assert r["server_time"] and r["rows"][0]["received_at"].endswith("+07:00") and r["pages"] == 1
+    fetched = sorted(x["fetched"] for x in r["rows"])
+    since = fetched[2] - 0.5                                                   # the last three arrivals
+    assert rd.articles(received_since=str(since))["total"] == 3
+    assert rd.articles(received_since="2000-01-01T00:00:00+07:00")["total"] == 5     # ISO with offset
+    assert rd.articles(sort="received")["rows"][0]["fetched"] == fetched[-1]
+    assert rd.articles(last_hours=24 * 365 * 5)["total"] == 5 and rd.articles(last_hours=0.001)["total"] == 0
+    assert rd.articles(received_since=_t.time() + 3600)["total"] == 0

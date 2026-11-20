@@ -298,6 +298,11 @@ def run(keywords: list[str], start: str, end: str, opt, tz, log, stop_event: thr
             if stop_event.is_set():
                 pipeline.request_stop()
                 return
+    try:
+        from . import media_db
+        media_db.install()                            # paid media: articles read with their logins
+    except Exception:  # noqa: BLE001
+        pass
     undo_p = _priority_first(pipeline, Database, list(opt.priority_media))
     undo_r = _shared_reads()
     undo_f = _fast_first(pipeline, cfg, log) if len(keywords) and getattr(opt, "quick_first", True) else (lambda: None)

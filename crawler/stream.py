@@ -29,12 +29,12 @@ from datetime import datetime, timedelta, timezone
 
 WIB = timezone(timedelta(hours=7))
 DEFAULTS = {"enabled": False, "threads": 16, "discovery_threads": 12, "rss_minutes": 10, "sitemap_minutes": 60,
-            "catchup_days": 2, "catchup_hour": 1,
+            "catchup_days": 2, "catchup_hour": 1, "weekly_report": True, "report_weekday": 0, "report_hour": 7,
             "top_n": 1000, "semi_hours": 4, "rare_hours": 24, "inactive_days": 3, "dead_days": 7,
             "retention_days": 7, "max_age_hours": 48, "domain_gap": 1.5, "rss": True, "sitemaps": True,
             "keywords": [], "robots": True, "exclude_domains": []}
 LIMITS = {"threads": (2, 64), "discovery_threads": (2, 48), "rss_minutes": (2, 240), "sitemap_minutes": (10, 720),
-          "catchup_days": (0, 7), "catchup_hour": (0, 23),
+          "catchup_days": (0, 7), "catchup_hour": (0, 23), "report_weekday": (0, 6), "report_hour": (0, 23),
           "top_n": (50, 20000), "semi_hours": (1, 48), "rare_hours": (2, 168), "inactive_days": (1, 30),
           "dead_days": (1, 60),
           "retention_days": (1, 90), "max_age_hours": (6, 168)}
@@ -112,7 +112,7 @@ def save_settings(data: dict) -> dict:
                 raise ValueError(f"{k}: a number from {lo} to {hi}.")
         elif k == "domain_gap":
             v = max(0.5, min(30.0, float(v)))
-        elif k in ("rss", "sitemaps", "robots"):
+        elif k in ("rss", "sitemaps", "robots", "weekly_report"):
             v = bool(v)
         elif k == "exclude_domains":
             items = v if isinstance(v, list) else re.split(r"[\n,\s]+", str(v or ""))
@@ -201,19 +201,18 @@ class Stream:
     # ----- sources -----
     def sync_sources(self, log=print) -> dict:
         """Every RSS feed and every outlet of the media dictionary becomes a source (new ones only)."""
-        from .medmas.media import CORE_MEDIA, MEDIA_DICT, RSS_FEEDS, load_external_dictionary
-        from . import news_multi
+        from .medmas.media import RSS_FEEDS
+        from . import media_db
         from .paths import APP_DATA
-        try:
-            load_external_dictionary(news_multi._dictionary(APP_DATA), lambda m: None)
-        except Exception as e:  # noqa: BLE001
-            log(f"stream: media dictionary not loaded ({e})")
-        feeds = {d: list(u) for d, u in RSS_FEEDS.items()}
+        reg = media_db.registry()                           # the registered media (admins edit it: Media Database)
+        feeds = {d: list(u) for d, u in RSS_FEEDS.items() if d in reg}
         known = os.path.join(APP_DATA, "news_multi", "medmascrawler.db")
         if os.path.exists(known):
             try:
                 c = sqlite3.connect(f"file:{known}?mode=ro", uri=True, timeout=10)
                 for d, u in c.execute("SELECT domain, feed_url FROM feed_stats WHERE feed_url != ''"):
+                    if d not in reg:
+                        continue
                     feeds.setdefault(d, [])
                     if u not in feeds[d]:
                         feeds[d].append(u)
@@ -224,7 +223,7 @@ class Stream:
         rss_iv, sm_iv = self.cfg["rss_minutes"] * 60, self.cfg["sitemap_minutes"] * 60
         rows = [(f"rss:{u}", "rss", d, u, now + random.random() * rss_iv, rss_iv)
                 for d, urls in feeds.items() for u in urls]
-        doms = sorted(set(MEDIA_DICT) | set(CORE_MEDIA))
+        doms = sorted(reg)
         rows += [(f"sm:{d}", "sitemap", d, "", now + random.random() * sm_iv, sm_iv) for d in doms]
         with self.lock:
             before = self._db.total_changes
@@ -233,6 +232,26 @@ class Stream:
             self._db.commit()
             added = self._db.total_changes - before
         return {"rss": sum(len(u) for u in feeds.values()), "sitemaps": len(doms), "added": added}
+
+    def add_outlets(self, domains: list[str]) -> None:
+        """Newly registered outlets: their sitemap is looked at right away."""
+        now = time.time()
+        with self.lock:
+            self._db.executemany("INSERT OR IGNORE INTO sources(id, kind, domain, url, next_check, interval) "
+                                 "VALUES (?,?,?,?,?,?)", [(f"sm:{d}", "sitemap", d, "", now, 3600) for d in domains])
+            self._db.commit()
+
+    def remove_outlets(self, domains: list[str]) -> None:
+        """Removed from the registered media: no feed, no sitemap, nothing waiting to be read."""
+        with self.lock:
+            for d in domains:
+                self._db.execute("DELETE FROM sources WHERE domain=?", (d,))
+                self._db.execute("DELETE FROM articles WHERE domain=? AND status='new'", (d,))
+                q = self.by_domain.pop(d, None)
+                for j in q or []:
+                    self.queued.discard(j["key"])
+                self.tiers.pop(d, None)
+            self._db.commit()
 
     def due_sources(self, limit: int = 64) -> list:
         kinds = [k for k, on in (("rss", self.cfg["rss"]), ("sitemap", self.cfg["sitemaps"])) if on]
@@ -689,6 +708,15 @@ class Stream:
             now = datetime.now(WIB)
             due = (self.cfg.get("catchup_days") and now.hour >= self.cfg.get("catchup_hour", 1)
                    and self.meta("catchup_last") != now.strftime("%Y-%m-%d"))
+            week = now.strftime("%G-W%V")
+            if (self.cfg.get("weekly_report", True) and now.weekday() == self.cfg.get("report_weekday", 0)
+                    and now.hour >= self.cfg.get("report_hour", 7) and self.meta("weekly_last") != week):
+                self.meta("weekly_last", week)
+                try:
+                    from . import media_db
+                    media_db.send_report()
+                except Exception as e:  # noqa: BLE001
+                    self.last_error = f"weekly report: {str(e)[:120]}"
             if due or self.catchup_now.is_set():
                 self.catchup_now.clear()
                 try:
@@ -771,6 +799,11 @@ class Stream:
             self.cfg = settings()
             self.stop_event.clear()
             self.running, self.started = True, time.time()
+        try:
+            from . import media_db
+            media_db.install()                                # paid media: their logins
+        except Exception:  # noqa: BLE001
+            pass
         info = self.sync_sources(log)
         log(f"🛰 News stream started: {info['rss']} RSS feeds + {info['sitemaps']} outlet sitemaps, "
             f"{self.cfg['threads']} readers")

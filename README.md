@@ -322,6 +322,25 @@ Measured on a 4-CPU test machine with local test sites: ~37 articles/second (≈
 core. On the real internet the pace is set by how many articles the media publish and how fast their sites answer; the
 page shows the live pace and the "per day at this pace" figure.
 
+## Media Database (registered media, activity, access, paid media)
+
+**Media Database** (sidebar, News) lists the registered media (~12,400 outlets; the bundled dictionary until an admin
+edits it — then `media_dictionary.txt` in the data folder). For each outlet, from the stream's last 7 days:
+
+- **Activity** — Active (top 1,000) / Semi-active / Rare / Inactive / Unreachable / Not checked yet, and new articles
+  per day.
+- **Access** — Readable (≥ 80 % of its articles read) / Partly readable / Cannot be read (blocked, Cloudflare, HTTP
+  403 …, with the most common error) / Paywall? (pages too short to be the article) / Refused by robots.txt / Site
+  unreachable / No new articles / Not read yet / Excluded.
+
+Admins add outlets (one per line, `domain` or `domain, name`) and remove them (the stream stops reading them at once).
+**Weekly access report**: every Monday 07:00 WIB (adjustable) an Excel (Summary, Cannot be read, Readable, All media) is
+written to Exports and a summary goes to Telegram; *Access report now* makes one any time.
+
+**Paid media**: *Login* on an outlet's row takes the cookies of a browser logged in to it (the Cookie header, a cookie
+export JSON or cookies.txt). They are kept on the server (file mode 600), never shown again, and every article of that
+outlet is read with them — by the stream and by News Search. Check the outlet's subscription terms first.
+
 ## Google News links (news.google.com / rss) → the media's own link
 
 Every news search turns Google News links into the media's own links. Whatever the browser could not decode gets a

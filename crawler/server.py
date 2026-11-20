@@ -108,6 +108,15 @@ class Handler(BaseHTTPRequestHandler):
             from . import overview as ov
             from .paths import SERVER_MODE
             return self._json(ov.build(SERVER_MODE))
+        if u.path == "/api/media":
+            from . import media_db
+            qs = parse_qs(u.query)
+            g = lambda k, d="": qs.get(k, [d])[0]  # noqa: E731
+            try:
+                return self._json(media_db.listing(g("q")[:100], g("tier"), g("access"), int(g("page", "1") or 1),
+                                                   int(g("size", "50") or 50), g("sort", "activity")))
+            except ValueError:
+                return self._json({"ok": False, "error": "bad page"})
         if u.path == "/api/stream":
             from . import stream
             qs = parse_qs(u.query)
@@ -204,6 +213,21 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"ok": ok, "error": None if ok else "That schedule no longer exists."})
                 err = get().run_now(data.get("id", ""))
             except ScheduleError as e:
+                return self._json({"ok": False, "error": str(e)})
+        elif u.path in ("/api/media/add", "/api/media/remove", "/api/media/login", "/api/media/report"):
+            from . import media_db
+            try:
+                if u.path == "/api/media/add":
+                    return self._json({"ok": True, **media_db.add(str(data.get("text") or ""))})
+                if u.path == "/api/media/remove":
+                    return self._json({"ok": True, **media_db.remove(list(data.get("domains") or []))})
+                if u.path == "/api/media/login":
+                    return self._json({"ok": True, **media_db.set_subscription(
+                        str(data.get("domain") or ""), data.get("cookies"), str(data.get("note") or ""),
+                        bool(data.get("clear")))})
+                r = media_db.send_report()
+                return self._json({"ok": True, "file": r["file"], "access": r["access"], "tiers": r["tiers"]})
+            except ValueError as e:
                 return self._json({"ok": False, "error": str(e)})
         elif u.path == "/api/stream/export":
             from . import stream

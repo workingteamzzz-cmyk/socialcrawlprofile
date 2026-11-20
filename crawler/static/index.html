@@ -616,6 +616,7 @@ body{font-feature-settings:"tnum" 1,"cv11" 1;letter-spacing:-.003em}
       <button data-p="nwsearch"><svg class="i"><use href="#i-news"/></svg>News Search</button>
       <button data-p="nwlinks"><svg class="i"><use href="#i-link"/></svg>News Links<span class="count" id="navNews">0</span></button>
       <button data-p="stream"><svg class="i"><use href="#i-radio"/></svg>Live Stream<span class="count" id="navStream"></span></button>
+      <button data-p="media"><svg class="i"><use href="#i-building"/></svg>Media Database</button>
       <div class="sep need-op">API scraper</div>
       <button data-p="apiscrape" class="need-op"><svg class="i"><use href="#i-pulse"/></svg>API Scraper</button>
       <button data-p="apikeys" class="need-admin"><svg class="i"><use href="#i-shield"/></svg>Settings</button>
@@ -1114,6 +1115,40 @@ body{font-feature-settings:"tnum" 1,"cv11" 1;letter-spacing:-.003em}
       </div></div>
     </section>
 
+    <!-- MEDIA DATABASE -->
+    <section class="page" id="p-media">
+      <div class="pagehead"><div><h1>Media Database</h1><p>The registered media the stream and News Search read: how often each publishes (last 7 days) and whether the app can read it. Add or remove outlets, set the login of a paid outlet.</p></div>
+        <div class="actions"><span class="hint" id="mdRepMsg"></span><button class="btn need-op" id="mdReport"><svg class="i"><use href="#i-file"/></svg>Access report now</button></div></div>
+      <div class="kpis">
+        <div class="kpi"><small>Registered outlets</small><b id="mdK1">–</b><span class="kpi-sub" id="mdK1s"></span></div>
+        <div class="kpi"><small>Publishing (7 days)</small><b id="mdK2">–</b><span class="kpi-sub" id="mdK2s"></span></div>
+        <div class="kpi"><small>Readable</small><b id="mdK3">–</b><span class="kpi-sub" id="mdK3s"></span></div>
+        <div class="kpi"><small>Cannot be read</small><b id="mdK4">–</b><span class="kpi-sub" id="mdK4s"></span></div>
+      </div>
+      <div class="card"><div class="card-hd" style="flex-wrap:wrap;gap:8px"><h3>Outlets</h3>
+          <input class="search" id="mdQ" placeholder="Search domain or name…" style="margin-left:auto;max-width:220px;height:36px;padding-top:0;padding-bottom:0">
+          <select class="select" id="mdTier" style="max-width:170px;height:36px;padding-top:0;padding-bottom:0"><option value="">Every activity</option><option value="active">Active</option><option value="semi">Semi-active</option><option value="rare">Rare</option><option value="inactive">Inactive</option><option value="dead">Unreachable</option><option value="new">Not checked yet</option></select>
+          <select class="select" id="mdAcc" style="max-width:180px;height:36px;padding-top:0;padding-bottom:0"><option value="">Every access</option><option value="ok">Readable</option><option value="partial">Partly readable</option><option value="blocked">Cannot be read</option><option value="paywall">Paywall?</option><option value="robots">Refused by robots.txt</option><option value="unreachable">Site unreachable</option><option value="quiet">No new articles</option><option value="pending">Not read yet</option><option value="excluded">Excluded</option><option value="unknown">Not checked yet</option></select>
+          <select class="select" id="mdSort" style="max-width:150px;height:36px;padding-top:0;padding-bottom:0"><option value="activity">Busiest first</option><option value="name">A–Z</option></select></div>
+        <div class="tbl-wrap"><table class="tbl dtbl"><thead><tr><th>Outlet</th><th style="width:130px">Activity</th><th style="width:110px">Articles / day</th><th style="width:170px">Access</th><th style="width:110px">Read / failed</th><th style="width:150px">Last article</th><th style="width:170px"></th></tr></thead><tbody id="mdBody"></tbody></table></div>
+        <div class="card-bd" style="display:flex;align-items:center;gap:10px;padding-top:12px"><span class="hint" id="mdPageInfo"></span>
+          <button class="btn sm" id="mdPrev" style="margin-left:auto">Previous</button><button class="btn sm" id="mdNext">Next</button></div></div>
+      <div class="dgrid g-3 need-admin" style="margin-top:16px">
+        <div class="card"><div class="card-hd"><h3>Add outlets</h3></div><div class="card-bd">
+          <div class="field"><label for="mdAdd">One per line: domain, or domain, name (URLs are fine)</label><textarea id="mdAdd" rows="5" placeholder="radarbogor.id, Radar Bogor&#10;https://www.contohmedia.com/"></textarea></div>
+          <button class="btn primary" id="mdAddBtn">Add</button> <span class="hint" id="mdAddMsg"></span></div></div>
+        <div class="card"><div class="card-hd"><h3>Weekly access report</h3></div><div class="card-bd">
+          <p class="hint" style="margin-top:0">Every week: which outlets the app can read and which it cannot (Excel in Exports + a summary on Telegram).</p>
+          <label class="opt-row" style="border:0;padding:0 0 10px"><input type="checkbox" id="mdWk"> Send it every week</label>
+          <div style="display:flex;gap:10px"><div class="field" style="flex:1"><label for="mdWkDay">Day</label><select id="mdWkDay"><option value="0">Monday</option><option value="1">Tuesday</option><option value="2">Wednesday</option><option value="3">Thursday</option><option value="4">Friday</option><option value="5">Saturday</option><option value="6">Sunday</option></select></div>
+            <div class="field" style="flex:1"><label for="mdWkHour">Hour (WIB)</label><input id="mdWkHour" type="number" min="0" max="23"></div></div>
+          <button class="btn" id="mdWkSave">Save</button> <span class="hint" id="mdWkMsg"></span></div></div>
+        <div class="card"><div class="card-hd"><h3>Paid media</h3></div><div class="card-bd">
+          <p class="hint" style="margin-top:0">Subscribed to a paid outlet? Log in to it in your browser, copy its cookies, and set them with <b>Login</b> on its row. Every article of that outlet is then read with your subscription. Cookies stay on the server and are never shown again; they expire when the outlet logs you out — set them again then.</p>
+          <p class="hint">Check the outlet's subscription terms: many allow personal reading only.</p></div></div>
+      </div>
+    </section>
+
     <!-- API SCRAPER (the team's Social Scraper, via ScrapeCreators / Twitter API) -->
     <section class="page" id="p-apiscrape">
       <div class="pagehead"><div><h1>API Scraper</h1><p>The team's Social Scraper (v58): posts from TikTok, YouTube, Threads, Instagram, Facebook and Twitter through the scraping API — complete with User ID, Username, Follower, User Image, engagement, and <b>Sentiment &amp; Emotion</b>. Uses API credits. Output: the team's Excel (Sheet1 + Rekap + Codebook) in Exports.</p></div></div>
@@ -1436,6 +1471,15 @@ body{font-feature-settings:"tnum" 1,"cv11" 1;letter-spacing:-.003em}
     </div>
   </div>
 </div>
+<div class="modal" id="mdModal" role="dialog" aria-modal="true" aria-labelledby="mdMTitle">
+  <div class="card" style="width:min(560px,100%)">
+    <div class="card-hd"><h3 id="mdMTitle">Paid outlet login</h3><div class="tools"><button class="iconbtn" id="mdMClose" aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div></div>
+    <div class="card-bd">
+      <p style="margin-top:0">Outlet: <b id="mdMDom"></b> <span class="badge b-ok" id="mdMSet" style="display:none">login set</span></p>
+      <div class="field"><label for="mdMCk">Cookies of a logged-in browser — the Cookie header (DevTools → Network → a page → Request headers), a cookie-export JSON, or cookies.txt</label><textarea id="mdMCk" rows="6" placeholder="session=…; token=…"></textarea></div>
+      <div class="field"><label for="mdMNote">Note (optional, e.g. whose subscription)</label><input id="mdMNote"></div>
+      <div style="display:flex;gap:8px"><button class="btn primary" id="mdMSave">Save login</button><button class="btn danger" id="mdMClear">Remove login</button><span class="hint" id="mdMMsg"></span></div>
+    </div></div></div>
 <div class="modal" id="meModal" role="dialog" aria-modal="true" aria-labelledby="meTitle">
   <div class="card" style="width:min(520px,100%)">
     <div class="card-hd"><h3 id="meTitle">My account</h3><div class="tools"><button class="iconbtn" id="meClose" aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div></div>
@@ -1517,6 +1561,7 @@ function go(p){
   if (p === 'report') loadReport();
   if (p === 'home') loadHome();
   if (p === 'stream') loadStream();
+  if (p === 'media') loadMedia();
   if (p === 'apikeys'){ loadApKeys(); loadTg(); loadSafety(); }
 }
 document.querySelectorAll('#nav button').forEach(b => b.onclick = () => go(b.dataset.p));
@@ -2312,7 +2357,7 @@ $('tgTest').onclick = async () => {
 
 /* ---------- look: icon colours, page header icons, new-search menu, tabs, home, me ---------- */
 const NAV_IC = {home: '#f59e0b', collect: '#22c55e', accounts: '#3b82f6', results: '#06b6d4', status: '#22c55e', kwsearch: '#8b5cf6',
-  kwlinks: '#06b6d4', nwsearch: '#3b82f6', nwlinks: '#06b6d4', stream: '#22c55e', apiscrape: '#f43f5e', apikeys: '#f59e0b', report: '#10b981',
+  kwlinks: '#06b6d4', nwsearch: '#3b82f6', nwlinks: '#06b6d4', stream: '#22c55e', media: '#a855f7', apiscrape: '#f43f5e', apikeys: '#f59e0b', report: '#10b981',
   schedules: '#f97316', exports: '#64748b', users: '#ec4899', log: '#94a3b8'};
 document.querySelectorAll('#nav button[data-p]').forEach(b => { if (NAV_IC[b.dataset.p]) b.style.setProperty('--ic', NAV_IC[b.dataset.p]); });
 document.querySelectorAll('section.page').forEach(sec => {
@@ -2541,6 +2586,63 @@ $('lsExport').onclick = async () => { const r = await api('/api/stream/export', 
 let _stq; $('lsStQ').addEventListener('input', () => { clearTimeout(_stq); _stq = setTimeout(loadStream, 300); });
 setInterval(() => { if (document.visibilityState === 'visible' && $('p-stream').classList.contains('on')) loadStream(); }, 10000);
 document.addEventListener('mousemove', e => { const t = e.target.closest && e.target.closest('#lsChStream [data-tip]'); if (t) tip(e, t.dataset.tip); else if (e.target.closest && e.target.closest('#lsChStream')) tip(); });
+
+/* ---------- media database ---------- */
+let MD = {page: 1}, MDROWS = [];
+const TIERL = {active: ['Active', '#16a34a'], semi: ['Semi-active', '#2a78d6'], rare: ['Rare', '#e0a100'], inactive: ['Inactive', '#8a92a3'], dead: ['Unreachable', '#d03b3b'], new: ['Not checked yet', '#c3c2b7']};
+const ACCL = {ok: ['Readable', 'b-ok'], partial: ['Partly readable', 'b-warn'], blocked: ['Cannot be read', 'b-bad'], paywall: ['Paywall?', 'b-warn'],
+  robots: ['Refused by robots.txt', 'b-bad'], unreachable: ['Site unreachable', 'b-bad'], quiet: ['No new articles', 'b-neu'], pending: ['Not read yet', 'b-neu'], excluded: ['Excluded', 'b-neu'], unknown: ['Not checked yet', 'b-neu']};
+async function loadMedia(){
+  const qs = new URLSearchParams({q: $('mdQ').value.trim(), tier: $('mdTier').value, access: $('mdAcc').value, sort: $('mdSort').value, page: MD.page, size: 50});
+  const d = await api('/api/media?' + qs);
+  if (!d || !d.rows) return;
+  MDROWS = d.rows; const c = d.counts, t = c.tiers || {}, a = c.access || {};
+  $('mdK1').textContent = fmt(c.total); $('mdK1s').textContent = `${fmt(t.new || 0)} not checked yet`;
+  $('mdK2').textContent = fmt((t.active || 0) + (t.semi || 0)); $('mdK2s').textContent = `${fmt(t.active || 0)} active · ${fmt(t.semi || 0)} semi · ${fmt(t.rare || 0)} rare`;
+  $('mdK3').textContent = fmt(a.ok || 0); $('mdK3s').textContent = `${fmt(a.partial || 0)} partly`;
+  $('mdK4').textContent = fmt((a.blocked || 0) + (a.paywall || 0) + (a.robots || 0)); $('mdK4s').textContent = `${fmt(a.blocked || 0)} blocked · ${fmt(a.paywall || 0)} paywall? · ${fmt(a.robots || 0)} robots.txt · ${fmt(a.unreachable || 0)} down`;
+  const admin = ROLE === 'admin';
+  $('mdBody').innerHTML = d.rows.length ? d.rows.map((r, i) => `<tr>
+    <td><b>${esc(r.domain)}</b>${r.name ? `<small>${esc(r.name)}</small>` : ''}${r.subscribed ? ' <span class="badge b-ok" title="Read with the paid login">login</span>' : ''}</td>
+    <td><span style="display:inline-flex;align-items:center;gap:6px"><i style="width:8px;height:8px;border-radius:2px;background:${TIERL[r.tier][1]}"></i>${TIERL[r.tier][0]}</span></td>
+    <td>${fmt(r.per_day)}<small>${fmt(r.found7)} in 7 days</small></td>
+    <td><span class="badge ${ACCL[r.access][1]}">${ACCL[r.access][0]}</span>${r.error && r.access !== 'ok' ? `<small>${esc(r.error)}</small>` : ''}</td>
+    <td>${fmt(r.read)} / ${fmt(r.failed + r.short)}${r.robots ? `<small>${fmt(r.robots)} refused</small>` : ''}</td>
+    <td>${r.last_day ? dShort(r.last_day) : '–'}<small>${r.rss ? 'RSS + ' : ''}${r.sitemap ? 'sitemap' : r.rss ? '' : 'no feed found yet'}</small></td>
+    <td class="nowrap">${admin ? `<button class="btn sm" data-mdlogin="${i}">Login</button> <button class="btn sm" data-mdrm="${i}">Remove</button>` : ''}</td></tr>`).join('')
+    : '<tr><td colspan="7" class="empty-s">No outlet matches.</td></tr>';
+  const from = (d.page - 1) * d.size;
+  $('mdPageInfo').textContent = d.total ? `${fmt(from + 1)}–${fmt(Math.min(d.total, from + d.size))} of ${fmt(d.total)}` : '';
+  $('mdPrev').disabled = d.page <= 1; $('mdNext').disabled = from + d.size >= d.total;
+  if (!loadMedia.filled){ const s = await api('/api/stream'); if (s && s.settings){ loadMedia.filled = true;
+    $('mdWk').checked = s.settings.weekly_report !== false; $('mdWkDay').value = s.settings.report_weekday; $('mdWkHour').value = s.settings.report_hour; } }
+}
+let _mdq; ['mdQ'].forEach(id => $(id).addEventListener('input', () => { clearTimeout(_mdq); _mdq = setTimeout(() => { MD.page = 1; loadMedia(); }, 300); }));
+['mdTier', 'mdAcc', 'mdSort'].forEach(id => $(id).onchange = () => { MD.page = 1; loadMedia(); });
+$('mdPrev').onclick = () => { MD.page = Math.max(1, MD.page - 1); loadMedia(); };
+$('mdNext').onclick = () => { MD.page++; loadMedia(); };
+$('mdAddBtn').onclick = async () => { const r = await api('/api/media/add', {text: $('mdAdd').value});
+  if (!r || r.ok === false) return $('mdAddMsg').textContent = (r && r.error) || 'Not added';
+  $('mdAddMsg').textContent = `${r.added.length} added` + (r.already.length ? `, ${r.already.length} already registered` : '') + (r.invalid.length ? `, ${r.invalid.length} not a domain` : '');
+  if (r.added.length) $('mdAdd').value = ''; loadMedia(); };
+$('mdBody').addEventListener('click', async e => {
+  const rm = e.target.closest('[data-mdrm]'), lg = e.target.closest('[data-mdlogin]');
+  if (rm){ const r = MDROWS[+rm.dataset.mdrm]; if (!confirm(`Remove ${r.domain} from the registered media? The stream stops reading it.`)) return;
+    const x = await api('/api/media/remove', {domains: [r.domain]}); toast(x && x.ok ? `${r.domain} removed` : 'Not removed'); loadMedia(); }
+  if (lg){ const r = MDROWS[+lg.dataset.mdlogin]; $('mdMDom').textContent = r.domain; $('mdMSet').style.display = r.subscribed ? '' : 'none';
+    $('mdMCk').value = ''; $('mdMNote').value = ''; $('mdMMsg').textContent = ''; $('mdModal').classList.add('show'); }
+});
+const mdLogin = async clear => { const r = await api('/api/media/login', {domain: $('mdMDom').textContent, cookies: $('mdMCk').value, note: $('mdMNote').value, clear});
+  if (!r || r.ok === false) return $('mdMMsg').textContent = (r && r.error) || 'Not saved';
+  $('mdModal').classList.remove('show'); toast(clear ? 'Login removed' : 'Login saved — its articles are now read with it'); loadMedia(); };
+$('mdMSave').onclick = () => mdLogin(false); $('mdMClear').onclick = () => mdLogin(true);
+$('mdMClose').onclick = () => $('mdModal').classList.remove('show');
+$('mdModal').addEventListener('click', e => { if (e.target === $('mdModal')) $('mdModal').classList.remove('show'); });
+$('mdReport').onclick = async () => { $('mdRepMsg').textContent = 'Making the report…';
+  const r = await api('/api/media/report', {});
+  $('mdRepMsg').innerHTML = r && r.ok ? `Ready: <a href="/download/${encodeURIComponent(r.file)}">${esc(r.file)}</a>` : esc((r && r.error) || 'Not made'); };
+$('mdWkSave').onclick = async () => { const r = await api('/api/stream', {weekly_report: $('mdWk').checked, report_weekday: +$('mdWkDay').value, report_hour: +$('mdWkHour').value});
+  $('mdWkMsg').textContent = r && r.ok ? 'Saved.' : (r && r.error) || 'Not saved'; };
 
 /* ---------- reports ---------- */
 let TOPICS = [];

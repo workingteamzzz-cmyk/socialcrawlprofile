@@ -247,6 +247,9 @@ class StreamSettings(BaseModel):
     catchup_days: int | None = Field(None, description="late-article sweep: the last N days (0 = off)")
     catchup_hour: int | None = Field(None, description="hour of the day (WIB) the sweep runs")
     catchup_now: bool | None = Field(None, description="run the late-article sweep now")
+    weekly_report: bool | None = Field(None, description="weekly media access report (Excel + Telegram)")
+    report_weekday: int | None = Field(None, description="0 = Monday … 6 = Sunday")
+    report_hour: int | None = Field(None, description="hour of the day, WIB")
     semi_hours: int | None = None
     rare_hours: int | None = None
     inactive_days: int | None = None
@@ -256,6 +259,21 @@ class StreamSettings(BaseModel):
     keywords: list[str] | str | None = Field(None, description="stream keywords (report topics are added)")
     robots: bool | None = Field(None, description="respect each outlet's robots.txt (default on)")
     exclude_domains: list[str] | str | None = Field(None, description="outlets the stream never reads")
+
+
+class MediaAdd(BaseModel):
+    text: str = Field(..., description='one outlet per line: "domain" or "domain, name" (URLs are fine)')
+
+
+class MediaRemove(BaseModel):
+    domains: list[str]
+
+
+class MediaLogin(BaseModel):
+    domain: str = Field(..., description="the paid outlet, e.g. kompas.id")
+    cookies: str | None = Field(None, description="cookies of a logged-in browser: Cookie header, JSON export or cookies.txt")
+    note: str = ""
+    clear: bool = False
 
 
 class StreamExport(BaseModel):
@@ -672,7 +690,7 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
 
     @app.get("/api/dashboard", tags=["overview"], dependencies=auth,
              summary="Home dashboard: trend, sentiment, top media / keywords, latest items from the report database")
-    def dashboard(days: int = 14, q: str = ""):
+    def dashboard_data(days: int = 14, q: str = ""):
         from . import dashboard as db
         return db.build(days, q)
 
@@ -742,6 +760,46 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
             daily_cap=body.daily_cap, monthly_cap=body.monthly_cap,
             cleared=[k for k, v in (("api", body.clear_api_key), ("twitter", body.clear_twitter)) if v])
         return {"ok": True, **pub}
+
+    # ---------- registered media ----------
+    @app.get("/api/media", tags=["media"], dependencies=auth,
+             summary="Registered media: activity tier, access (readable or not), paid login")
+    def media_list(q: str = "", tier: str = "", access: str = "", page: int = 1, size: int = 50, sort: str = "activity"):
+        from . import media_db
+        return media_db.listing(q[:100], tier, access, page, size, sort)
+
+    @app.post("/api/media/add", tags=["media"], dependencies=admin_only, summary="Register outlets")
+    def media_add(body: MediaAdd, request: Request):
+        from . import media_db
+        out = media_db.add(body.text)
+        log(request, "added media", n=len(out["added"]))
+        return {"ok": True, **out}
+
+    @app.post("/api/media/remove", tags=["media"], dependencies=admin_only, summary="Remove outlets")
+    def media_remove(body: MediaRemove, request: Request):
+        from . import media_db
+        out = media_db.remove(body.domains)
+        log(request, "removed media", domains=",".join(out["removed"])[:300])
+        return {"ok": True, **out}
+
+    @app.post("/api/media/login", tags=["media"], dependencies=admin_only,
+              summary="Paid outlet: set (or clear) the login cookies used to read its articles")
+    def media_login(body: MediaLogin, request: Request):
+        from . import media_db
+        try:
+            out = media_db.set_subscription(body.domain, body.cookies, body.note, body.clear)
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        log(request, ("cleared" if body.clear else "set") + " a paid-media login", domain=out["domain"])
+        return {"ok": True, **out}
+
+    @app.post("/api/media/report", tags=["media"], dependencies=op,
+              summary="Make the media access report now (Excel in Exports + Telegram)")
+    def media_report(request: Request):
+        from . import media_db
+        r = media_db.send_report()
+        log(request, "made the media access report")
+        return {"ok": True, "file": r["file"], "access": r["access"], "tiers": r["tiers"]}
 
     # ---------- live news stream ----------
     @app.get("/api/stream", tags=["stream"], dependencies=auth, summary="Live news stream: pace, sources, latest articles")

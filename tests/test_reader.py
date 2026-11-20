@@ -74,3 +74,37 @@ def test_client_dashboard_with_api_key_and_cors(rd, tmp_path, monkeypatch):
     assert r.json()["ok"] and r.headers.get("access-control-allow-origin") == "https://dashboard.klien.id"
     bad = c.get("/api/articles", headers={"X-API-Key": key, "Origin": "https://lain.com"})
     assert "access-control-allow-origin" not in bad.headers
+
+
+def test_all_databases_stream_plus_news_search(rd):
+    """News Search / Keyword runs (the reporting database) show in the reader too; a link in both shows once."""
+    from datetime import timedelta, timezone
+
+    from crawler import archive, insights
+    tz = timezone(timedelta(hours=7))
+    archive.add_rows("online", [
+        {"url": "https://www.f.id/berita/pln-tarif", "title": "PLN Umumkan Tarif Listrik Desember", "media": "f.id",
+         "published": "2026-11-20", "published_full": "2026-11-20 12:00", "text": "PLN mengumumkan tarif.\nParagraf dua.",
+         "description": "Tarif baru.", "sentiment": "Positive", "keyword": "pln"},
+        {"url": "https://b.id/1", "title": "PLN Padam Lagi, Warga Bekasi Mengeluh", "media": "b.id",
+         "published": "2026-11-20", "text": "sama", "keyword": "pln"},           # also read by the stream
+        {"url": "https://g.id/old", "title": "PLN 2025", "media": "g.id", "published": "2025-01-05", "text": "x",
+         "keyword": "pln"}], tz)
+    assert insights.index_reports() == 3
+    every = rd.articles(q="PLN")
+    assert every["total"] == 6 and every["source"] == "all"                 # 4 stream + 2 new from News Search
+    assert [x["origin"] for x in every["rows"]].count("reports") == 2
+    assert rd.articles(q="PLN", source="stream")["total"] == 4
+    assert rd.articles(q="PLN", source="reports")["total"] == 3
+    day = rd.articles(q="tarif", start="2026-11-20", end="2026-11-20")
+    assert day["total"] == 1 and day["sentiment"]["positive"]["n"] == 1 and day["rows"][0]["domain"] == "f.id"
+    one = rd.article(day["rows"][0]["key"])
+    assert one["origin"] == "reports" and one["title"].startswith("PLN Umumkan") and one["paragraphs"]
+    assert rd.articles(start="2025-01-01", end="2025-12-31")["total"] == 1   # no keyword: every article of a period
+    with archive._LOCK:                                                      # deleted (Exports > free up space)
+        c = archive._db()
+        c.execute("DELETE FROM items WHERE day < '2026-01-01'")
+        c.commit()
+        c.close()
+    insights.prune_reports()
+    assert rd.articles(start="2025-01-01", end="2025-12-31")["total"] == 0

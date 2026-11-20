@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS items (
     PRIMARY KEY (kind, key)
 );
 CREATE INDEX IF NOT EXISTS idx_items_day ON items(kind, day);
+CREATE INDEX IF NOT EXISTS idx_items_seen ON items(kind, last_seen, key);
 """
 
 

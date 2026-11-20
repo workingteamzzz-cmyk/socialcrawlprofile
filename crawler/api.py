@@ -948,13 +948,15 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
 
     # ---------- news stream reader / client API ----------
     @app.get("/api/articles", tags=["client API"], dependencies=auth,
-             summary="Articles the live stream read: query (AND / OR / NOT, \"phrase\", ( )), report topic, dates, "
+             summary="Every article in the server's databases (source=all: live stream + News Search / reports; "
+                     "or stream / reports): query (AND / OR / NOT, \"phrase\", ( )), report topic, dates, "
                      "sentiment; with sentiment counts. For a client's dashboard: send X-API-Key.")
     def articles_get(q: str = "", topic: str = "", start: str = "", end: str = "", sentiment: str = "",
-                     sort: str = "newest", page: int = 1, size: int = 24):
+                     sort: str = "newest", page: int = 1, size: int = 24, source: str = "all"):
         from . import reader
         try:
-            return {"ok": True, **reader.articles(q[:500], topic[:100], start, end, sentiment, sort, page, size)}
+            return {"ok": True, **reader.articles(q[:500], topic[:100], start, end, sentiment, sort, page, size,
+                                                  source[:10])}
         except ValueError as e:
             return {"ok": False, "error": str(e)}
 

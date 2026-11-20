@@ -80,6 +80,13 @@ def _search_db() -> sqlite3.Connection:
               "pub_date UNINDEXED, pub_time UNINDEXED, matched UNINDEXED, fetched UNINDEXED, title, summary, "
               "tokenize='unicode61 remove_diacritics 2')")
     c.execute("CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT)")
+    # the reporting database (News Search / Keyword / scheduled runs, imported files) for the News Stream reader:
+    # skey = the stream's key for the same link, so an article in both shows once
+    c.execute("CREATE TABLE IF NOT EXISTS rep(skey TEXT PRIMARY KEY, akey TEXT, url TEXT, domain TEXT, title TEXT, "
+              "pub_date TEXT, pub_time TEXT, image TEXT, summary TEXT, sentiment TEXT, keywords TEXT, seen TEXT)")
+    c.execute("CREATE INDEX IF NOT EXISTS rep_pub ON rep(pub_date)")
+    c.execute("CREATE VIRTUAL TABLE IF NOT EXISTS rdocs USING fts5(skey UNINDEXED, title, summary, "
+              "tokenize='unicode61 remove_diacritics 2')")
     c.commit()
     return c
 
@@ -123,6 +130,92 @@ def index_new(limit: int = 5000) -> int:
     finally:
         db.close()
         src.close()
+
+
+def _archive_ro() -> sqlite3.Connection | None:
+    from .paths import APP_DATA
+    p = os.path.join(APP_DATA, "archive.db")
+    if not os.path.exists(p):
+        return None
+    c = sqlite3.connect(f"file:{p}?mode=ro", uri=True, timeout=30)
+    c.row_factory = sqlite3.Row
+    return c
+
+
+def _sent(v: str) -> str:
+    v = (v or "").strip().lower()
+    return v if v in ("positive", "negative") else "neutral"
+
+
+def index_reports(limit: int = 5000) -> int:
+    """Online rows of the reporting database added / changed since the last call -> the reader's index."""
+    from urllib.parse import urlparse
+    from .stream import norm_key
+    src = _archive_ro()
+    if src is None:
+        return 0
+    db = _search_db()
+    try:
+        r = db.execute("SELECT v FROM meta WHERE k='rep_cursor'").fetchone()
+        seen, key = (json.loads(r["v"]) if r else ["", ""])
+        try:
+            rows = src.execute("SELECT key, row, day, sentiment, keywords, last_seen FROM items WHERE kind='online' AND "
+                               "(last_seen > ? OR (last_seen = ? AND key > ?)) ORDER BY last_seen, key LIMIT ?",
+                               (seen, seen, key, limit)).fetchall()
+        except sqlite3.Error:
+            return 0
+        if not rows:
+            return 0
+        out = []
+        for x in rows:
+            try:
+                row = json.loads(x["row"] or "{}")
+            except ValueError:
+                continue
+            url = str(row.get("URL") or "")
+            if not url.startswith("http"):
+                continue
+            t = str(row.get("TIME") or "")[:5]
+            host = re.sub(r"^(www\.|m\.|amp\.)", "", (urlparse(url).hostname or "").lower())
+            out.append((norm_key(url), x["key"], url, host,
+                        str(row.get("TITLE") or "")[:500], x["day"] or "", t if re.match(r"\d{2}:\d{2}$", t) else "",
+                        str(row.get("IMAGE") or "")[:1000], str(row.get("SUMMARY") or "")[:2000],
+                        _sent(x["sentiment"] or row.get("SENTIMENT")), (x["keywords"] or "").strip("|").replace("|", ", "),
+                        x["last_seen"] or ""))
+        keys = [o[0] for o in out]
+        for i in range(0, len(keys), 500):
+            part = keys[i:i + 500]
+            db.execute(f"DELETE FROM rdocs WHERE skey IN ({','.join('?' * len(part))})", part)
+        db.executemany("INSERT OR REPLACE INTO rep VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", out)
+        db.executemany("INSERT INTO rdocs(skey, title, summary) VALUES (?,?,?)", [(o[0], o[4], o[8]) for o in out])
+        db.execute("INSERT INTO meta(k, v) VALUES ('rep_cursor', ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+                   (json.dumps([rows[-1]["last_seen"] or "", rows[-1]["key"]]),))
+        db.commit()
+        return len(rows)
+    finally:
+        db.close()
+        src.close()
+
+
+def prune_reports() -> int:
+    """Rows deleted from the reporting database (Exports > free up space) leave the reader's index too."""
+    from .paths import APP_DATA
+    p = os.path.join(APP_DATA, "archive.db")
+    db = _search_db()
+    try:
+        if not os.path.exists(p):
+            n = db.execute("DELETE FROM rep").rowcount
+            db.execute("DELETE FROM rdocs")
+        else:
+            db.execute("ATTACH DATABASE ? AS a", (p,))
+            n = db.execute("DELETE FROM rep WHERE NOT EXISTS (SELECT 1 FROM a.items i WHERE i.kind='online' "
+                           "AND i.key = rep.akey)").rowcount
+            if n:
+                db.execute("DELETE FROM rdocs WHERE skey NOT IN (SELECT skey FROM rep)")
+        db.commit()
+        return n
+    finally:
+        db.close()
 
 
 def purge_index(days: int) -> None:
@@ -401,11 +494,16 @@ def alert_spikes() -> list[dict]:
 
 # ---------- background ----------
 def _loop() -> None:
-    last_spike = last_purge = 0.0
+    last_spike = last_purge = last_prune = 0.0
     while not _STATE["stop"].is_set():
         try:
             while index_new() >= 5000 and not _STATE["stop"].is_set():
                 pass
+            while index_reports() >= 5000 and not _STATE["stop"].is_set():
+                pass
+            if time.time() - last_prune > 3600:
+                last_prune = time.time()
+                prune_reports()
             if time.time() - last_spike > 900:
                 last_spike = time.time()
                 alert_spikes()

@@ -186,6 +186,11 @@ def _delete(start: str, end: str, parts: dict) -> None:
                 c.commit()
             finally:
                 c.close()
+        try:
+            from . import insights
+            insights.prune_reports()                   # the News Stream reader forgets them too
+        except Exception:  # noqa: BLE001
+            pass
     if parts.get("files", True):
         keep = set(parts.get("keep_files") or [])
         st["files"] = len(delete_outputs([f["name"] for f in _files(start, end) if f["name"] not in keep]))

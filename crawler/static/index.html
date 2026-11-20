@@ -1188,7 +1188,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
 
     <!-- NEWS STREAM (reader) -->
     <section class="page" id="p-reader">
-      <div class="pagehead"><div><h1>News Stream</h1><p>Articles streaming in from the registered media, filtered as you set — new ones show up by themselves.</p></div>
+      <div class="pagehead"><div><h1>News Stream</h1><p>Every article on the server — the live stream and every News Search / Keyword / scheduled run — filtered as you set; new ones show up by themselves.</p></div>
         <div class="actions"><span class="pill run" id="rdLive"><i></i>Live</span></div></div>
       <div class="rd-wrap">
         <aside class="card rd-filters"><div class="card-bd" style="padding-top:16px">
@@ -1197,6 +1197,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
           <div style="display:grid;grid-template-columns:minmax(0,1fr);gap:0">
             <div class="field"><label for="rdStart">Start date</label><input type="date" id="rdStart"></div>
             <div class="field"><label for="rdEnd">End date</label><input type="date" id="rdEnd"></div></div>
+          <div class="field"><label for="rdSrc">Source</label><select id="rdSrc"><option value="all">All databases</option><option value="stream">Live stream only</option><option value="reports">News Search &amp; reports only</option></select></div>
           <div class="field"><label for="rdSent">Sentiment</label><select id="rdSent"><option value="">All</option><option value="positive">Positive</option><option value="negative">Negative</option><option value="neutral">Neutral</option></select></div>
           <div class="field"><label for="rdSort">Sort</label><select id="rdSort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></div>
           <div class="field"><label>View</label><div class="seg rd-view" id="rdView"><button data-v="grid" class="on">Grid</button><button data-v="list">List</button></div></div>
@@ -2996,7 +2997,7 @@ const SENT = {positive: ['b-ok', 'Positive'], negative: ['b-bad', 'Negative'], n
 const TIERN = {active: 'Active', active2: 'Active 2', semi: 'Semi', rare: 'Rare', inactive: 'Inactive', dead: 'Down', new: 'New'};
 function rdParams(page){
   return new URLSearchParams({q: $('rdQ').value.trim(), topic: $('rdTopic').value, start: $('rdStart').value, end: $('rdEnd').value,
-    sentiment: $('rdSent').value, sort: $('rdSort').value, page, size: 24});
+    sentiment: $('rdSent').value, sort: $('rdSort').value, source: $('rdSrc').value, page, size: 24});
 }
 function rdTerms(){
   const q = $('rdQ').value + ' ' + ($('rdTopic').selectedOptions[0]?.dataset.kw || '');
@@ -3013,7 +3014,7 @@ function rdCard(r){
     <div class="rd-body"><span class="badge ${SENT[r.sentiment][0]}">${SENT[r.sentiment][1]}</span>
       <h4>${esc(r.title || r.url)}</h4>
       <small><svg class="i"><use href="#i-cal"/></svg>${rdWhen(r)}${r.tier ? ` <span class="rd-tier">${TIERN[r.tier] || esc(r.tier)}</span>` : ''}</small>
-      <small><svg class="i"><use href="#i-building"/></svg>${esc(r.domain)}</small></div></div>`;
+      <small><svg class="i"><use href="#i-building"/></svg>${esc(r.domain)}${r.origin === 'reports' ? ' <span class="rd-tier">News Search</span>' : ''}</small></div></div>`;
 }
 async function loadReader(reset = true){
   if (RD.loading) return; RD.loading = true;
@@ -3057,9 +3058,9 @@ $('rdList').addEventListener('keydown', e => { const c = e.target.closest('.rd-c
 $('rdDetail').addEventListener('click', e => { if (e.target.closest('.rd-close')) $('rdDetail').classList.remove('open'); });
 $('rdGo').onclick = () => loadReader(true);
 $('rdQ').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) loadReader(true); });
-['rdTopic', 'rdSent', 'rdSort', 'rdStart', 'rdEnd'].forEach(id => $(id).addEventListener('change', () => loadReader(true)));
+['rdTopic', 'rdSrc', 'rdSent', 'rdSort', 'rdStart', 'rdEnd'].forEach(id => $(id).addEventListener('change', () => loadReader(true)));
 $('rdReset').onclick = () => { const t = new Date().toISOString().slice(0, 10); $('rdStart').value = $('rdEnd').value = t; $('rdQ').value = '';
-  $('rdTopic').value = ''; $('rdSent').value = ''; $('rdSort').value = 'newest'; loadReader(true); };
+  $('rdTopic').value = ''; $('rdSrc').value = 'all'; $('rdSent').value = ''; $('rdSort').value = 'newest'; loadReader(true); };
 document.querySelectorAll('#rdView button').forEach(b => { b.classList.toggle('on', b.dataset.v === RD.view);
   b.onclick = () => { RD.view = b.dataset.v; ls.set('rd_view', RD.view); document.querySelectorAll('#rdView button').forEach(x => x.classList.toggle('on', x === b));
     $('rdList').classList.toggle('list', RD.view === 'list'); }; });

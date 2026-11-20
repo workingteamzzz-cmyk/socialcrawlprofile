@@ -336,6 +336,11 @@ page shows the live pace and the "per day at this pace" figure.
 `"phrase"` `( )` `prefix*`), positive / negative / neutral shares on top, article cards in the middle, the full article on
 the right with the keywords highlighted. New matching articles are announced every 30 seconds ("↑ 5 new articles").
 
+**Source** chooses which databases it reads: *All databases* (the default — the Live Stream plus every News Search /
+Keyword / scheduled run and imported Online file; a link found by both shows once), *Live stream only*, or *News Search &
+reports only*. Articles from News Search carry a "News Search" tag. Clear both dates to search every day on the server.
+The client API takes the same choice: `&source=all|stream|reports`.
+
 ### Giving a client's dashboard the data (API)
 
 1. Users → add a **viewer** user for the client (e.g. `klien-pln`), then **New API key** — give the key to the client

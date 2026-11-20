@@ -25,7 +25,8 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    mem_limit: 4g
+    mem_limit: 3g                   # leaves room for the system, SSH and Caddy on a 4 GB server
+    cpus: "1.7"                     # of 2: the server always keeps some CPU for itself
     pids_limit: 2048
 
   caddy:

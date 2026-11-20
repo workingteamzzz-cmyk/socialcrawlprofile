@@ -119,6 +119,8 @@ def remove(domains: list[str]) -> dict:
     try:
         from . import stream
         stream.get().remove_outlets(gone)
+        if stream._WORKER_PARENT and gone:
+            stream.command("removed", json.dumps(gone))   # the worker forgets their queued articles too
     except Exception:  # noqa: BLE001
         pass
     _CACHE["t"] = 0
@@ -191,6 +193,12 @@ def set_subscription(domain: str, cookies: str | None, note: str = "", clear: bo
             json.dump(subs, f)
         os.replace(tmp, _subs_path())
     install()
+    try:
+        from . import stream
+        if stream._WORKER_PARENT:
+            stream.command("subs")                       # the stream's own process reloads the logins
+    except Exception:  # noqa: BLE001
+        pass
     return {"domain": d, "subscribed": d in subs}
 
 

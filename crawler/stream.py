@@ -28,7 +28,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 WIB = timezone(timedelta(hours=7))
-DEFAULTS = {"enabled": False, "threads": 16, "discovery_threads": 12, "rss_minutes": 10, "sitemap_minutes": 60,
+DEFAULTS = {"enabled": False, "threads": 8, "discovery_threads": 8, "rss_minutes": 10, "sitemap_minutes": 60,
             "catchup_days": 2, "catchup_hour": 1, "weekly_report": True, "report_weekday": 0, "report_hour": 7,
             "health_on_start": True, "health_weekday": 6, "health_hour": 2,
             "top_n": 1000, "semi_hours": 4, "rare_hours": 24, "inactive_days": 3, "dead_days": 7,
@@ -70,6 +70,7 @@ CREATE INDEX IF NOT EXISTS a_pub ON articles(status, pub_date);
 CREATE INDEX IF NOT EXISTS a_disc ON articles(discovered);
 CREATE TABLE IF NOT EXISTS seen(key TEXT PRIMARY KEY, t REAL);
 CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
+CREATE TABLE IF NOT EXISTS commands(id INTEGER PRIMARY KEY AUTOINCREMENT, cmd TEXT, arg TEXT DEFAULT '', t REAL);
 CREATE TABLE IF NOT EXISTS site_health(domain TEXT PRIMARY KEY, checked REAL, alive INTEGER, sitemaps INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS domain_days(domain TEXT, day TEXT, n INTEGER DEFAULT 0, PRIMARY KEY(domain, day));
 CREATE TABLE IF NOT EXISTS hourly(
@@ -1047,6 +1048,17 @@ class Stream:
                 self.queued.clear()
                 self.qn = 0
 
+    def live_state(self) -> dict:
+        """What only the running engine knows (the worker process writes it for the web process every 2 s)."""
+        rec = list(self.recent)
+        now = time.time()
+        per_min = sum(1 for t in rec if t > now - 300) / 5
+        with self.lock:
+            return {"t": now, "running": self.running, "since": int(self.started) if self.running else 0,
+                    "per_minute": round(per_min, 1), "per_day_pace": int(per_min * 60 * 24),
+                    "readers_busy": len(self.busy_domains), "queue_mem": self.qn, "last_error": self.last_error,
+                    "export": dict(self.export), "health": dict(self.health), "catchup": dict(self.catchup)}
+
     def days_with_articles(self) -> list[str]:
         """The last 30 calendar days that have articles (one indexed look per day, not a scan)."""
         now = datetime.now(WIB)
@@ -1089,7 +1101,8 @@ class Stream:
             size = 0
         rec = list(self.recent)                              # readers append while we count
         per_min = sum(1 for t in rec if t > now - 300) / 5
-        return {"running": self.running, "since": int(self.started) if self.running else 0, "settings": settings(),
+        live = read_live() if _WORKER_PARENT else None
+        out = {"running": self.running, "since": int(self.started) if self.running else 0, "settings": settings(),
                 "queue": self.rq("SELECT COUNT(*) n FROM articles WHERE status='new'")[0]["n"],
                 "stored": self.rq("SELECT COUNT(*) n FROM articles WHERE status='success'")[0]["n"],
                 "per_minute": round(per_min, 1), "per_day_pace": int(per_min * 60 * 24), "today": day,
@@ -1102,6 +1115,16 @@ class Stream:
                 "readers_busy": len(self.busy_domains), "last_error": self.last_error, "export": dict(self.export),
                 "days": self.days_with_articles(),
                 "latest": [dict(r) for r in rows]}
+        if live:                                             # the engine runs in its own process: its live state
+            for k in ("running", "since", "per_minute", "per_day_pace", "readers_busy", "last_error", "export"):
+                out[k] = live.get(k, out[k])
+            out["health"].update(live.get("health") or {})
+            out["catchup"].update(live.get("catchup") or {})
+            out["worker"] = True
+        elif _WORKER_PARENT:
+            out["running"] = False
+            out["last_error"] = "the stream process is starting or not running"
+        return out
 
 
 _STREAM: Stream | None = None
@@ -1120,6 +1143,8 @@ def set_enabled(on: bool, log=print) -> dict:
     cur = settings()
     cur["enabled"] = bool(on)
     _write_settings(cur)
+    if _WORKER_PARENT:
+        return {"enabled": cur["enabled"]}                # the worker process follows the setting within seconds
     s = get()
     if on:
         threading.Thread(target=s.start, args=(log,), daemon=True).start()
@@ -1144,7 +1169,8 @@ def apply(data: dict, log=print) -> dict:
         new = save_settings(fields)
         s.cfg = new
         s.kw_cache = (0.0, [])
-        restart = s.running and any(old.get(k) != new.get(k) for k in ("threads", "discovery_threads"))
+        restart = (not _WORKER_PARENT and s.running
+                   and any(old.get(k) != new.get(k) for k in ("threads", "discovery_threads")))
         if restart:
             def again():
                 s.stop()
@@ -1152,16 +1178,13 @@ def apply(data: dict, log=print) -> dict:
             threading.Thread(target=again, daemon=True).start()
     if isinstance(data.get("enabled"), bool):
         out = set_enabled(data["enabled"], log)
-    if data.get("health_now"):
-        if not s.running:
-            raise ValueError("Start the stream first.")
-        s.health_now.set()
-        out["health"] = "started"
-    if data.get("catchup_now"):
-        if not s.running:
-            raise ValueError("Start the stream first.")
-        s.catchup_now.set()
-        out["catchup"] = "started"
+    running = (read_live() or {}).get("running") if _WORKER_PARENT else s.running
+    for key, cmd, ev in (("health_now", "health", s.health_now), ("catchup_now", "catchup", s.catchup_now)):
+        if data.get(key):
+            if not running:
+                raise ValueError("Start the stream first.")
+            command(cmd) if _WORKER_PARENT else ev.set()
+            out[cmd] = "started"
     return {**settings(), **out}
 
 
@@ -1171,6 +1194,11 @@ def start_export(day: str) -> dict:
     s = get()
     if not re.match(r"\d{4}-\d{2}-\d{2}$", day or ""):
         return {"ok": False, "error": "Date as YYYY-MM-DD."}
+    if _WORKER_PARENT:
+        if ((read_live() or {}).get("export") or {}).get("running"):
+            return {"ok": False, "error": "An export is already running."}
+        command("export", day)                             # made by the worker process (keeps the web quick)
+        return {"ok": True}
     with s.lock:
         if s.export.get("running"):
             return {"ok": False, "error": "An export is already running."}
@@ -1184,3 +1212,68 @@ def _quiet(fn, *a):
         fn(*a)
     except Exception:  # noqa: BLE001  the error is in s.export
         pass
+
+
+# ---------- the stream in its own process ----------
+# The web server and the stream share nothing but the data folder: the stream runs as `python -m
+# crawler.stream_worker` at a lower priority, so a busy stream (thousands of pages, parsing, indexing) never makes the
+# dashboard slow. The web process writes settings and commands; the worker writes its live state (live.json).
+_WORKER_PARENT = False
+_WORKER = {"proc": None, "stop": threading.Event()}
+
+
+def _live_path() -> str:
+    return os.path.join(_dir(), "live.json")
+
+
+def read_live() -> dict | None:
+    try:
+        with open(_live_path(), encoding="utf-8") as f:
+            d = json.load(f)
+        return d if time.time() - float(d.get("t", 0)) < 20 else None
+    except (OSError, ValueError):
+        return None
+
+
+def write_live(state: dict) -> None:
+    os.makedirs(_dir(), exist_ok=True)
+    tmp = _live_path() + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(state, f)
+    os.replace(tmp, _live_path())
+
+
+def command(cmd: str, arg: str = "") -> None:
+    """A request for the worker process (run the sweep / site check now, make an export, reload logins, …)."""
+    get().x("INSERT INTO commands(cmd, arg, t) VALUES (?,?,?)", (cmd, arg, time.time()))
+
+
+def take_commands(s: "Stream") -> list:
+    with s.lock:
+        rows = s._db.execute("SELECT id, cmd, arg FROM commands ORDER BY id").fetchall()
+        if rows:
+            s._db.execute("DELETE FROM commands WHERE id <= ?", (rows[-1]["id"],))
+            s._db.commit()
+    return [(r["cmd"], r["arg"]) for r in rows]
+
+
+def start_worker(log=print) -> None:
+    """The web server's side: start the worker process and restart it if it ever dies."""
+    import subprocess
+    import sys
+    global _WORKER_PARENT
+    _WORKER_PARENT = True
+
+    def keep():
+        fails = 0
+        while not _WORKER["stop"].is_set():
+            p = _WORKER["proc"]
+            if p is None or p.poll() is not None:
+                if p is not None:
+                    fails += 1
+                    log(f"stream worker stopped (exit {p.returncode}) — starting it again")
+                _WORKER["proc"] = subprocess.Popen(          # stdin stays open: the worker ends when we do
+                    [sys.executable, "-m", "crawler.stream_worker"], stdin=subprocess.PIPE,
+                    cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            _WORKER["stop"].wait(min(60, 5 * (1 + fails)))
+    threading.Thread(target=keep, daemon=True, name="stream-supervisor").start()

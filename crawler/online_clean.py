@@ -208,6 +208,33 @@ def content_html(teks, title="", author="") -> str:
     return "".join(f"<p>{p}</p>" for p in paras)
 
 
+_JUNK_URL = re.compile(r"/(privacy|privacy-policy|kebijakan-privasi|privasi|terms|terms-of-use|terms-of-service|tos|"
+                       r"syarat|syarat-dan-ketentuan|syarat-ketentuan|ketentuan|pedoman|pedoman-media-siber|disclaimer|"
+                       r"about|about-us|tentang|tentang-kami|contact|contact-us|kontak|hubungi-kami|redaksi|susunan-redaksi|"
+                       r"karir|career|careers|lowongan|advertise|iklan|pasang-iklan|info-iklan|kode-etik|"
+                       r"login|register|daftar|subscribe|langganan|faq|bantuan|help)(/|\.html?|\.php)?$", re.I)
+_JUNK_TITLE = re.compile(r"^\s*(privacy policy|kebijakan privasi|terms of (use|service)|syarat( dan|&)? ketentuan|"
+                         r"pedoman (pemberitaan )?media siber|disclaimer|about us|tentang kami|contact us|kontak( kami)?|"
+                         r"hubungi kami|susunan redaksi|redaksi|karir|careers?|info iklan|pasang iklan|kode etik|faq|"
+                         r"login|masuk|daftar|register|subscribe|langganan|404|page not found|halaman tidak ditemukan|"
+                         r"not found|access denied|forbidden|just a moment|attention required|"
+                         r"(local|latest|breaking) news, .*|berita terkini( dan| &)? terbaru.*|portal berita .*)\s*[.…!]*\s*"
+                         r"([|\-–—:].{0,60})?$", re.I)
+
+
+def is_junk_page(title: str, url: str = "") -> bool:
+    """A site page, not a news article: privacy / terms / about / contact / login / an error page, or a front page
+    whose title is the site's tagline ("Local news, breaking news, weather and traffic")."""
+    from urllib.parse import urlparse
+    try:
+        path = urlparse(url or "").path
+    except ValueError:
+        path = ""
+    if path and _JUNK_URL.search(path.rstrip("/") or "/"):
+        return True
+    return bool(_JUNK_TITLE.match(str(title or "")))
+
+
 def safe_cell(v, column: str = ""):
     """Control characters removed; longer than an Excel cell -> cut (CONTENT at the end of a paragraph)."""
     if not isinstance(v, str):
@@ -225,6 +252,8 @@ def safe_cell(v, column: str = ""):
 def finalize(rows: list[list], columns: list[str], drop_empty_content: bool) -> tuple[list[list], dict]:
     """Drop empty-CONTENT articles (optional) and duplicate URLs (keeping the fullest CONTENT), keep the order."""
     ci, ui = columns.index("CONTENT"), columns.index("URL")
+    ti = columns.index("TITLE")
+    rows = [r for r in rows if not is_junk_page(r[ti], r[ui])]          # privacy / terms / front pages: never
     dropped_empty = [r[ui] for r in rows if drop_empty_content and not (r[ci] or "").strip()]
     if drop_empty_content:
         rows = [r for r in rows if (r[ci] or "").strip()]

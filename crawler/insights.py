@@ -252,7 +252,7 @@ def export(q: str, days: int, out_dir: str) -> dict:
                                             "influencer": r["influencer"], "person": r["persons"], "published": d,
                                             "published_full": f"{d} {t}" if re.match(r"\d{2}:\d{2}$", t) and d else ""},
                                            WIB)
-                if row[3] in seen or not (row[10] or "").strip():
+                if row[3] in seen or not (row[10] or "").strip() or oc.is_junk_page(row[2], row[3]):
                     continue
                 seen.add(row[3])
                 ws.append([oc.safe_cell(v, templates.ONLINE_COLUMNS[k]) for k, v in enumerate(row)])

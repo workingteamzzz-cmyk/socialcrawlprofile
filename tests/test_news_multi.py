@@ -284,3 +284,15 @@ def test_spokesperson_columns_keep_only_people():
                                           "Presiden Prabowo Subianto, Imam Sapto Riadi, Dedi, Pertumbuhan"}, timezone.utc)
     assert row[cols.index("INFLUENCER")] == "rony samtana"
     assert row[cols.index("PERSON")] == "vladimir putin,prabowo subianto,imam sapto riadi,dedi"
+
+
+def test_site_pages_never_in_the_online_file():
+    from crawler import templates
+    from datetime import timezone
+    rows = [{"url": u, "title": t, "text": "Isi halaman yang cukup panjang. " * 10} for t, u in [
+        ("Local news, breaking news, weather and traffic", "https://a.com/"),
+        ("Terms of Use", "https://a.com/terms-of-use"), ("Privacy Policy", "https://a.com/privacy-policy"),
+        ("Just a moment...", "https://a.com/berita/x"),
+        ("Mengungkap Fakta Tersembunyi di Balik Stasiun Kereta Api Tertua", "https://a.com/travel/2026/11/20/stasiun")]]
+    cols, values = templates.rows_for("online", rows, timezone.utc)
+    assert [v[cols.index("TITLE")] for v in values] == ["Mengungkap Fakta Tersembunyi di Balik Stasiun Kereta Api Tertua"]

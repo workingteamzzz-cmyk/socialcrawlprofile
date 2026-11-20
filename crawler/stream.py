@@ -362,13 +362,14 @@ class Stream:
         """New article links -> the reading queue (front: fresh news first; catch-up links go to the back).
         Only articles, only from the days the stream covers."""
         from .medmas.filters import is_article_link
+        from .online_clean import is_junk_page
         cutoff = self.cutoff()
         take_all = bool(self.cfg.get("all_links", True))
         room_old = int(self.cfg.get("old_per_check", 1000)) if take_all else 0
         now, rows = time.time(), []
         for it in items:
             url = (it.get("url") or "").strip()
-            if not url.startswith("http") or not is_article_link(url):
+            if not url.startswith("http") or not is_article_link(url) or is_junk_page("", url):
                 continue
             d = (it.get("date") or "")[:10]
             old = bool(d and d < cutoff) or bool(it.get("old"))
@@ -622,8 +623,11 @@ class Stream:
         res = extract_article(job["url"], 20)
         d = str(res.get("date") or "")[:10] or job.get("feed_date") or ""
         t = str(res.get("time") or "")[:5] or job.get("feed_time") or ""
+        from .online_clean import is_junk_page
         status = "success" if res.get("content") and res.get("is_article", True) and not res.get("is_index") else \
             ("failed" if not res.get("content") else "filtered")
+        if status == "success" and is_junk_page(res.get("title") or job.get("title") or "", job["url"]):
+            status = "filtered"                              # privacy / terms / a front page: not an article
         cutoff = self.cutoff()
         if status == "success" and not self.cfg.get("all_links", True) and \
                 re.match(r"\d{4}-\d{2}-\d{2}$", d) and d < cutoff:
@@ -987,7 +991,7 @@ class Stream:
                         "person": r["persons"], "published": day,
                         "published_full": f"{day} {t}" if re.match(r"\d{2}:\d{2}$", t) else ""}, WIB)
                     u = row[3]
-                    if u in seen or not (row[10] or "").strip():
+                    if u in seen or not (row[10] or "").strip() or oc.is_junk_page(row[2], u):
                         continue
                     seen.add(u)
                     ws.append([oc.safe_cell(v, templates.ONLINE_COLUMNS[k]) for k, v in enumerate(row)])

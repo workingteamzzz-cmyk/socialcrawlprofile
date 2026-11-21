@@ -259,3 +259,21 @@ def test_unknown_time_shows_as_midnight(rd):
     st.x("UPDATE articles SET pub_time='' WHERE domain='d.id'")
     row = next(r for r in rd.articles()["rows"] if r["domain"] == "d.id")
     assert row["pub_time"] == "00:00" and rd.article(row["key"])["time"] == "00:00"
+
+
+def test_client_key_for_every_article(rd, tmp_path, monkeypatch):
+    """'Every article (all data)': chosen on purpose, the key gets everything (still narrowed by q / dates / kinds);
+    without it, an empty query is refused as before."""
+    pytest.importorskip("fastapi")
+    from tests.test_users import SITE, _app, _client
+    app, _ = _app(tmp_path, monkeypatch)
+    admin = _client(app, "ana")
+    assert not admin.post("/api/clients/save", json={"name": "X"}, headers=SITE).json()["ok"]
+    r = admin.post("/api/clients/save", json={"name": "Semua", "all": True, "query": "ignored"}, headers=SITE).json()
+    assert r["ok"] and r["client"]["all"] and r["client"]["query"] == ""
+    c, h = _client(app), {"X-Client-Key": r["key"]}
+    assert c.get("/api/client/articles", headers=h).json()["total"] == 5
+    assert c.get("/api/client/articles", params={"q": "cabai"}, headers=h).json()["total"] == 1
+    assert c.get("/api/client/me", headers=h).json()["every_article"] is True
+    one = c.get("/api/client/articles", headers=h).json()["rows"][0]["key"]
+    assert c.get("/api/client/articles/one", params={"key": one}, headers=h).json()["ok"]

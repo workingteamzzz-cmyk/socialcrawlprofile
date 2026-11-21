@@ -1624,10 +1624,11 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
           <div class="card"><div class="card-hd"><h3 id="clFormTitle">Add a client</h3><div class="tools"><button class="btn sm" id="clNew" hidden>New client</button></div></div>
             <div class="card-bd">
               <div class="field"><label for="clName">Client name</label><input id="clName" maxlength="80" placeholder="e.g. PLN UID Jabar"></div>
-              <div class="field"><label for="clQuery">What they may see — query or keywords</label>
+              <label class="opt-row" style="border:0;padding:0 0 8px"><span class="t"><b>Every article (all data)</b><small>No filter: the client receives everything on the server (within the databases, dates and kinds chosen below). Use only for a client who buys the full feed.</small></span><span class="switch"><input type="checkbox" id="clAll"><span></span></span></label>
+              <div class="field" id="clQueryF"><label for="clQuery">What they may see — query or keywords</label>
                 <textarea id="clQuery" rows="3" placeholder='pln AND (padam OR gangguan) — or a list: pln, listrik padam, pemadaman'></textarea>
                 <small class="hint">AND · OR · NOT · "exact phrase" · ( ) · prefix*. A plain list (comma / one per line) means any of them.</small></div>
-              <div class="field"><label for="clTopic">…or a report topic</label><select id="clTopic"><option value="">— none —</option></select></div>
+              <div class="field" id="clTopicF"><label for="clTopic">…or a report topic</label><select id="clTopic"><option value="">— none —</option></select></div>
               <div class="field"><label>What the key gives</label>
                 <div style="display:flex;gap:18px;flex-wrap:wrap"><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="clNews" checked> News articles</label>
                 <label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="clSocial"> Social media posts &amp; comments <small class="hint">(from Keyword Search, Collect and the API scraper)</small></label></div></div>
@@ -3650,7 +3651,7 @@ async function loadClients(){
   const topicName = id => (CLK.topics.find(t => t.id === id) || {}).name || 'topic';
   $('clTbl').querySelector('tbody').innerHTML = CLK.list.map((c, i) => `<tr>
       <td><b>${esc(c.name)}</b><br><span class="pill sm ${c.enabled && !c.expired ? '' : 'off'}"><i></i>${c.expired ? 'Expired' : c.enabled ? 'Active' : 'Paused'}</span> <small class="hint">…${esc(c.key_tail || '')}</small></td>
-      <td><small>${c.query ? esc(c.query) : 'Topic: ' + esc(topicName(c.topic))}</small><br><small class="hint">${[c.news !== false ? 'News' : '', c.social ? 'Social media' : ''].filter(Boolean).join(' + ')} · ${{all: 'All databases', stream: 'Live Stream', reports: 'News Search'}[c.source] || ''}${c.since ? ' · from ' + esc(c.since) : ''}${c.expires ? ' · until ' + esc(c.expires) : ''} · ${c.rate}/min${(c.origins || []).length ? ' · ' + c.origins.map(o => esc(new URL(o).host)).join(', ') : ''}</small></td>
+      <td><small>${c.all ? '<b>Every article (all data)</b>' : c.query ? esc(c.query) : 'Topic: ' + esc(topicName(c.topic))}</small><br><small class="hint">${[c.news !== false ? 'News' : '', c.social ? 'Social media' : ''].filter(Boolean).join(' + ')} · ${{all: 'All databases', stream: 'Live Stream', reports: 'News Search'}[c.source] || ''}${c.since ? ' · from ' + esc(c.since) : ''}${c.expires ? ' · until ' + esc(c.expires) : ''} · ${c.rate}/min${(c.origins || []).length ? ' · ' + c.origins.map(o => esc(new URL(o).host)).join(', ') : ''}</small></td>
       <td class="num">${fmt(c.calls || 0)}</td><td><small>${clDate(c.last_used)}</small></td>
       <td style="white-space:nowrap"><button class="btn sm" data-cle="${i}">Edit</button> <button class="btn sm" data-clk="${i}">New key</button>
         <button class="btn sm" data-clp="${i}">${c.enabled ? 'Pause' : 'Resume'}</button> <button class="btn sm ghost" data-cld="${i}" style="color:var(--bad)">Delete</button></td></tr>`).join('')
@@ -3672,6 +3673,7 @@ function clFill(c){
   $('clSource').value = c ? c.source : 'all'; $('clSince').value = c ? c.since : ''; $('clExpires').value = c ? c.expires : '';
   $('clRate').value = c ? c.rate : 60; $('clOrigins').value = c ? (c.origins || []).join(', ') : ''; $('clMsg').className = 'alert';
   $('clNews').checked = c ? c.news !== false : true; $('clSocial').checked = c ? !!c.social : false;
+  $('clAll').checked = !!(c && c.all); clAllShow();
   if (c) $('clName').focus();
 }
 function clShowKey(name, key){
@@ -3684,12 +3686,14 @@ function clShowKey(name, key){
 $('clCopy').onclick = async () => { try { await navigator.clipboard.writeText($('clKey').textContent); toast('Key copied'); }
   catch (e){ const r = document.createRange(); r.selectNodeContents($('clKey')); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); toast('Selected — press Ctrl/Cmd+C'); } };
 $('clKeyDone').onclick = () => { $('clKeyCard').hidden = true; $('clKey').textContent = ''; $('clEx').textContent = ''; };
+function clAllShow(){ const a = $('clAll').checked; $('clQueryF').style.display = a ? 'none' : ''; $('clTopicF').style.display = a ? 'none' : ''; }
+$('clAll').addEventListener('change', clAllShow);
 $('clNew').onclick = () => clFill(null);
 $('clSave').onclick = async () => {
   const body = {id: CLK.edit ? CLK.edit.id : '', name: $('clName').value.trim(), query: $('clQuery').value.trim(), topic: $('clTopic').value,
     source: $('clSource').value, since: $('clSince').value, expires: $('clExpires').value, rate: +$('clRate').value || 60,
     origins: $('clOrigins').value.trim(), enabled: CLK.edit ? CLK.edit.enabled : true,
-    news: $('clNews').checked, social: $('clSocial').checked};
+    news: $('clNews').checked, social: $('clSocial').checked, all: $('clAll').checked};
   const r = await api('/api/clients/save', body), m = $('clMsg');
   if (!r.ok){ m.textContent = r.error || 'Not saved'; m.className = 'alert show err'; return; }
   m.className = 'alert';

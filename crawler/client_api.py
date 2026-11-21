@@ -79,11 +79,12 @@ def _clean(data: dict) -> dict:
     name = str(data.get("name") or "").strip()[:80]
     if not name:
         raise ClientError("Give the client a name (e.g. PLN UID Jabar).")
-    query = normalize_query(str(data.get("query") or ""))
+    every = bool(data.get("all"))                     # every article / post on the server, on purpose
+    query = "" if every else normalize_query(str(data.get("query") or ""))
     if len(query) > 1000:
         raise ClientError("The query is too long (max. 1,000 characters) — use a report topic for long keyword lists.")
-    topic = str(data.get("topic") or "").strip()[:100]
-    if not query and not topic:
+    topic = "" if every else str(data.get("topic") or "").strip()[:100]
+    if not every and not query and not topic:
         raise ClientError("Type the client's query or keywords, or choose a report topic — the key shows only that.")
     if query:
         try:
@@ -113,7 +114,7 @@ def _clean(data: dict) -> dict:
         raise ClientError("Choose what the client gets: news articles, social media posts, or both.")
     return {"name": name, "query": query, "topic": topic, "source": source, "since": since, "expires": expires,
             "rate": rate, "origins": origins[:10], "enabled": bool(data.get("enabled", True)), "news": news,
-            "social": social}
+            "social": social, "all": every}
 
 
 def save(data: dict) -> tuple[dict, str]:
@@ -215,7 +216,7 @@ def _scope(c: dict, start: str) -> tuple[str, str, str]:
     query, topic = c.get("query") or "", c.get("topic") or ""
     if topic and not any(t.get("id") == topic for t in archive.topics()):
         topic = ""                                    # deleted topic: by id only, never a same-named new one
-    if not query and not topic:
+    if not query and not topic and not c.get("all"):
         raise PermissionError("This key has no query or topic any more — ask for it to be set.")
     since = c.get("since") or ""
     if start:
@@ -272,7 +273,8 @@ def article(c: dict, key: str) -> dict:
 
 
 def me(c: dict) -> dict:
-    return {"client": c["name"], "query": c.get("query") or "", "topic": c.get("topic") or "",
+    return {"client": c["name"], "every_article": bool(c.get("all")), "query": c.get("query") or "",
+            "topic": c.get("topic") or "",
             "source": c.get("source") or "all", "data_from": c.get("since") or "", "expires": c.get("expires") or "",
             "news": bool(c.get("news", True)), "social_media": bool(c.get("social")),
             "rate_per_minute": c.get("rate") or 60}

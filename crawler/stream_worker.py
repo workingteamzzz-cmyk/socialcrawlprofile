@@ -113,6 +113,21 @@ def main() -> None:
     insights.start()
     path = os.path.join(stream._dir(), "settings.json")
     last_mt, prev = None, stream.settings()
+    beat = {"loop": time.time(), "ok": False}
+    main_ident = threading.get_ident()
+
+    def heartbeat():                                      # live state every 2 s, whatever the main loop is doing
+        while not parent_gone.is_set():
+            try:
+                st = s.live_state()
+                age = time.time() - beat["loop"]
+                st.update(loop_age=round(age), loop_ok=beat["ok"],
+                          stuck_at=stream.where_stuck(main_ident) if age > 30 else "")
+                stream.write_live(st)
+            except Exception as e:  # noqa: BLE001
+                s.last_error = f"heartbeat: {str(e)[:150]}"
+            parent_gone.wait(2)
+    threading.Thread(target=heartbeat, daemon=True, name="stream-heartbeat").start()
     from crawler import fetch_policy
     while not parent_gone.is_set():
         try:
@@ -161,9 +176,9 @@ def main() -> None:
                     from crawler import backfill
                     threading.Thread(target=stream._quiet, args=(backfill.export, s, arg, OUTPUT_DIR), daemon=True).start()
             _manage_readers(stream, s, readers)
-            stream.write_live(s.live_state())
         except Exception as e:  # noqa: BLE001  the loop keeps going; the error shows on the dashboard
             s.last_error = f"worker: {str(e)[:150]}"
+        beat["loop"], beat["ok"] = time.time(), True
         parent_gone.wait(2)
     s.stop()
     for p, _n in readers.values():

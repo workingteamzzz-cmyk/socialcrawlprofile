@@ -1643,13 +1643,17 @@ class Stream:
         rec = list(self.recent)
         now = time.time()
         per_min = sum(1 for t in rec if t > now - 300) / 5
-        with self.lock:
-            return {"t": now, "running": self.running, "since": int(self.started) if self.running else 0,
+        got = self.lock.acquire(timeout=1)                   # a long database step never silences the heartbeat
+        try:
+            return {"t": now, "lock_busy": not got, "running": self.running, "since": int(self.started) if self.running else 0,
                     "per_minute": round(per_min, 1), "per_day_pace": int(per_min * 60 * 24),
                     "readers_busy": len(self.busy_domains), "queue_mem": self.qn, "queue_backlog_mem": self.qn_old,
                     "trim": dict(self.__dict__.get("trim") or {}), "sm_unchanged": getattr(self, "sm_unchanged", 0),
                     "last_error": self.last_error,
                     "export": dict(self.export), "health": dict(self.health), "catchup": dict(self.catchup)}
+        finally:
+            if got:
+                self.lock.release()
 
     def days_with_articles(self) -> list[str]:
         """The last 30 calendar days that have articles (one indexed look per day, not a scan)."""
@@ -1744,6 +1748,7 @@ class Stream:
             for k in ("running", "since", "per_minute", "per_day_pace", "readers_busy", "last_error", "export"):
                 out[k] = live.get(k, out[k])
             out["processes"] = live.get("processes", 1)
+            out["loop_age"], out["stuck_at"] = live.get("loop_age", 0), live.get("stuck_at", "")
             out["trim"] = live.get("trim") or {}
             out["health"].update(live.get("health") or {})
             out["catchup"].update(live.get("catchup") or {})
@@ -1904,6 +1909,28 @@ def write_reader_live(k: int, state: dict) -> None:
     os.replace(p + ".tmp", p)
 
 
+def where_stuck(main_ident: int) -> str:
+    """Where the worker is waiting: the app's own frames of the main loop and of threads busy in the database —
+    shown on the Live Stream page while the stream starts slowly, so a stuck step is seen, not guessed."""
+    import sys
+    import traceback
+    names = {t.ident: t.name for t in threading.enumerate()}
+    out = []
+    for ident, frame in sys._current_frames().items():
+        own = [f for f in traceback.extract_stack(frame) if ("/crawler/" in f.filename or "/tests/" in f.filename)]
+        if not own:
+            continue
+        top = own[-1]
+        busy_db = any("execute" in (f.line or "") or "COUNT(" in (f.line or "") for f in own[-2:])
+        if ident != main_ident and not busy_db:
+            continue
+        where = " < ".join(f"{os.path.basename(f.filename)}:{f.lineno} {f.name}" for f in reversed(own[-3:]))
+        out.append(("main" if ident == main_ident else names.get(ident, "thread")) + ": " + where)
+        if top.line and busy_db:
+            out[-1] += " [" + top.line.strip()[:90] + "]"
+    return " | ".join(out[:6])
+
+
 def write_live(state: dict) -> None:
     os.makedirs(_dir(), exist_ok=True)
     tmp = _live_path() + ".tmp"
@@ -1926,6 +1953,7 @@ def take_commands(s: "Stream") -> list:
     return [(r["cmd"], r["arg"]) for r in rows]
 
 
+LOOP_HUNG_AFTER = 1800    # the worker's main loop has not come round for 30 minutes (after it did once) = hung
 HUNG_AFTER = 300          # the worker writes its live state every 2 s: 5 minutes without it = hung
 STALL_AFTER = 1200        # stream on, links waiting, nothing read for 20 minutes = stalled
 
@@ -1947,6 +1975,8 @@ def _stuck(started: float, idle_since: float) -> tuple[str, float]:
             d = json.load(f)
     except (OSError, ValueError):
         return "", idle_since
+    if d.get("loop_ok") and float(d.get("loop_age") or 0) > LOOP_HUNG_AFTER:
+        return "stopped answering (hung at " + str(d.get("stuck_at") or "?")[:120] + ")", 0.0
     fresh = int(d.get("queue_mem") or 0) - int(d.get("queue_backlog_mem") or 0)   # by day the archive may wait
     if not settings().get("enabled") or not d.get("running") or fresh <= 0 or \
             float(d.get("per_minute") or 0) > 0 or (d.get("trim") or {}).get("running"):

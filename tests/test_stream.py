@@ -725,3 +725,25 @@ def test_clearing_older_waiting_links_keeps_news_of_the_last_days(tmp_path, monk
     left = {r["key"] for r in st.rq("SELECT key FROM articles")}
     assert left == {"fresh", "late", "undated_new", "read_old"} and out["removed"] == 3
     assert not st.__dict__.get("_sm_seen")
+
+
+def test_where_stuck_names_the_waiting_step_and_live_state_never_blocks(tmp_path, monkeypatch):
+    """While a long step holds the stream's lock, the live state still comes (lock_busy) and the main thread's place
+    is named."""
+    import threading as _th
+    import time as _t
+    from crawler import paths, stream
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    st = stream.Stream(str(tmp_path / "s"))
+    held = _th.Event()
+
+    def hold():
+        with st.lock:
+            held.set()
+            _t.sleep(2.5)
+    _th.Thread(target=hold, daemon=True).start()
+    held.wait(2)
+    t0 = _t.time()
+    live = st.live_state()
+    assert live["lock_busy"] and _t.time() - t0 < 2
+    assert "test_stream.py" in stream.where_stuck(_th.get_ident())

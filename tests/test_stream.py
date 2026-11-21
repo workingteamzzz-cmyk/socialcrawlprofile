@@ -656,3 +656,33 @@ def test_late_news_is_not_limited_by_the_older_links_budget(tmp_path, monkeypatc
     late = [{"url": f"https://a.id/berita/telat-{i}", "domain": "a.id", "date": day(4)} for i in range(6)]
     arch = [{"url": f"https://a.id/berita/kabar-lama-{i}", "domain": "a.id", "date": day(30)} for i in range(6)]
     assert st.add_found(late + arch, "sitemap") == 8                       # 6 late + 2 archive
+
+
+def test_watchdog_restarts_a_hung_or_stalled_worker_but_not_one_starting_up(tmp_path, monkeypatch):
+    """Live state not written for 5 min (after it was once) = hung; stream on, fresh links waiting, nothing read
+    for 20 min = stalled; a worker still starting up, a stopped stream or only archive links waiting = fine."""
+    import json as _j
+    import os as _o
+    import time as _t
+    from crawler import paths, stream
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    monkeypatch.setattr(stream, "settings", lambda: {**stream.DEFAULTS, "enabled": True})
+    live = stream._live_path()
+    _o.makedirs(_o.path.dirname(live), exist_ok=True)
+    now = _t.time()
+    assert stream._stuck(now, 0.0) == ("", 0.0)                              # no live state yet: starting up
+    def put(**kw):
+        with open(live, "w") as f:
+            _j.dump({"running": True, "queue_mem": 10, "queue_backlog_mem": 0, "per_minute": 0, **kw}, f)
+    put()
+    _o.utime(live, (now - 400, now - 400))
+    assert stream._stuck(now - 1000, 0.0)[0].startswith("stopped")          # written once, then silent: hung
+    assert stream._stuck(now, 0.0)[0] == ""                                  # older than this start: starting up
+    put()
+    why, idle = stream._stuck(now - 1000, 0.0)
+    assert why == "" and idle > 0                                            # idle: the clock starts
+    assert stream._stuck(now - 1000, idle - stream.STALL_AFTER - 1)[0].endswith("(stalled)")
+    put(queue_backlog_mem=10)                                                # only archive links: by day, fine
+    assert stream._stuck(now - 1000, now - 5000) == ("", 0.0)
+    put(per_minute=40)
+    assert stream._stuck(now - 1000, now - 5000) == ("", 0.0)

@@ -153,6 +153,25 @@ if [ "${SKIP_START:-0}" != 1 ]; then
   fi
 fi
 
+# ---------- watchdog: an app that runs but no longer answers is restarted (crashes and reboots: Docker itself) ----------
+app_dir=$(pwd)
+cat > /usr/local/bin/collector-watchdog <<WATCHDOG
+#!/usr/bin/env bash
+# Every 2 minutes (cron): if the app container is running but unhealthy, restart it and note it in the log.
+cd "$app_dir" || exit 0
+id=\$(docker compose ps -q collector 2>/dev/null) || exit 0
+[ -n "\$id" ] || exit 0
+if [ "\$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "\$id" 2>/dev/null)" = unhealthy ]; then
+  echo "\$(date '+%F %T') app unhealthy - restarting" >> /var/log/collector-watchdog.log
+  docker compose restart collector >> /var/log/collector-watchdog.log 2>&1
+fi
+WATCHDOG
+chmod 755 /usr/local/bin/collector-watchdog
+echo "*/2 * * * * root /usr/local/bin/collector-watchdog" > /etc/cron.d/collector-watchdog
+chmod 644 /etc/cron.d/collector-watchdog
+systemctl enable docker >/dev/null 2>&1 || true          # Docker (and with it the app) starts after a reboot
+echo "     Watchdog on: a stuck app is restarted within minutes (log: /var/log/collector-watchdog.log)."
+
 bold "Done."
 echo "Open:   https://$DOMAIN"
 if [ -f "$KEYS_FILE" ]; then

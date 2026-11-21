@@ -334,11 +334,16 @@ page shows the live pace and the "per day at this pace" figure.
 - **Fresh-news lane**: the Live Stream keeps two queues — news from the stream's days (and undated links) and the
   backlog (older links, media-archive jobs). Readers always take fresh news first; one reader works the backlog, the
   others take it only when no fresh page can be read. "Waiting to be read" shows both.
+- **Never stays down**: Docker restarts the app after a crash or a server reboot; the installer adds a watchdog (cron,
+  every 2 minutes) that restarts the app when it runs but no longer answers; the web app restarts the stream's worker
+  when it dies, when it stops writing its live state for 5 minutes (hung) or when it reads nothing for 20 minutes while
+  fresh links wait (stalled) — with a Telegram message when Telegram is set up, and the cause on the Live Stream page.
 - **Priorities**: (1) fresh news (the stream's days) — always, at once; a link whose title already matches a keyword
   or report topic joins it, whatever its date; (2) late news (published in the last `late_days` days, default 7) —
   by day only when a reader is free; (3) older links — only in the night hours (`old_hours`, default `1-6` = 01:00–
-  06:00 WIB); (4) media-archive jobs — any time. Nothing published before `min_date` (default 2026-01-01; judged by
-  the date, or a year in the address) is taken, except by a media-archive job. At most `old_per_day` older links
+  06:00 WIB); (4) media-archive jobs — any time. Every year is taken: the backlog is read newest first, so this
+  year's articles come before older years'; `min_date` (empty by default; judged by the date, or a year in the
+  address) can set a floor — older links then only by a media-archive job. At most `old_per_day` older links
   (default 30,000; late news is not counted) are stored a day; a visit listing more than 1,500 "new" links at once (an archive, or a sitemap
   whose every entry carries the file's build date) goes to the backlog. The Live Stream shows how many minutes after
   publication news arrives (median, and the share within 30 minutes).

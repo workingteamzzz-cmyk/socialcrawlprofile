@@ -32,7 +32,7 @@ DEFAULTS = {"enabled": False, "threads": 8, "discovery_threads": 8, "rss_minutes
             "catchup_days": 2, "catchup_hour": 1, "weekly_report": True, "report_weekday": 0, "report_hour": 7,
             "health_on_start": True, "health_weekday": 6, "health_hour": 2,
             "top_n": 1000, "top2_n": 2000, "active2_hours": 2, "semi_hours": 4, "rare_hours": 24, "inactive_days": 3, "dead_days": 7,
-            "retention_days": 0, "max_age_hours": 48, "all_links": True, "old_per_check": 50, "old_per_day": 30000, "old_hours": "1-6", "late_days": 7, "min_date": "2026-01-01", "homepage": True, "domain_gap": 1.5, "rss": True, "sitemaps": True,
+            "retention_days": 0, "max_age_hours": 48, "all_links": True, "old_per_check": 50, "old_per_day": 30000, "old_hours": "1-6", "late_days": 7, "min_date": "", "homepage": True, "domain_gap": 1.5, "rss": True, "sitemaps": True,
             "keywords": [], "robots": True, "exclude_domains": [],
             "fetch_googlebot": True, "fetch_cloudscraper": True,     # refused pages: see fetch_policy.py
             "auto_add_media": True, "retry_failed": True,             # outlets found by News Search; retry later
@@ -516,9 +516,10 @@ class Stream:
         return self._cut[1]
 
     def too_old(self, d: str, url: str = "") -> bool:
-        """Published before min_date (default 2026-01-01): not taken, except by a media-archive job. Undated links
-        are judged by a year in their address (/2019/05/…)."""
-        lim = str(self.cfg.get("min_date", "2026-01-01") or "")
+        """Published before min_date (default: none — every year is taken; older links wait for the night hours,
+        newest first): not taken, except by a media-archive job. Undated links are judged by a year in their address
+        (/2019/05/…)."""
+        lim = str(self.cfg.get("min_date", "") or "")
         if not lim:
             return False
         if d and re.match(r"\d{4}-\d{2}-\d{2}$", d):
@@ -1883,6 +1884,45 @@ def take_commands(s: "Stream") -> list:
     return [(r["cmd"], r["arg"]) for r in rows]
 
 
+HUNG_AFTER = 300          # the worker writes its live state every 2 s: 5 minutes without it = hung
+STALL_AFTER = 1200        # stream on, links waiting, nothing read for 20 minutes = stalled
+
+
+def _stuck(started: float, idle_since: float) -> tuple[str, float]:
+    """(reason or '', idle_since): the worker hung (its live state stopped being written — only once it has
+    written one since it started, so a long start-up is never mistaken for a hang) or the stream stalled."""
+    now = time.time()
+    try:
+        mt = os.path.getmtime(_live_path())
+    except OSError:
+        return "", 0.0
+    if mt < started:                                      # not written since this start yet: still starting up
+        return "", 0.0
+    if now - mt > HUNG_AFTER:
+        return "stopped answering (hung)", 0.0
+    try:
+        with open(_live_path(), encoding="utf-8") as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return "", idle_since
+    fresh = int(d.get("queue_mem") or 0) - int(d.get("queue_backlog_mem") or 0)   # by day the archive may wait
+    if not settings().get("enabled") or not d.get("running") or fresh <= 0 or \
+            float(d.get("per_minute") or 0) > 0 or (d.get("trim") or {}).get("running"):
+        return "", 0.0
+    if not idle_since:
+        return "", now
+    return ("read nothing for 20 minutes (stalled)" if now - idle_since > STALL_AFTER else ""), idle_since
+
+
+def _alert(text: str) -> None:
+    """A Telegram message to the admins, when Telegram is set up (never fails)."""
+    try:
+        from . import telegram_bot
+        telegram_bot.send(text)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def start_worker(log=print) -> None:
     """The web server's side: start the worker process and restart it if it ever dies."""
     import subprocess
@@ -1891,17 +1931,35 @@ def start_worker(log=print) -> None:
     _WORKER_PARENT = True
 
     def keep():
-        fails = 0
+        fails, started, idle_since = 0, 0.0, 0.0
         while not _WORKER["stop"].is_set():
             p = _WORKER["proc"]
+            if p is not None and p.poll() is None:
+                why = _stuck(started, idle_since)
+                idle_since = why[1]
+                if why[0]:                                   # alive but hung / not reading: start it afresh
+                    log(f"stream worker {why[0]} — restarting it")
+                    _alert(f"⚠️ Live Stream {why[0]} — restarted automatically.")
+                    p.kill()
+                    try:
+                        p.wait(30)
+                    except Exception:  # noqa: BLE001
+                        pass
+                    p.returncode = "hung" if why[0].startswith("stopped") else "stalled"
             if p is None or p.poll() is not None:
                 if p is not None:
                     fails += 1
                     _WORKER["exits"] = [x for x in _WORKER["exits"] if x[0] > time.time() - 86400][-50:] + \
                         [(time.time(), p.returncode)]
                     log(f"stream worker stopped (exit {p.returncode}) — starting it again")
+                    if p.returncode not in ("hung", "stalled"):
+                        _alert(f"⚠️ Live Stream stopped (exit {p.returncode}"
+                               f"{', out of memory' if p.returncode == -9 else ''}) — restarted automatically.")
                 _WORKER["proc"] = subprocess.Popen(          # stdin stays open: the worker ends when we do
                     [sys.executable, "-m", "crawler.stream_worker"], stdin=subprocess.PIPE,
                     cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                started, idle_since = time.time(), 0.0
+            elif time.time() - started > 3600:
+                fails = 0                                    # an hour without trouble: quick restarts again
             _WORKER["stop"].wait(min(60, 5 * (1 + fails)))
     threading.Thread(target=keep, daemon=True, name="stream-supervisor").start()

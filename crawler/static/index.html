@@ -1325,7 +1325,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
           <div class="field"><label for="lsSfOldDay">Older links: at most … a day in total (the readers' daily pace)</label><input id="lsSfOldDay" type="number" min="0" max="2000000"></div>
           <div class="field"><label for="lsSfOldH">Older links (beyond the late-news days) are read only between … (WIB, e.g. 1-6; empty = any time)</label><input id="lsSfOldH" type="text" placeholder="1-6"></div>
           <div class="field"><label for="lsSfLate">Late news (read by day when a reader is free): published in the last … days</label><input id="lsSfLate" type="number" min="2" max="30"></div>
-          <div class="field"><label for="lsSfMin">Oldest publication date taken (older only by Media archive; empty = no limit)</label><input id="lsSfMin" type="text" placeholder="2026-01-01"></div>
+          <div class="field"><label for="lsSfMin">Oldest publication date taken (empty = every year: older links wait for the night, newest first)</label><input id="lsSfMin" type="text" placeholder="empty = no limit, e.g. 2026-01-01"></div>
           <div class="field"><label for="lsSfHDay">Site check (every registered site): day</label><select id="lsSfHDay"><option value="0">Monday</option><option value="1">Tuesday</option><option value="2">Wednesday</option><option value="3">Thursday</option><option value="4">Friday</option><option value="5">Saturday</option><option value="6">Sunday</option></select></div>
           <div class="field"><label for="lsSfHHour">Site check: hour (WIB)</label><input id="lsSfHHour" type="number" min="0" max="23"></div>
           <div class="field"><label for="lsSfCuD">Late articles: sweep the last … days (0 = off)</label><input id="lsSfCuD" type="number" min="0" max="7"></div>
@@ -3035,7 +3035,7 @@ function drawStream(d){
 }
 function lsFill(cfg){ loadStream.filled = true;
     $('lsSfThreads').value = cfg.threads; $('lsSfRss').value = cfg.rss_minutes; $('lsSfSm').value = cfg.sitemap_minutes;
-    $('lsSfOld').value = cfg.old_per_check; $('lsSfOldDay').value = cfg.old_per_day ?? 30000; $('lsSfOldH').value = cfg.old_hours ?? '1-6'; $('lsSfLate').value = cfg.late_days ?? 7; $('lsSfMin').value = cfg.min_date ?? '2026-01-01'; $('lsSfAll').checked = cfg.all_links !== false; $('lsSfHome').checked = cfg.homepage !== false;
+    $('lsSfOld').value = cfg.old_per_check; $('lsSfOldDay').value = cfg.old_per_day ?? 30000; $('lsSfOldH').value = cfg.old_hours ?? '1-6'; $('lsSfLate').value = cfg.late_days ?? 7; $('lsSfMin').value = cfg.min_date ?? ''; $('lsSfAll').checked = cfg.all_links !== false; $('lsSfHome').checked = cfg.homepage !== false;
     $('lsSfHDay').value = cfg.health_weekday; $('lsSfHHour').value = cfg.health_hour; $('lsSfHStart').checked = cfg.health_on_start !== false;
     $('lsSfCuD').value = cfg.catchup_days; $('lsSfCuH').value = cfg.catchup_hour;
     $('lsSfTop').value = cfg.top_n; $('lsSfTop2').value = cfg.top2_n; $('lsSfA2').value = cfg.active2_hours; $('lsSfSemi').value = cfg.semi_hours; $('lsSfRare').value = cfg.rare_hours; $('lsSfIn').value = cfg.inactive_days; $('lsSfDead').value = cfg.dead_days; $('lsSfAge').value = cfg.max_age_hours;
@@ -3085,7 +3085,7 @@ async function loadStream(){
   $('lsStRet').textContent = cfg.retention_days ? cfg.retention_days + ' days' : 'for good';
   $('lsSRead').textContent = fmt(d.today.read); $('lsSReadS').textContent = `${fmt(d.today.failed)} could not be read · ${fmt(d.today.skipped || 0)} skipped (robots.txt / excluded) · ${d.stored === null || d.stored === undefined ? '…' : fmt(d.stored)} stored`;
   $('lsSPace').textContent = fmt(d.per_minute) + ' /min'; $('lsSPaceS').textContent = (d.running ? `≈ ${fmt(d.per_day_pace)} per day at this pace` + (d.processes > 1 ? ` · ${d.processes} reader processes` : '') : 'stream is stopped')
-    + (d.restarts && d.restarts.n ? ` · restarted ${d.restarts.n}× in 24 h (last ${new Date(d.restarts.last * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}${d.restarts.code === -9 ? ', out of memory' : d.restarts.code !== null ? ', exit ' + d.restarts.code : ''})` : '');
+    + (d.restarts && d.restarts.n ? ` · restarted ${d.restarts.n}× in 24 h (last ${new Date(d.restarts.last * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}${d.restarts.code === -9 ? ', out of memory' : d.restarts.code === 'hung' ? ', hung' : d.restarts.code === 'stalled' ? ', stalled' : d.restarts.code !== null ? ', exit ' + d.restarts.code : ''})` : '');
   if (d.lag && d.lag.median !== null && d.lag.median !== undefined) $('lsSPaceS').textContent += ` · news arrives ${fmt(d.lag.median)} min after publication (median; ${d.lag.within30}% within 30 min)`;
   $('lsSMatch').textContent = fmt(d.today.matched); $('lsSMatchS').textContent = `${d.keywords} keyword(s) incl. report topics`;
   const cnt = v => v === null || v === undefined ? '…' : fmt(v);                 // counted in the background

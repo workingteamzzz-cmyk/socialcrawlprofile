@@ -1029,8 +1029,9 @@ class Stream:
                 with self.lock:
                     n = self._db.execute(
                         "DELETE FROM articles WHERE rowid IN (SELECT rowid FROM articles WHERE status='new' AND "
-                        "((feed_date > '' AND feed_date < ?) OR source LIKE '%:old' OR "
-                        "(feed_date = '' AND discovered < ?)) LIMIT ?)", (cut, time.time() - 2 * 86400, chunk)).rowcount
+                        "((feed_date > '' AND feed_date < ?) OR "
+                        "(feed_date = '' AND (source LIKE '%:old' OR discovered < ?))) LIMIT ?)",
+                        (cut, time.time() - 2 * 86400, chunk)).rowcount   # dated in the last days: kept
                     self._db.commit()
                 st["removed"] += n
                 if n < chunk:
@@ -1044,6 +1045,7 @@ class Stream:
                 self.qn -= self.qn_old
                 self.qn_old = 0
             self.__dict__.pop("_sc", None)                    # the counts again, at once
+            self.__dict__.pop("_sm_seen", None)               # sitemaps read again: removed links can come back
         except Exception as e:  # noqa: BLE001
             st["error"] = str(e)[:150]
         st.update(running=False, finished=time.time())

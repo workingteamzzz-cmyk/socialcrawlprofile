@@ -700,3 +700,28 @@ def test_an_unchanged_sitemap_file_is_not_processed_again(tmp_path, monkeypatch)
     assert not st._unchanged("https://a.id/s.xml", body + b" ")
     idx = b'<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></sitemapindex>'
     assert not st._unchanged("https://a.id/i.xml", idx) and not st._unchanged("https://a.id/i.xml", idx)
+
+
+def test_clearing_older_waiting_links_keeps_news_of_the_last_days(tmp_path, monkeypatch):
+    """'Clear older waiting links' removes only waiting links older than late_days (and undated old ones); news of
+    the last days (even marked :old), read articles and fresh news stay; sitemaps are read again afterwards."""
+    import time as _t
+    from datetime import datetime, timedelta
+    from crawler import paths, stream
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    st = stream.Stream(str(tmp_path / "s"))
+    st.cfg = {**stream.settings(), "late_days": 7}
+    day = lambda n: (datetime.now(stream.WIB) - timedelta(days=n)).strftime("%Y-%m-%d")
+    now = _t.time()
+    rows = [("fresh", day(0), "sitemap", "new", now), ("late", day(4), "sitemap:old", "new", now),
+            ("arch", day(30), "sitemap:old", "new", now), ("undated_old", "", "sitemap:old", "new", now),
+            ("undated_new", "", "rss", "new", now), ("undated_stale", "", "rss", "new", now - 5 * 86400),
+            ("read_old", day(30), "sitemap:old", "success", now)]
+    for k, fd, src, status, disc in rows:
+        st.x("INSERT INTO articles(key, url, domain, source, feed_date, status, discovered) VALUES (?,?,?,?,?,?,?)",
+             (k, f"https://a.id/{k}", "a.id", src, fd, status, disc))
+    st._sm_seen = {"https://a.id/s.xml": (1, 2)}
+    out = st.trim_backlog()
+    left = {r["key"] for r in st.rq("SELECT key FROM articles")}
+    assert left == {"fresh", "late", "undated_new", "read_old"} and out["removed"] == 3
+    assert not st.__dict__.get("_sm_seen")

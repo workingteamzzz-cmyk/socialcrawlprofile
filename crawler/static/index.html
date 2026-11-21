@@ -1305,7 +1305,8 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
         </div></div>
       <div class="card need-admin" style="margin-top:16px"><div class="card-hd"><h3>Stream settings</h3><span class="hd-note">admins</span></div><div class="card-bd">
         <div class="grid2" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px">
-          <div class="field"><label for="lsSfThreads">Article readers (threads)</label><input id="lsSfThreads" type="number" min="2" max="64"></div>
+          <div class="field"><label for="lsSfThreads">Article readers (threads, per process)</label><input id="lsSfThreads" type="number" min="2" max="64"></div>
+          <div class="field"><label for="lsSfProc">Reader processes (0 = automatic: CPU cores − 1, max 4)</label><input id="lsSfProc" type="number" min="0" max="8"></div>
           <div class="field"><label for="lsSfRss">RSS feeds of active outlets: every (minutes)</label><input id="lsSfRss" type="number" min="2" max="240"></div>
           <div class="field"><label for="lsSfTop">Active outlets = the top … of the last 7 days</label><input id="lsSfTop" type="number" min="50" max="20000"></div>
           <div class="field"><label for="lsSfSm">Active: check every (minutes)</label><input id="lsSfSm" type="number" min="10" max="720"></div>
@@ -3030,7 +3031,7 @@ function lsFill(cfg){ loadStream.filled = true;
     $('lsSfUseRss').checked = !!cfg.rss; $('lsSfUseSm').checked = !!cfg.sitemaps; $('lsSfRobots').checked = cfg.robots !== false;
     $('lsSfGb').checked = cfg.fetch_googlebot !== false; $('lsSfCs').checked = cfg.fetch_cloudscraper !== false;
     $('lsSfAuto').checked = cfg.auto_add_media !== false; $('lsSfRetry').checked = cfg.retry_failed !== false;
-    $('lsSfIntl').checked = !!cfg.pause_international;
+    $('lsSfIntl').checked = !!cfg.pause_international; $('lsSfProc').value = cfg.reader_processes || 0;
     $('lsSfEx').value = (cfg.exclude_domains || []).join('\n'); }
 $('lsIntlGo').onclick = async () => {
   const r = await api('/api/stream/intl/catchup', {start: $('lsIntlFrom').value, end: $('lsIntlTo').value});
@@ -3064,7 +3065,7 @@ async function loadStream(){
   $('navStream').textContent = d.running ? '●' : '';
   $('lsStRet').textContent = cfg.retention_days ? cfg.retention_days + ' days' : 'for good';
   $('lsSRead').textContent = fmt(d.today.read); $('lsSReadS').textContent = `${fmt(d.today.failed)} could not be read · ${fmt(d.today.skipped || 0)} skipped (robots.txt / excluded) · ${d.stored === null || d.stored === undefined ? '…' : fmt(d.stored)} stored`;
-  $('lsSPace').textContent = fmt(d.per_minute) + ' /min'; $('lsSPaceS').textContent = d.running ? `≈ ${fmt(d.per_day_pace)} per day at this pace` : 'stream is stopped';
+  $('lsSPace').textContent = fmt(d.per_minute) + ' /min'; $('lsSPaceS').textContent = d.running ? `≈ ${fmt(d.per_day_pace)} per day at this pace` + (d.processes > 1 ? ` · ${d.processes} reader processes` : '') : 'stream is stopped';
   $('lsSMatch').textContent = fmt(d.today.matched); $('lsSMatchS').textContent = `${d.keywords} keyword(s) incl. report topics`;
   const cnt = v => v === null || v === undefined ? '…' : fmt(v);                 // counted in the background
   $('lsSQueue').textContent = cnt(d.queue);
@@ -3122,7 +3123,7 @@ $('lsSfSave').onclick = async () => {
     top_n: +$('lsSfTop').value, top2_n: +$('lsSfTop2').value, active2_hours: +$('lsSfA2').value, semi_hours: +$('lsSfSemi').value, rare_hours: +$('lsSfRare').value, inactive_days: +$('lsSfIn').value, dead_days: +$('lsSfDead').value,
     rss: $('lsSfUseRss').checked, sitemaps: $('lsSfUseSm').checked, robots: $('lsSfRobots').checked, exclude_domains: $('lsSfEx').value,
     fetch_googlebot: $('lsSfGb').checked, fetch_cloudscraper: $('lsSfCs').checked,
-    auto_add_media: $('lsSfAuto').checked, retry_failed: $('lsSfRetry').checked, pause_international: $('lsSfIntl').checked});
+    auto_add_media: $('lsSfAuto').checked, retry_failed: $('lsSfRetry').checked, pause_international: $('lsSfIntl').checked, reader_processes: +$('lsSfProc').value || 0});
   $('lsSfMsg').textContent = r && r.ok ? 'Saved.' : (r && r.error) || 'Not saved'; loadStream.filled = false; loadStream(); };
 $('lsExport').onclick = async () => { const r = await api('/api/stream/export', {day: $('lsDay').value});
   if (r && r.ok === false) return toast(r.error || 'Not started'); toast('Making the Excel…'); setTimeout(loadStream, 800);

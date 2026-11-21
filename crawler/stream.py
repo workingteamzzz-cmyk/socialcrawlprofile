@@ -36,8 +36,9 @@ DEFAULTS = {"enabled": False, "threads": 8, "discovery_threads": 8, "rss_minutes
             "keywords": [], "robots": True, "exclude_domains": [],
             "fetch_googlebot": True, "fetch_cloudscraper": True,     # refused pages: see fetch_policy.py
             "auto_add_media": True, "retry_failed": True,             # outlets found by News Search; retry later
-            "pause_international": False}                             # non-Indonesian outlets: see intl.py
-LIMITS = {"threads": (2, 64), "discovery_threads": (2, 48), "rss_minutes": (2, 240), "sitemap_minutes": (10, 720),
+            "pause_international": False,                             # non-Indonesian outlets: see intl.py
+            "reader_processes": 0}                                    # 0 = automatic (CPU cores - 1, max 4)
+LIMITS = {"threads": (2, 64), "reader_processes": (0, 8), "discovery_threads": (2, 48), "rss_minutes": (2, 240), "sitemap_minutes": (10, 720),
           "old_per_check": (0, 20000),
           "catchup_days": (0, 7), "catchup_hour": (0, 23), "health_weekday": (0, 6), "health_hour": (0, 23), "report_weekday": (0, 6), "report_hour": (0, 23),
           "top_n": (50, 20000), "top2_n": (0, 20000), "active2_hours": (1, 24), "semi_hours": (1, 48), "rare_hours": (2, 168), "inactive_days": (1, 30),
@@ -236,6 +237,11 @@ class Stream:
         self.qn_old = 0                        # of qn, how many wait in the backlog lane
         self._cut = (0.0, "")                  # cutoff date, cached for a minute
         self.disk_brake = False                # the disk is nearly full: no older links taken in
+        self.shard = (0, 1)                    # (this process, processes): each outlet is read by one process only
+        try:
+            self._db.create_function("shard", 2, _shard_of, deterministic=True)
+        except sqlite3.Error:
+            pass
         self.kw_cache = (0.0, [])
         self.last_error = ""
         self.cfg = settings()
@@ -484,9 +490,15 @@ class Stream:
             return float(job.get("discovered") or time.time()) > time.time() - 2 * 86400
         return d >= self._fresh_cutoff()
 
+    def mine(self, dom: str) -> bool:
+        k, n = self.shard
+        return n <= 1 or _shard_of(dom, n) == k
+
     def _enqueue(self, job: dict, front: bool = False) -> None:
         if job["key"] in self.queued:
             return
+        if not self.mine(job.get("domain") or norm_key(job["url"]).split("/")[0]):
+            return                                     # another reader process's outlet: it waits in the database
         self.queued.add(job["key"])
         self.qn += 1
         dom = job["domain"] or norm_key(job["url"]).split("/")[0]
@@ -625,22 +637,24 @@ class Stream:
         """Articles waiting in the database -> the lanes: fresh news first (by date, then the undated, newest
         found first); the backlog lane is topped up separately, so millions of older links never crowd the news."""
         cols = "key, url, domain, title, feed_date, feed_time, source, discovered"
+        k, n = self.shard
+        sh = f" AND shard(domain, {int(n)}) = {int(k)}" if n > 1 else ""   # this process's outlets only
         with self.lock:
             fresh_n = self.qn - self.qn_old
             if fresh_n < 2000:
                 cut = self._fresh_cutoff()
-                rows = self._db.execute(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date >= ? "
+                rows = self._db.execute(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date >= ?{sh} "
                                         "ORDER BY feed_date DESC LIMIT 3000", (cut,)).fetchall()
                 rows += self._db.execute(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date = '' AND "
-                                         "discovered > ? AND source NOT LIKE '%:old' ORDER BY discovered DESC "
+                                         f"discovered > ? AND source NOT LIKE '%:old'{sh} ORDER BY discovered DESC "
                                          "LIMIT 1500", (time.time() - 2 * 86400,)).fetchall()
                 for r in rows:
                     self._enqueue(dict(r))
             if self.qn_old < 1500:
                 cut = self._fresh_cutoff()
                 rows = self._db.execute(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date > '' AND "
-                                        "feed_date < ? ORDER BY feed_date DESC LIMIT 1500", (cut,)).fetchall()
-                rows += self._db.execute(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date = '' "
+                                        f"feed_date < ?{sh} ORDER BY feed_date DESC LIMIT 1500", (cut,)).fetchall()
+                rows += self._db.execute(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date = ''{sh} "
                                          "ORDER BY discovered DESC LIMIT 1500").fetchall()   # undated backlog
                 for r in rows:
                     if self.qn >= QUEUE_MAX:
@@ -1331,6 +1345,7 @@ class Stream:
                 if self.running:
                     return
                 self.cfg = settings()
+                self.shard = (0, reader_processes(self.cfg) if _IN_WORKER else 1)
                 self.stop_event = threading.Event()          # a fresh event: old threads keep seeing theirs set
                 self.running, self.started = True, time.time()
             try:
@@ -1340,7 +1355,7 @@ class Stream:
                 pass
             info = self.sync_sources(log)
             log(f"🛰 News stream started: {info['rss']} RSS feeds + {info['sitemaps']} outlet sitemaps, "
-                f"{self.cfg['threads']} readers")
+                f"{self.cfg['threads']} readers × {self.shard[1]} process(es)")
             self.threads = [threading.Thread(target=self.discovery_loop, daemon=True, name="stream-discovery"),
                             threading.Thread(target=self.catchup_loop, daemon=True, name="stream-catchup"),
                             threading.Thread(target=self.health_loop, daemon=True, name="stream-health"),
@@ -1352,6 +1367,44 @@ class Stream:
                              for i in range(self.cfg["threads"])]
             for t in self.threads:
                 t.start()
+
+    def start_readers(self, k: int, n: int, log=print) -> None:
+        """A reader process (k of n): only reads — its share of the outlets — and keeps its counts; finding links,
+        tiers, sweeps and checks stay with the main stream process."""
+        with self._ctl:
+            with self.lock:
+                if self.running:
+                    return
+                self.cfg = settings()
+                self.shard = (k, n)
+                self.stop_event = threading.Event()
+                self.running, self.started = True, time.time()
+            try:
+                from . import fetch_policy, media_db
+                media_db.install()
+                fetch_policy.apply_settings(self.cfg)
+            except Exception:  # noqa: BLE001
+                pass
+            self.threads = [threading.Thread(target=self._reader_house, daemon=True, name=f"stream-r{k}-house")]
+            self.threads += [threading.Thread(target=self.reader_loop, args=(i == 0 and self.cfg["threads"] >= 4,),
+                                              daemon=True, name=f"stream-r{k}-{i}") for i in range(self.cfg["threads"])]
+            for t in self.threads:
+                t.start()
+            log(f"stream reader process {k + 1} of {n}: {self.cfg['threads']} readers")
+
+    def _reader_house(self) -> None:
+        ev = self.stop_event
+        while not ev.is_set():
+            for name, step in (("counts", self.flush_counts), ("queue", self.refill)):
+                try:
+                    step()
+                except Exception as e:  # noqa: BLE001
+                    self.last_error = f"{name}: {str(e)[:120]}"
+            ev.wait(3.0)
+        try:
+            self.flush_counts()
+        except Exception:  # noqa: BLE001
+            pass
 
     def stop(self) -> None:
         with self._ctl:
@@ -1481,6 +1534,7 @@ class Stream:
         if live:                                             # the engine runs in its own process: its live state
             for k in ("running", "since", "per_minute", "per_day_pace", "readers_busy", "last_error", "export"):
                 out[k] = live.get(k, out[k])
+            out["processes"] = live.get("processes", 1)
             out["health"].update(live.get("health") or {})
             out["catchup"].update(live.get("catchup") or {})
             out["worker"] = True
@@ -1492,6 +1546,23 @@ class Stream:
 
 _STREAM: Stream | None = None
 _GET_LOCK = threading.Lock()
+
+
+def _shard_of(domain, n) -> int:
+    """Which reader process reads an outlet: the same one always (one page at a time per outlet holds across
+    processes)."""
+    import zlib as _z
+    return _z.crc32((domain or "").encode()) % max(1, int(n or 1))
+
+
+def reader_processes(cfg: dict | None = None) -> int:
+    """Processes that read articles: the setting, or automatic — one per CPU core but one (the web server and the
+    discovery need a core), at most 4."""
+    cfg = cfg or settings()
+    n = int(cfg.get("reader_processes") or 0)
+    if n <= 0:
+        n = max(1, min(4, (os.cpu_count() or 1) - 1))
+    return max(1, min(8, n))
 
 
 def get() -> Stream:
@@ -1582,6 +1653,7 @@ def _quiet(fn, *a):
 # crawler.stream_worker` at a lower priority, so a busy stream (thousands of pages, parsing, indexing) never makes the
 # dashboard slow. The web process writes settings and commands; the worker writes its live state (live.json).
 _WORKER_PARENT = False
+_IN_WORKER = False                         # set by stream_worker: this process is the stream's main process
 _WORKER = {"proc": None, "stop": threading.Event()}
 
 
@@ -1593,9 +1665,33 @@ def read_live() -> dict | None:
     try:
         with open(_live_path(), encoding="utf-8") as f:
             d = json.load(f)
-        return d if time.time() - float(d.get("t", 0)) < 20 else None
     except (OSError, ValueError):
         return None
+    if time.time() - float(d.get("t", 0)) >= 20:
+        return None
+    import glob
+    procs = 1
+    for p in glob.glob(os.path.join(_dir(), "live_r*.json")):        # the reader processes add their pace
+        try:
+            with open(p, encoding="utf-8") as f:
+                r = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if time.time() - float(r.get("t", 0)) < 20 and r.get("running"):
+            procs += 1
+            for k in ("per_minute", "per_day_pace", "readers_busy"):
+                d[k] = round(float(d.get(k) or 0) + float(r.get(k) or 0), 1) if k == "per_minute" else \
+                    int(d.get(k) or 0) + int(r.get(k) or 0)
+    d["processes"] = procs
+    return d
+
+
+def write_reader_live(k: int, state: dict) -> None:
+    os.makedirs(_dir(), exist_ok=True)
+    p = os.path.join(_dir(), f"live_r{k}.json")
+    with open(p + ".tmp", "w", encoding="utf-8") as f:
+        json.dump(state, f)
+    os.replace(p + ".tmp", p)
 
 
 def write_live(state: dict) -> None:

@@ -348,6 +348,14 @@ page shows the live pace and the "per day at this pace" figure.
 - Newsroom policy pages ("Kode Etik Jurnalistik", "Standar Perlindungan Profesi Wartawan", "Susunan Redaksi …") are
   not news: skipped, and ones already stored leave News Stream and the exports.
 
+## Reader processes (use every CPU core)
+
+Python runs one process on about one core, however many reader threads it has. The stream therefore splits the
+reading over several processes: the main stream process finds links and reads its share; extra reader processes read
+the rest. Each outlet belongs to exactly one process (by its domain), so "one page at a time per outlet" still holds.
+Stream settings → **Reader processes**: 0 = automatic (CPU cores − 1, at most 4: a 4-core server runs 3), or a
+number up to 8. *Article readers* is per process. The pace on the Live Stream page is the sum of all processes.
+
 ## International (non-Indonesian) outlets — pause and catch up
 
 The stream decides once a day which outlets are international: the address first (.id = Indonesian; another

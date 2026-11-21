@@ -511,3 +511,61 @@ def test_queue_in_memory_is_bounded_and_old_undated_links_wait_behind(tmp_path, 
     assert st.is_fresh({"source": "sitemap", "feed_date": "", "discovered": _t.time()})
     assert not st.is_fresh({"source": "sitemap", "feed_date": "", "discovered": _t.time() - 3 * 86400})
     st.running = False
+
+
+def test_reader_processes_share_the_outlets(tmp_path, monkeypatch):
+    """Several reader processes: each outlet belongs to exactly one (one page at a time per outlet holds), together
+    they cover all; the pace shown is the sum; the worker starts / stops them with the stream."""
+    import json as _j
+    import time as _t
+    from crawler import paths, stream, stream_worker
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    folder = str(tmp_path / "data" / "stream")
+    a, b = stream.Stream(folder), stream.Stream(folder)
+    today = stream.datetime.now(stream.WIB).strftime("%Y-%m-%d")
+    with a.lock:
+        a._db.executemany("INSERT INTO articles(key, url, domain, feed_date, discovered, status) VALUES "
+                          "(?,?,?,?,?, 'new')", [(f"d{i}.id/x", f"https://d{i}.id/x", f"d{i}.id", today, _t.time())
+                                                 for i in range(40)])
+        a._db.commit()
+    for st, k in ((a, 0), (b, 1)):
+        st.cfg, st.shard = stream.settings(), (k, 2)
+        st.refill()
+    da = {j["domain"] for q in a.by_domain.values() for j in q}
+    db_ = {j["domain"] for q in b.by_domain.values() for j in q}
+    assert da and db_ and not (da & db_) and len(da | db_) == 40
+    a._enqueue({"key": "zz/1", "url": "https://zz.id/1", "domain": next(iter(db_)), "feed_date": today})
+    assert "zz/1" not in a.queued                                            # another process's outlet
+    stream.write_live({"t": _t.time(), "running": True, "per_minute": 50.0, "per_day_pace": 72000, "readers_busy": 8})
+    stream.write_reader_live(1, {"t": _t.time(), "running": True, "per_minute": 40.0, "per_day_pace": 57600,
+                                 "readers_busy": 7})
+    live = stream.read_live()
+    assert live["per_minute"] == 90.0 and live["processes"] == 2 and live["readers_busy"] == 15
+    started = []
+
+    class P:
+        def __init__(self, args, **k):
+            started.append(args[-2:])
+            self.stdin, self.returncode = type("I", (), {"close": lambda s: None})(), None
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout=0):
+            self.returncode = 0
+    import subprocess
+    monkeypatch.setattr(subprocess, "Popen", P)
+    monkeypatch.setattr(stream, "reader_processes", lambda cfg=None: 3)
+    procs, s = {}, type("S", (), {"running": True})()
+    stream_worker._manage_readers(stream, s, procs)
+    assert sorted(started) == [["1", "3"], ["2", "3"]] and set(procs) == {1, 2}
+    s.running = False
+    stream_worker._manage_readers(stream, s, procs)
+    assert procs == {}
+    assert _j.loads(open(f"{folder}/live_r1.json").read())["per_minute"] == 40.0
+    monkeypatch.undo()
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    monkeypatch.setattr(stream.os, "cpu_count", lambda: 4)
+    assert stream.reader_processes({"reader_processes": 0}) == 3 and stream.reader_processes({"reader_processes": 2}) == 2
+    monkeypatch.setattr(stream.os, "cpu_count", lambda: 2)
+    assert stream.reader_processes({"reader_processes": 0}) == 1

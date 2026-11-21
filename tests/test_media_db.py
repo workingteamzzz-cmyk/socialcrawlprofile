@@ -121,12 +121,13 @@ def test_outlets_found_by_searches_join_the_list(tmp_path, monkeypatch):
     platforms, aggregators, excluded outlets and sub-domains of registered ones are not."""
     from crawler import media_db, paths, stream
     monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
-    media_db.add("detik.com\nkompas.com")
+    media_db.add("detik.com\nkompas.com\nkabarku.id")
     stream.save_settings({"exclude_domains": "dilarang.id"})
-    got = media_db.discover(["https://news.detik.com/berita/1", "https://www.radarbaru.id/2026/11/x",
+    got = media_db.discover(["https://jateng.kabarku.id/berita/1", "https://www.radarbaru.id/2026/11/x",
                              "https://radarbaru.id/y", "https://www.msn.com/id-id/news/z", "https://x.com/a/status/1",
                              "https://dilarang.id/a", "https://kabarbaru.co.id/b"])
-    assert got == ["kabarbaru.co.id", "radarbaru.id"] and "radarbaru.id" in media_db.registry()
+    assert got == ["jateng.kabarku.id", "kabarbaru.co.id", "radarbaru.id"] and "radarbaru.id" in media_db.registry()
+    assert media_db.discover(["https://m.detik.com/a", "https://amp.kompas.com/b"]) == []   # mobile / AMP hosts
     assert media_db.discover(["https://radarbaru.id/z"]) == []                     # once
     stream.save_settings({"auto_add_media": False})
     assert media_db.discover(["https://lain.id/a"]) == []
@@ -176,3 +177,56 @@ def test_compare_with_a_competitors_list(tmp_path, monkeypatch):
     assert set(out["fetchable"]) == {"https://gagal.id/2", "https://ada.id/3", "https://belum.id/9",
                                      "https://lain.co.id/7"}
     assert [r for r in out["rows"] if r["status"] == "failed"][0]["error"] == "HTTP 403"
+
+
+def test_busy_outlets_are_read_deeper_and_why_explains_a_miss(tmp_path, monkeypatch):
+    """Active outlets: up to 20 sitemap files a visit (6 for others). 'Why?' finds where a missed link is listed."""
+    import time as _t
+
+    from crawler import compare, media_db, paths, stream
+    from crawler.medmas.discovery import sitemaps as sm
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    month = _t.strftime("%Y-%m")
+    today = _t.strftime("%Y-%m-%d")
+    files = {f"https://besar.id/sitemap-{month}-{i}.xml": i for i in range(30)}
+    ns = 'xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"'
+    index = (f"<sitemapindex {ns}>" + "".join(f"<sitemap><loc>{u}</loc></sitemap>" for u in files) + "</sitemapindex>")
+    fetched = []
+
+    def fetch(u, timeout=10):
+        fetched.append(u)
+        if u.endswith("/sitemap.xml"):
+            return index.encode()
+        i = files.get(u, 0)
+        return (f"<urlset {ns}><url><loc>https://besar.id/berita/{i}/artikel-{i}</loc><lastmod>{today}</lastmod>"
+                "</url></urlset>").encode()
+    monkeypatch.setattr(sm, "_fetch", fetch)
+    monkeypatch.setattr(sm, "_sitemaps_from_robots", lambda d: (["https://besar.id/sitemap.xml"], True))
+    media_db.add("besar.id")
+    st = stream.get()
+    st.cfg = {**stream.settings(), "homepage": False}
+    st.x("INSERT OR IGNORE INTO sources(id, kind, domain) VALUES ('sm:besar.id', 'sitemap', 'besar.id')")
+    st.x("UPDATE sources SET url=?, tier='active', checked=1 WHERE domain='besar.id' AND kind='sitemap'",
+         ('["https://besar.id/sitemap.xml"]',))
+    st.tiers["besar.id"] = "active"
+    src = st.rq("SELECT * FROM sources WHERE domain='besar.id' AND kind='sitemap'")[0]
+    st.check_sitemap(src)
+    assert len(fetched) == stream.SITEMAP_READS_BUSY                     # not 6
+    st.tiers["besar.id"] = "semi"
+    fetched.clear()
+    st.check_sitemap(src)
+    assert len(fetched) == 4                                              # the index + 3 (quiet outlets)
+
+    class R:
+        status_code, text = 403, ""
+    monkeypatch.setattr(compare, "requests", None, raising=False)
+    import requests
+    monkeypatch.setattr(requests, "get", lambda *a, **k: R())
+    out = compare.why("https://besar.id/berita/25/artikel-25")
+    assert out["found_in"].endswith("-25.xml") and "deeper" in out["verdict"] and "403" in out["page"]
+    assert "refuses" in out["verdict"]
+    miss = compare.why("https://besar.id/berita/tidak-ada")
+    assert not miss["found_in"] and "Not in the outlet's sitemaps" in miss["verdict"]
+    cmp = compare.compare("https://jateng.besar.id/berita/9")
+    assert cmp["rows"][0]["status"] == "not_found" and cmp["rows"][0]["subsite"] == "jateng.besar.id"
+    assert ("jateng.besar.id", 1) in cmp["missing_outlets"]

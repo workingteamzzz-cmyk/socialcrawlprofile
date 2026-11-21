@@ -32,7 +32,7 @@ DEFAULTS = {"enabled": False, "threads": 8, "discovery_threads": 8, "rss_minutes
             "catchup_days": 2, "catchup_hour": 1, "weekly_report": True, "report_weekday": 0, "report_hour": 7,
             "health_on_start": True, "health_weekday": 6, "health_hour": 2,
             "top_n": 1000, "top2_n": 2000, "active2_hours": 2, "semi_hours": 4, "rare_hours": 24, "inactive_days": 3, "dead_days": 7,
-            "retention_days": 0, "max_age_hours": 48, "all_links": True, "old_per_check": 1000, "homepage": True, "domain_gap": 1.5, "rss": True, "sitemaps": True,
+            "retention_days": 0, "max_age_hours": 48, "all_links": True, "old_per_check": 50, "homepage": True, "domain_gap": 1.5, "rss": True, "sitemaps": True,
             "keywords": [], "robots": True, "exclude_domains": [],
             "fetch_googlebot": True, "fetch_cloudscraper": True,     # refused pages: see fetch_policy.py
             "auto_add_media": True, "retry_failed": True,             # outlets found by News Search; retry later
@@ -112,6 +112,14 @@ def settings() -> dict:
             got = json.load(f)
     except (OSError, ValueError):
         got = {}
+    mark50 = os.path.join(_dir(), "oldlinks_v50.done")
+    if got and got.get("old_per_check") == 1000 and not os.path.exists(mark50):
+        got["old_per_check"] = 50                               # the old default flooded the queue (millions a day)
+        try:
+            _write_settings({**DEFAULTS, **{k: v for k, v in got.items() if k in DEFAULTS}})
+            open(mark50, "w").close()
+        except OSError:
+            pass
     mark = os.path.join(_dir(), "retention_v33.done")
     if got and got.get("retention_days") == 7 and not os.path.exists(mark):
         got["retention_days"] = 0                               # the old 7-day default: articles are now kept for good
@@ -160,6 +168,8 @@ def _write_settings(cur: dict) -> None:
     os.replace(tmp, os.path.join(_dir(), "settings.json"))
 
 
+QUEUE_MAX = 20000                          # articles held in memory at most; the rest wait in the database
+SITEMAP_READS_BUSY = 20                    # sitemap files read per visit of an active outlet (others: 6)
 JUNK_VERSION = "v47"                       # bump when online_clean's page filter learns new titles
 
 
@@ -425,8 +435,8 @@ class Stream:
             old = bool(d and d < cutoff) or bool(it.get("old"))
             if old and not take_all:
                 continue
-            rows.append(((norm_key(url), url, it.get("domain") or "", (it.get("title") or "")[:500], source, d,
-                          (it.get("time") or "")[:5], now), old))
+            rows.append(((norm_key(url), url, it.get("domain") or "", (it.get("title") or "")[:500],
+                          f"{source}:old" if old else source, d, (it.get("time") or "")[:5], now), old))
         if not rows:
             return 0
         fresh = []
@@ -452,11 +462,11 @@ class Stream:
             self._db.commit()
             self.counts["found"] += len(fresh)
             if self.running:                     # straight to the readers, at the front: newest first, no waiting
-                for (key, url, dom, title, _src, fd, ft, _t), old in fresh:
-                    if self.qn >= 4000 and (old or not front):
+                for (key, url, dom, title, src_, fd, ft, _t), old in fresh:
+                    if self.qn >= QUEUE_MAX or (self.qn >= 4000 and (old or not front)):
                         continue                       # the queue is full: it waits in the database (refill)
                     self._enqueue({"key": key, "url": url, "domain": dom, "title": title, "feed_date": fd,
-                                   "feed_time": ft}, front=front and not old)       # older ones wait behind the news
+                                   "feed_time": ft, "source": src_}, front=front and not old)  # older ones: behind
         return len(fresh)
 
     def _fresh_cutoff(self) -> str:
@@ -466,10 +476,13 @@ class Stream:
 
     def is_fresh(self, job: dict) -> bool:
         """The fresh-news lane: published within the stream's days (or no date known) and not a media-archive job."""
-        if (job.get("source") or "").startswith("backfill:"):
-            return False
+        src = job.get("source") or ""
+        if src.startswith("backfill:") or src.endswith(":old"):
+            return False                               # a media-archive job, or a link known to be older
         d = (job.get("feed_date") or "")[:10]
-        return not d or d >= self._fresh_cutoff()
+        if not d:                                      # undated: fresh only when just found (2 days)
+            return float(job.get("discovered") or time.time()) > time.time() - 2 * 86400
+        return d >= self._fresh_cutoff()
 
     def _enqueue(self, job: dict, front: bool = False) -> None:
         if job["key"] in self.queued:
@@ -534,7 +547,9 @@ class Stream:
         stamps = [f for d in back[1:catchup + 1] for f in (d.strftime("%Y-%m-%d"), d.strftime("%Y%m%d"),
                                                             d.strftime("%Y/%m/%d"), d.strftime("%Y/%m/") + f"{d.day}")]
         items, ok_any, queue, seen, reads = [], False, list(roots), set(), 0
-        while queue and reads < (14 if catchup else 6):
+        busy = self.tier_of(src) in ("active", "active2")    # big, busy outlets: read deeper (news sitemaps first)
+        limit = 14 if catchup else (SITEMAP_READS_BUSY if busy else 6)
+        while queue and reads < limit:
             u = queue.pop(0)
             if u in seen:
                 continue
@@ -553,7 +568,8 @@ class Stream:
                 if catchup:                                  # the day's own archive sitemaps first
                     dated = [x for x, p in ranked if p is not None and any(t in x for t in stamps)]
                     subs = dated + [x for x in subs if x not in dated]
-                queue.extend((subs or [x for x, p in ranked if p is not None][-2:])[:8 if catchup else 3])
+                subs.sort(key=lambda x: 0 if ("news" in x.lower() or "berita" in x.lower()) else 1)
+                queue.extend((subs or [x for x, p in ranked if p is not None][-2:])[:8 if catchup else (SITEMAP_READS_BUSY if busy else 3)])
                 continue
             news = "news" in u.lower() or "berita" in u.lower()
             for e in data:
@@ -608,21 +624,27 @@ class Stream:
     def refill(self) -> None:
         """Articles waiting in the database -> the lanes: fresh news first (by date, then the undated, newest
         found first); the backlog lane is topped up separately, so millions of older links never crowd the news."""
-        cols = "key, url, domain, title, feed_date, feed_time, source"
+        cols = "key, url, domain, title, feed_date, feed_time, source, discovered"
         with self.lock:
             fresh_n = self.qn - self.qn_old
             if fresh_n < 2000:
                 cut = self._fresh_cutoff()
                 rows = self._db.execute(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date >= ? "
                                         "ORDER BY feed_date DESC LIMIT 3000", (cut,)).fetchall()
-                rows += self._db.execute(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date = '' "
-                                         "ORDER BY discovered DESC LIMIT 1500").fetchall()
+                rows += self._db.execute(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date = '' AND "
+                                         "discovered > ? AND source NOT LIKE '%:old' ORDER BY discovered DESC "
+                                         "LIMIT 1500", (time.time() - 2 * 86400,)).fetchall()
                 for r in rows:
                     self._enqueue(dict(r))
             if self.qn_old < 1500:
                 cut = self._fresh_cutoff()
-                for r in self._db.execute(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date > '' AND "
-                                          "feed_date < ? ORDER BY feed_date DESC LIMIT 2000", (cut,)).fetchall():
+                rows = self._db.execute(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date > '' AND "
+                                        "feed_date < ? ORDER BY feed_date DESC LIMIT 1500", (cut,)).fetchall()
+                rows += self._db.execute(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date = '' "
+                                         "ORDER BY discovered DESC LIMIT 1500").fetchall()   # undated backlog
+                for r in rows:
+                    if self.qn >= QUEUE_MAX:
+                        break
                     self._enqueue(dict(r))
 
     def _take(self, by: dict, rr: deque, now: float):
@@ -1373,7 +1395,8 @@ class Stream:
                     c["v"] = {"queue": one("SELECT COUNT(*) n FROM articles WHERE status='new'"),
                               "queue_fresh": one("SELECT COUNT(*) n FROM articles WHERE status='new' AND feed_date >= ?",
                                                  (cut,)) + one("SELECT COUNT(*) n FROM articles WHERE status='new' AND "
-                                                               "feed_date = ''"),
+                                                               "feed_date = '' AND discovered > ? AND source NOT LIKE "
+                                                               "'%:old'", (time.time() - 2 * 86400,)),
                               "stored": one("SELECT COUNT(*) n FROM articles WHERE status='success'")}
                     c["t"] = time.time()
                 except Exception:  # noqa: BLE001  busy: try again shortly

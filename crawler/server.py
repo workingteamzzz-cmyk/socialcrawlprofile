@@ -260,6 +260,12 @@ class Handler(BaseHTTPRequestHandler):
         elif u.path == "/api/news/start":
             err = JOB.start_news(data.get("keywords") or [], data.get("start", ""), data.get("end", ""),
                                  data.get("tz", "WIB"), data.get("options") or {})
+        elif u.path == "/api/compare/why":
+            from . import compare
+            try:
+                return self._json({"ok": True, **compare.why(str(data.get("url") or "")[:2000])})
+            except ValueError as e:
+                return self._json({"ok": False, "error": str(e)})
         elif u.path == "/api/compare":
             from . import compare
             try:

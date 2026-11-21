@@ -490,3 +490,24 @@ def test_international_outlets_pause_and_catch_up(tmp_path, monkeypatch):
     monkeypatch.setattr(st, "check_sitemap", lambda src, catchup=0: swept.append((src["domain"], catchup)) or (0, False, {}))
     st.run_catchup(days=2, domains=["bbc.com"])                                  # the worker's one-off sweep
     assert swept == [("bbc.com", 2)] and not st.meta("catchup_last")             # the daily sweep's date untouched
+
+
+def test_queue_in_memory_is_bounded_and_old_undated_links_wait_behind(tmp_path, monkeypatch):
+    """Millions of links found in a day never fill the worker's memory; older undated links never count as news."""
+    import time as _t
+    from crawler import paths, stream
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    monkeypatch.setattr(stream, "QUEUE_MAX", 50)
+    st = stream.Stream(str(tmp_path / "s"))
+    st.cfg = {**stream.settings(), "old_per_check": 1000}
+    st.running = True
+    st.add_found([{"url": f"https://a{i}.id/berita/x{i}", "domain": f"a{i}.id"} for i in range(200)], "sitemap")
+    assert st.qn == 50                                                       # the rest wait in the database
+    old = [{"url": f"https://b.id/berita/lama-{i}", "domain": "b.id", "old": True} for i in range(5)]
+    st.add_found(old, "sitemap")
+    rows = st.rq("SELECT source FROM articles WHERE domain='b.id'")
+    assert rows and all(r["source"] == "sitemap:old" for r in rows)
+    assert not st.is_fresh({"source": "sitemap:old", "feed_date": ""})
+    assert st.is_fresh({"source": "sitemap", "feed_date": "", "discovered": _t.time()})
+    assert not st.is_fresh({"source": "sitemap", "feed_date": "", "discovered": _t.time() - 3 * 86400})
+    st.running = False

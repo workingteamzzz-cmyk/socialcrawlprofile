@@ -683,6 +683,15 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
         log(request, "compared with another list", links=out["total"], have=out["have"])
         return {"ok": True, **out}
 
+    @app.post("/api/compare/why", tags=["jobs"], dependencies=op,
+              summary="Why was this link missed? Looks at the site's page, sitemaps and RSS now")
+    def compare_why(body: dict):
+        from . import compare
+        try:
+            return {"ok": True, **compare.why(str(body.get("url") or "")[:2000])}
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+
     @app.post("/api/news/bulk", tags=["jobs"], dependencies=op,
               summary="Bulk links: read the articles of pasted links (no search, no date / keyword filter)")
     def news_bulk(body: BulkLinks, request: Request):

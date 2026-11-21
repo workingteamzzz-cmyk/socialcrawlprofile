@@ -116,7 +116,8 @@ NOT_MEDIA = ("google.", "googleusercontent.", "msn.com", "yahoo.", "bing.com", "
 def discover(urls, source: str = "News Search") -> list[str]:
     """Outlets that a search found articles on but the list does not have yet -> added to the registered media, so
     the Live Stream reads them from now on (the list grows by itself). Platforms, aggregators and excluded outlets
-    are left out; a sub-domain of a registered outlet (news.detik.com) counts as registered."""
+    are left out. A regional / section site of a registered outlet (jateng.tribunnews.com) is added too — its own
+    sitemaps hold articles the main site's do not."""
     try:
         from . import stream
         cfg = stream.settings()
@@ -132,9 +133,13 @@ def discover(urls, source: str = "News Search") -> list[str]:
         if not d or any(x in d for x in NOT_MEDIA) or d in excl:
             continue
         parts = d.split(".")
-        if any(".".join(parts[i:]) in reg for i in range(len(parts) - 1)):
+        if d in reg:
             continue
-        new[d] = new.get(d, 0) + 1
+        parent = next((".".join(parts[i:]) for i in range(1, len(parts) - 1) if ".".join(parts[i:]) in reg), "")
+        if parent and parts[0] in ("m", "amp", "mobile", "www", "web", "beta", "static", "cdn", "img", "images"):
+            continue                                   # the same site's mobile / asset host: nothing new
+        new[d] = new.get(d, 0) + 1                     # a new outlet, or a registered one's regional / section site
+                                                       # (jateng.tribunnews.com): its own sitemaps are read too
     if not new:
         return []
     out = add("\n".join(sorted(new)))["added"]

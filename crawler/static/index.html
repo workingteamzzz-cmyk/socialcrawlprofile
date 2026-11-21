@@ -2471,12 +2471,17 @@ $('cmpGo').onclick = async () => {
   $('cmpReasons').innerHTML = ks.map(k => `<span style="display:flex;align-items:center;gap:7px"><i style="width:9px;height:9px;border-radius:2px;background:${CMPC[k]}"></i>${esc(r.counts[k].label)}<b style="margin-left:auto">${fmt(r.counts[k].n)}</b></span>`).join('');
   $('cmpOutlets').innerHTML = r.top_missing_outlets.length ? 'Most missing from: ' + r.top_missing_outlets.slice(0, 10).map(([d, n]) => `<b>${esc(d)}</b> ${n}`).join(' · ') : '';
   $('cmpFetch').textContent = `Read the ${fmt(r.fetchable.length)} missing ones now`; $('cmpFetch').disabled = !r.fetchable.length;
-  $('cmpAdd').textContent = `Add ${fmt(r.missing_outlets.length)} missing outlet(s) to the list`; $('cmpAdd').disabled = !r.missing_outlets.length;
+  $('cmpAdd').textContent = `Add ${fmt(r.missing_outlets.length)} missing outlet(s) / regional site(s) to the list`; $('cmpAdd').disabled = !r.missing_outlets.length;
   $('cmpBody').innerHTML = r.rows.filter(x => x.status !== 'have').concat(r.rows.filter(x => x.status === 'have')).slice(0, 1500).map(x => `<tr>
     <td class="url"><a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.url.replace(/^https?:\/\/(www\.)?/, ''))}</a></td>
     <td><span style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap"><i style="width:8px;height:8px;border-radius:2px;background:${CMPC[x.status]}"></i>${esc(x.reason)}</span></td>
-    <td><small>${esc(x.error || x.title || '')}</small></td></tr>`).join('');
+    <td><small>${esc(x.error || x.title || '')}${x.subsite ? ` · regional site <b>${esc(x.subsite)}</b> not read yet` : ''}</small>${x.status !== 'have' ? ` <button class="btn sm" data-cmpwhy="${esc(x.url)}" style="margin-left:6px">Why?</button>` : ''}</td></tr>`).join('');
 };
+$('cmpBody').addEventListener('click', async e => { const b = e.target.closest('[data-cmpwhy]'); if (!b) return;
+  const cell = b.closest('td'); b.disabled = true; b.textContent = 'Checking… (up to a minute)';
+  const r = await api('/api/compare/why', {url: b.dataset.cmpwhy});
+  cell.innerHTML = r && r.ok ? `<small><b>${esc(r.verdict)}</b><br>Page: ${esc(r.page || '—')} · sitemap files checked: ${r.checked}${r.found_in ? ' · listed in ' + esc(r.found_in) : ''}${r.date ? ' · dated ' + esc(String(r.date).slice(0, 10)) : ''}${(r.notes || []).length ? '<br>' + r.notes.map(esc).join('<br>') : ''}</small>`
+    : `<small>${esc((r && r.error) || 'Could not check')}</small>`; });
 $('cmpFetch').onclick = () => { if (!CMP) return; $('nbLinks').value = CMP.fetchable.join('\n'); nwSetMode('bulk'); nbCount();
   toast(`${fmt(CMP.fetchable.length)} links ready — press Process links`); };
 $('cmpAdd').onclick = async () => { if (!CMP) return;

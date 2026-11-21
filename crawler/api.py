@@ -1200,6 +1200,14 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
         log(request, "marked outlets' country", n=n, country=str(body.get("country") or "auto"))
         return {"ok": True, "marked": n}
 
+    @app.post("/api/stream/trim", tags=["stream"], dependencies=admin_only,
+              summary="Take the older waiting links out of the queue (they can be found again later)")
+    def stream_trim(request: Request):
+        from . import stream
+        stream.command("trim_backlog")
+        log(request, "cleared the older waiting links")
+        return {"ok": True}
+
     @app.post("/api/stream/intl/classify", tags=["stream"], dependencies=admin_only,
               summary="Decide again which outlets are international (runs in the stream's worker)")
     def intl_classify(request: Request):

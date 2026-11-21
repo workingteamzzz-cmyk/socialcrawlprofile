@@ -315,6 +315,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(insights.start_export(str(data.get("q") or "")[:300], int(data.get("days") or 7)))
             except ValueError as e:
                 return self._json({"ok": False, "error": str(e)})
+        elif u.path == "/api/stream/trim":
+            from . import stream
+            stream.command("trim_backlog")
+            return self._json({"ok": True})
         elif u.path in ("/api/media/country", "/api/stream/intl/classify", "/api/stream/intl/catchup"):
             from . import intl, stream
             try:

@@ -152,6 +152,8 @@ def main() -> None:
                     a = json.loads(arg or "{}")
                     threading.Thread(target=stream._quiet, args=(s.run_catchup, int(a.get("days") or 1),
                                                                  list(a.get("domains") or [])), daemon=True).start()
+                elif cmd == "trim_backlog" and not (s.__dict__.get("trim") or {}).get("running"):
+                    threading.Thread(target=stream._quiet, args=(s.trim_backlog,), daemon=True).start()
                 elif cmd == "classify":
                     from crawler import intl
                     threading.Thread(target=stream._quiet, args=(intl.classify, s), daemon=True).start()

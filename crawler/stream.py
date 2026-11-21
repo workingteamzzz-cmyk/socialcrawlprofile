@@ -71,7 +71,6 @@ CREATE INDEX IF NOT EXISTS s_next ON sources(next_check);
 CREATE INDEX IF NOT EXISTS s_domain ON sources(domain);
 CREATE INDEX IF NOT EXISTS a_succ ON articles(status, fetched);
 CREATE INDEX IF NOT EXISTS a_pub ON articles(status, pub_date);
-CREATE INDEX IF NOT EXISTS a_disc ON articles(discovered);
 CREATE TABLE IF NOT EXISTS seen(key TEXT PRIMARY KEY, t REAL);
 CREATE TABLE IF NOT EXISTS fetch_methods(day TEXT, method TEXT, n INTEGER DEFAULT 0, PRIMARY KEY(day, method));
 CREATE TABLE IF NOT EXISTS outlet_country(domain TEXT PRIMARY KEY, country TEXT, id_share REAL, n INTEGER DEFAULT 0,
@@ -844,6 +843,11 @@ class Stream:
     # ----- discovery + housekeeping -----
     def discovery_loop(self) -> None:
         ev = self.stop_event
+        try:                                          # here, not in start(): a big list never delays the start
+            info = self.sync_sources(getattr(self, "_log", print))
+            getattr(self, "_log", print)(f"🛰 Sources: {info['rss']} RSS feeds + {info['sitemaps']} outlet sitemaps")
+        except Exception as e:  # noqa: BLE001
+            self.last_error = f"sources: {str(e)[:120]}"
         with ThreadPoolExecutor(max_workers=self.cfg["discovery_threads"], thread_name_prefix="stream-src") as ex:
             while not ev.is_set():
                 try:
@@ -879,6 +883,40 @@ class Stream:
         total = sum(got.values())
         return {"days": days, "total": total,
                 "methods": {m: {"n": n, "pct": round(n * 100 / total, 2) if total else 0} for m, n in got.items()}}
+
+    def trim_backlog(self, chunk: int = 20000) -> dict:
+        """Older links waiting to be read (older than the stream's days, or undated and found days ago) are taken
+        out of the queue, a chunk at a time, so the database and its indexes stay light. Nothing is lost for good:
+        such links are not marked as seen — an outlet's sitemap lists them again, and the media archive can fetch
+        any period."""
+        cut = self.cutoff()
+        st = self.__dict__.setdefault("trim", {})
+        st.update(running=True, removed=0, started=time.time(), finished=0, error="")
+        ev = self.stop_event
+        try:
+            while not ev.is_set():
+                with self.lock:
+                    n = self._db.execute(
+                        "DELETE FROM articles WHERE rowid IN (SELECT rowid FROM articles WHERE status='new' AND "
+                        "((feed_date > '' AND feed_date < ?) OR source LIKE '%:old' OR "
+                        "(feed_date = '' AND discovered < ?)) LIMIT ?)", (cut, time.time() - 2 * 86400, chunk)).rowcount
+                    self._db.commit()
+                st["removed"] += n
+                if n < chunk:
+                    break
+                ev.wait(0.5)                                  # readers and finders get the database in between
+            with self.lock:
+                for d in list(self.by_domain_old):            # what was queued in memory from them
+                    for j in self.by_domain_old.pop(d):
+                        self.queued.discard(j["key"])
+                self.rr_old.clear()
+                self.qn -= self.qn_old
+                self.qn_old = 0
+            self.__dict__.pop("_sc", None)                    # the counts again, at once
+        except Exception as e:  # noqa: BLE001
+            st["error"] = str(e)[:150]
+        st.update(running=False, finished=time.time())
+        return dict(st)
 
     TEMPORARY = ("Timeout", "ConnectionError", "HTTP 429", "HTTP 500", "HTTP 502", "HTTP 503", "HTTP 504",
                  "HTTP 520", "HTTP 521", "HTTP 522", "HTTP 523", "HTTP 524", "Empty content")
@@ -963,6 +1001,10 @@ class Stream:
         and access per outlet over 7 days — a million rows counted in seconds, not minutes). Built once, here in the
         stream's own process, never while a page waits."""
         have = {r["name"] for r in self.rq("SELECT name FROM sqlite_master WHERE type='index'")}
+        if "a_disc" in have and "a_disc_ds" in have:        # covered by a_disc_ds: one index less to keep up
+            with self.lock:
+                self._db.execute("DROP INDEX IF EXISTS a_disc")
+                self._db.commit()
         if {"a_disc_ds", "a_fail_err", "a_new_fd"} <= have:
             return
         self.meta("maintenance", f"building indexes since {datetime.now(WIB):%H:%M} (once after an update)")
@@ -1353,9 +1395,8 @@ class Stream:
                 media_db.install()                            # paid media: their logins
             except Exception:  # noqa: BLE001
                 pass
-            info = self.sync_sources(log)
-            log(f"🛰 News stream started: {info['rss']} RSS feeds + {info['sitemaps']} outlet sitemaps, "
-                f"{self.cfg['threads']} readers × {self.shard[1]} process(es)")
+            self._log = log
+            log(f"🛰 News stream starting: {self.cfg['threads']} readers × {self.shard[1]} process(es)")
             self.threads = [threading.Thread(target=self.discovery_loop, daemon=True, name="stream-discovery"),
                             threading.Thread(target=self.catchup_loop, daemon=True, name="stream-catchup"),
                             threading.Thread(target=self.health_loop, daemon=True, name="stream-health"),
@@ -1471,6 +1512,7 @@ class Stream:
             return {"t": now, "running": self.running, "since": int(self.started) if self.running else 0,
                     "per_minute": round(per_min, 1), "per_day_pace": int(per_min * 60 * 24),
                     "readers_busy": len(self.busy_domains), "queue_mem": self.qn, "queue_backlog_mem": self.qn_old,
+                    "trim": dict(self.__dict__.get("trim") or {}),
                     "last_error": self.last_error,
                     "export": dict(self.export), "health": dict(self.health), "catchup": dict(self.catchup)}
 
@@ -1535,6 +1577,9 @@ class Stream:
             for k in ("running", "since", "per_minute", "per_day_pace", "readers_busy", "last_error", "export"):
                 out[k] = live.get(k, out[k])
             out["processes"] = live.get("processes", 1)
+            ex = [x for x in _WORKER["exits"] if x[0] > time.time() - 86400]
+            out["restarts"] = {"n": len(ex), "last": ex[-1][0] if ex else 0, "code": ex[-1][1] if ex else None}
+            out["trim"] = live.get("trim") or {}
             out["health"].update(live.get("health") or {})
             out["catchup"].update(live.get("catchup") or {})
             out["worker"] = True
@@ -1654,7 +1699,7 @@ def _quiet(fn, *a):
 # dashboard slow. The web process writes settings and commands; the worker writes its live state (live.json).
 _WORKER_PARENT = False
 _IN_WORKER = False                         # set by stream_worker: this process is the stream's main process
-_WORKER = {"proc": None, "stop": threading.Event()}
+_WORKER = {"proc": None, "stop": threading.Event(), "exits": []}   # exits: (time, exit code) of the stream process
 
 
 def _live_path() -> str:
@@ -1730,6 +1775,8 @@ def start_worker(log=print) -> None:
             if p is None or p.poll() is not None:
                 if p is not None:
                     fails += 1
+                    _WORKER["exits"] = [x for x in _WORKER["exits"] if x[0] > time.time() - 86400][-50:] + \
+                        [(time.time(), p.returncode)]
                     log(f"stream worker stopped (exit {p.returncode}) — starting it again")
                 _WORKER["proc"] = subprocess.Popen(          # stdin stays open: the worker ends when we do
                     [sys.executable, "-m", "crawler.stream_worker"], stdin=subprocess.PIPE,

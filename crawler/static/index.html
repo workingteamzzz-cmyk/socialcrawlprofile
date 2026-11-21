@@ -1280,7 +1280,8 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
         <div class="kpi"><small>Articles read today</small><b id="lsSRead">–</b><span class="kpi-sub" id="lsSReadS"></span></div>
         <div class="kpi"><small>Current pace</small><b id="lsSPace">–</b><span class="kpi-sub" id="lsSPaceS"></span></div>
         <div class="kpi"><small>Keyword matches today</small><b id="lsSMatch">–</b><span class="kpi-sub" id="lsSMatchS"></span></div>
-        <div class="kpi"><small>Waiting to be read</small><b id="lsSQueue">–</b><span class="kpi-sub" id="lsSQueueS"></span></div>
+        <div class="kpi"><small>Waiting to be read</small><b id="lsSQueue">–</b><span class="kpi-sub" id="lsSQueueS"></span>
+          <button class="btn sm need-admin" id="lsTrim" style="margin-top:8px" title="Take the older waiting links out of the queue — they can be found again later">Clear older waiting links</button></div>
       </div>
       <div class="dgrid g-2-1">
         <div class="card viz"><div class="card-hd"><h3>Articles read per hour</h3><div class="legend-row"><span><i style="background:var(--s1)"></i>Read</span><span><i style="background:var(--s2)"></i>Keyword matches</span></div></div>
@@ -3040,6 +3041,10 @@ function lsFill(cfg){ loadStream.filled = true;
     $('lsSfAuto').checked = cfg.auto_add_media !== false; $('lsSfRetry').checked = cfg.retry_failed !== false;
     $('lsSfIntl').checked = !!cfg.pause_international; $('lsSfProc').value = cfg.reader_processes || 0;
     $('lsSfEx').value = (cfg.exclude_domains || []).join('\n'); }
+$('lsTrim').onclick = async () => {
+  if (!confirm('Take the older waiting links out of the queue? Recent news stays. They are not lost for good: outlets list them again, and the media archive can fetch any period.')) return;
+  const r = await api('/api/stream/trim', {}); toast(r && r.ok ? 'Clearing the older waiting links — the count updates in a minute' : 'Not started');
+  $('lsTrim').disabled = true; $('lsTrim').textContent = 'Clearing…'; };
 $('lsIntlGo').onclick = async () => {
   const r = await api('/api/stream/intl/catchup', {start: $('lsIntlFrom').value, end: $('lsIntlTo').value});
   $('lsIntlMsg').textContent = r && r.ok ? (r.how === 'sweep' ? `Sweeping ${fmt(r.outlets)} international outlets' sitemaps for ${r.start} – ${r.end} — their articles join the backlog lane.`
@@ -3054,6 +3059,9 @@ async function loadStream(){
     clearTimeout(loadStream.t); loadStream.t = setTimeout(() => { if ($('p-stream').classList.contains('on')) loadStream(); }, 8000);
     return; }
   ST = d; const cfg = d.settings || {};
+  const trm = d.trim || {};
+  $('lsTrim').disabled = !!trm.running;
+  $('lsTrim').textContent = trm.running ? `Clearing… ${fmt(trm.removed || 0)} removed` : trm.finished ? `Cleared ${fmt(trm.removed || 0)} — clear again` : 'Clear older waiting links';
   const it = d.international || {};
   if (it.international !== undefined){
     $('lsIntlInfo').textContent = `${fmt(it.international)} international outlet(s) · ${fmt(it.indonesian)} Indonesian · ${fmt(it.undecided)} not decided yet`
@@ -3072,7 +3080,8 @@ async function loadStream(){
   $('navStream').textContent = d.running ? '●' : '';
   $('lsStRet').textContent = cfg.retention_days ? cfg.retention_days + ' days' : 'for good';
   $('lsSRead').textContent = fmt(d.today.read); $('lsSReadS').textContent = `${fmt(d.today.failed)} could not be read · ${fmt(d.today.skipped || 0)} skipped (robots.txt / excluded) · ${d.stored === null || d.stored === undefined ? '…' : fmt(d.stored)} stored`;
-  $('lsSPace').textContent = fmt(d.per_minute) + ' /min'; $('lsSPaceS').textContent = d.running ? `≈ ${fmt(d.per_day_pace)} per day at this pace` + (d.processes > 1 ? ` · ${d.processes} reader processes` : '') : 'stream is stopped';
+  $('lsSPace').textContent = fmt(d.per_minute) + ' /min'; $('lsSPaceS').textContent = (d.running ? `≈ ${fmt(d.per_day_pace)} per day at this pace` + (d.processes > 1 ? ` · ${d.processes} reader processes` : '') : 'stream is stopped')
+    + (d.restarts && d.restarts.n ? ` · restarted ${d.restarts.n}× in 24 h (last ${new Date(d.restarts.last * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}${d.restarts.code === -9 ? ', out of memory' : d.restarts.code !== null ? ', exit ' + d.restarts.code : ''})` : '');
   $('lsSMatch').textContent = fmt(d.today.matched); $('lsSMatchS').textContent = `${d.keywords} keyword(s) incl. report topics`;
   const cnt = v => v === null || v === undefined ? '…' : fmt(v);                 // counted in the background
   $('lsSQueue').textContent = cnt(d.queue);

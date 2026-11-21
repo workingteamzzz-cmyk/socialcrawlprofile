@@ -250,3 +250,12 @@ def test_client_key_limits_cannot_be_got_round(rd, tmp_path, monkeypatch):
     r = c.get("/api/client/articles", params={"page": "10000000000000000000"}, headers=h)
     assert r.status_code == 200 and r.json()["rows"] == []
     assert c.get("/api/client/posts", params={"page": "10000000000000000000"}, headers=h).status_code == 403
+
+
+def test_unknown_time_shows_as_midnight(rd):
+    """An article without a publication time: 00:00 everywhere (as in the Online Excel)."""
+    from crawler import stream
+    st = stream.Stream(str(rd._dir()))
+    st.x("UPDATE articles SET pub_time='' WHERE domain='d.id'")
+    row = next(r for r in rd.articles()["rows"] if r["domain"] == "d.id")
+    assert row["pub_time"] == "00:00" and rd.article(row["key"])["time"] == "00:00"

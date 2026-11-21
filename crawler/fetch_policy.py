@@ -32,6 +32,8 @@ def apply(googlebot: bool = True, cloudscraper: bool = True) -> None:
 
 
 def apply_settings(cfg: dict | None = None) -> None:
+    from . import time_fix
+    time_fix.install()                                   # local times marked as UTC (see time_fix.py)
     if cfg is None:
         try:
             from . import stream

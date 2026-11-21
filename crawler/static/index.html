@@ -3098,7 +3098,7 @@ async function loadStream(){
   if ($('lsCatchup')) $('lsCatchup').onclick = async () => { const r = await api('/api/stream', {catchup_now: true});
     toast(r && r.ok ? 'Late-article sweep started' : (r && r.error) || 'Not started'); setTimeout(loadStream, 1500); };
   drawStream(d);
-  $('lsStBody').innerHTML = d.latest.length ? d.latest.map(r => `<tr><td class="nowrap"><b>${r.pub_date ? dShort(r.pub_date) : '–'}</b><small>${esc(r.pub_time || '')}</small></td>
+  $('lsStBody').innerHTML = d.latest.length ? d.latest.map(r => `<tr><td class="nowrap"><b>${r.pub_date ? dShort(r.pub_date) : '–'}</b><small>${esc(r.pub_time || (r.pub_date ? '00:00' : ''))}</small></td>
     <td><a class="lt-t" href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title || r.url)}</a></td><td class="nowrap">${esc(r.domain)}</td>
     <td>${r.matched ? r.matched.split(', ').map(k => `<span class="badge b-ok" style="margin:1px">${esc(k)}</span>`).join('') : '<span class="hint">—</span>'}</td></tr>`).join('')
     : `<tr><td colspan="4" class="empty-s">${d.running ? 'Starting up — the first articles arrive within minutes.' : 'Start the stream to read every new article from the registered media.'}</td></tr>`;
@@ -3212,7 +3212,7 @@ async function exSearch(){
   $('exMsg').textContent = ''; $('exCount').textContent = `${fmt(d.total)} article(s)`;
   $('exMedia').innerHTML = EX.domain ? `<span class="qchip">only ${esc(EX.domain)} <button data-exdom="">×</button></span>` : d.media.length ? '<div class="sub-hd" style="margin:0 0 4px;padding:0;border:0">Most from (click to show only one)</div>' +
     d.media.slice(0, 5).map(([m, n]) => `<span class="badge b-neu" style="margin:0 4px 4px 0;cursor:pointer" data-exdom="${esc(m)}">${esc(m)} · ${fmt(n)}</span>`).join('') : '';
-  $('exBody').innerHTML = d.rows.length ? d.rows.map(r => `<tr><td style="width:96px" class="nowrap"><b>${r.pub_date ? dShort(r.pub_date) : '–'}</b><small>${esc(r.pub_time || '')}</small></td>
+  $('exBody').innerHTML = d.rows.length ? d.rows.map(r => `<tr><td style="width:96px" class="nowrap"><b>${r.pub_date ? dShort(r.pub_date) : '–'}</b><small>${esc(r.pub_time || (r.pub_date ? '00:00' : ''))}</small></td>
     <td><a class="lt-t" href="${esc(r.url)}" target="_blank" rel="noopener">${markSafe(r.title)}</a><small style="display:block;margin-top:3px;color:var(--muted)">${markSafe(r.snip)}</small>
       <small>${esc(r.domain)}${r.matched ? ' · ' + r.matched.split(', ').map(k => `<span class="badge b-ok">${esc(k)}</span>`).join(' ') : ''}</small></td></tr>`).join('')
     : `<tr><td class="empty-s">Nothing found for “${esc(q)}”.</td></tr>`;
@@ -3280,7 +3280,7 @@ function rdTerms(){
   return [...new Set(out.map(t => t.toLowerCase()))];
 }
 const rdHi = txt => { let h = esc(txt); for (const t of RD.terms){ const re = new RegExp('(' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi'); h = h.replace(re, '<mark>$1</mark>'); } return h; };
-const rdWhen = r => `${r.pub_date ? new Date(r.pub_date + 'T00:00:00').toLocaleDateString([], {day: '2-digit', month: 'short', year: 'numeric'}) : ''} ${r.pub_time || ''}`.trim();
+const rdWhen = r => `${r.pub_date ? new Date(r.pub_date + 'T00:00:00').toLocaleDateString([], {day: '2-digit', month: 'short', year: 'numeric'}) : ''} ${esc(r.pub_time || (r.pub_date ? '00:00' : ''))}`.trim();
 function rdCard(r){
   return `<div class="rd-card${r.key === RD.key ? ' on' : ''}" data-k="${esc(r.key)}" tabindex="0">
     ${r.image ? `<img class="rd-thumb" src="${esc(r.image)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : '<div class="rd-thumb rd-noimg"><svg class="i"><use href="#i-file"/></svg></div>'}

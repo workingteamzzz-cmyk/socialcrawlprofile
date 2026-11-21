@@ -765,3 +765,22 @@ def test_newsroom_policy_pages_are_not_news():
         assert not is_junk_page(t), t
     assert is_junk_page("", "https://monitorindonesia.com/kode-etik-jurnalistik/")
     assert is_junk_page("", "https://koranbuleleng.com/standar-perlindungan-profesi-wartawan")
+
+
+def test_local_time_marked_as_utc_takes_the_time_printed_on_the_page():
+    """Bali Post-style pages: meta says 07:00:35+00:00, the page prints 07:00:35 — the article is from 07:00, not
+    14:00. A correct UTC stamp (page shows the WIB time) is still converted."""
+    from bs4 import BeautifulSoup
+    from crawler import time_fix
+    from crawler.medmas import extract as ex
+    time_fix.install()
+    wrong = BeautifulSoup('<html><head><meta property="article:published_time" content="2026-11-21T07:00:35+00:00">'
+                          '</head><body><h1>SIM Keliling</h1><p>Sabtu, 21 November 2026 | 07:00:35</p></body></html>',
+                          "html.parser")
+    assert ex._detect_datetime(wrong) == ("2026-11-21", "07:00")
+    right = BeautifulSoup('<html><head><meta property="article:published_time" content="2026-11-21T00:00:35+00:00">'
+                          '</head><body><p>Sabtu, 21 November 2026 07:00 WIB</p></body></html>', "html.parser")
+    assert ex._detect_datetime(right) == ("2026-11-21", "07:00")
+    plain = BeautifulSoup('<html><head><meta property="article:published_time" content="2026-11-21T09:15:00+07:00">'
+                          '</head><body><p>21 November 2026 09:15</p></body></html>', "html.parser")
+    assert ex._detect_datetime(plain) == ("2026-11-21", "09:15")

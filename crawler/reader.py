@@ -211,6 +211,8 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
     total = sum(counts.values())
     shown = counts.get(sentiment, 0) if sentiment in SENTIMENTS else total
     for r in out_rows:
+        if r.get("pub_date") and not r.get("pub_time"):
+            r["pub_time"] = "00:00"                    # no time known: 00:00 (the team's rule, as in the Excel)
         r["received_at"] = datetime.fromtimestamp(r["fetched"], WIB).isoformat(timespec="seconds") \
             if r.get("fetched") else ""
     return {"total": total, "matching": shown, "page": page, "size": size, "query": expr, "source": source,
@@ -248,7 +250,7 @@ def _report_article(key: str) -> dict:
     html = str(row.get("CONTENT") or "")
     paras = [re.sub(r"<[^>]+>", "", p).strip() for p in re.split(r"</p>\s*|<br\s*/?>|\n", html)]
     return {"key": key, "url": r["url"], "domain": r["domain"], "title": r["title"], "date": r["pub_date"],
-            "time": r["pub_time"], "image": r["image"], "author": row.get("AUTHOR") or "", "summary": r["summary"],
+            "time": r["pub_time"] or ("00:00" if r["pub_date"] else ""), "image": r["image"], "author": row.get("AUTHOR") or "", "summary": r["summary"],
             "sentiment": r["sentiment"] or "neutral", "matched": r["keywords"], "origin": "reports",
             "influencer": clean_names(row.get("INFLUENCER") or ""), "persons": clean_names(row.get("PERSON") or ""),
             "paragraphs": [p for p in paras if p]}
@@ -267,7 +269,7 @@ def article(key: str) -> dict:
     paras = [p.strip() for p in re.split(r"\n\s*\n|\n", text) if p.strip()]
     keys = r.keys()
     return {"key": r["key"], "url": r["url"], "domain": r["domain"], "title": r["title"], "date": r["pub_date"],
-            "time": r["pub_time"], "image": r["image"], "author": r["author"], "summary": r["summary"],
+            "time": r["pub_time"] or ("00:00" if r["pub_date"] else ""), "image": r["image"], "author": r["author"], "summary": r["summary"],
             "sentiment": (r["sentiment"] if "sentiment" in keys else "") or "neutral", "matched": r["matched"],
             "influencer": clean_names(r["influencer"]), "persons": clean_names(r["persons"]), "paragraphs": paras,
             "origin": "stream"}
@@ -337,7 +339,7 @@ def posts(q: str = "", start: str = "", end: str = "", platform: str = "", senti
     total = sum(counts.values())
     shown = counts.get(sentiment, 0) if sentiment in SENTIMENTS else total
     out = [{"key": r["mkey"], "platform": r["platform"], "username": r["username"], "url": r["url"],
-            "date": r["pub_date"], "time": r["pub_time"], "text": r["text"], "sentiment": r["sentiment"] or "neutral",
+            "date": r["pub_date"], "time": r["pub_time"] or ("00:00" if r["pub_date"] else ""), "text": r["text"], "sentiment": r["sentiment"] or "neutral",
             "emotion": r["emotion"], "likes": r["likes"], "replies": r["replies"], "shares": r["shares"],
             "views": r["views"], "followers": r["followers"], "type": r["sub_type"] or "post",
             "received_at": datetime.fromtimestamp(r["added"], WIB).isoformat(timespec="seconds") if r["added"] else ""}

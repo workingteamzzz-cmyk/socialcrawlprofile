@@ -182,7 +182,7 @@ class Handler(BaseHTTPRequestHandler):
             g = lambda k, d="": qs.get(k, [d])[0]  # noqa: E731
             try:
                 return self._json(media_db.listing(g("q")[:100], g("tier"), g("access"), int(g("page", "1") or 1),
-                                                   int(g("size", "50") or 50), g("sort", "activity")))
+                                                   int(g("size", "50") or 50), g("sort", "activity"), g("country")))
             except ValueError:
                 return self._json({"ok": False, "error": "bad page"})
         if u.path == "/api/stream/config":
@@ -307,6 +307,19 @@ class Handler(BaseHTTPRequestHandler):
                 if u.path == "/api/insights":
                     return self._json({"ok": True, **insights.save_settings(data)})
                 return self._json(insights.start_export(str(data.get("q") or "")[:300], int(data.get("days") or 7)))
+            except ValueError as e:
+                return self._json({"ok": False, "error": str(e)})
+        elif u.path in ("/api/media/country", "/api/stream/intl/classify", "/api/stream/intl/catchup"):
+            from . import intl, stream
+            try:
+                if u.path == "/api/media/country":
+                    return self._json({"ok": True, "marked": intl.mark(stream.get(), list(data.get("domains") or []),
+                                                                        str(data.get("country") or ""))})
+                if u.path == "/api/stream/intl/classify":
+                    stream.command("classify")
+                    return self._json({"ok": True})
+                return self._json({"ok": True, **intl.catch_up(stream.get(), str(data.get("start") or ""),
+                                                              str(data.get("end") or ""))})
             except ValueError as e:
                 return self._json({"ok": False, "error": str(e)})
         elif u.path in ("/api/media/add", "/api/media/remove", "/api/media/login", "/api/media/report"):

@@ -348,6 +348,18 @@ page shows the live pace and the "per day at this pace" figure.
 - Newsroom policy pages ("Kode Etik Jurnalistik", "Standar Perlindungan Profesi Wartawan", "Susunan Redaksi …") are
   not news: skipped, and ones already stored leave News Stream and the exports.
 
+## International (non-Indonesian) outlets — pause and catch up
+
+The stream decides once a day which outlets are international: the address first (.id = Indonesian; another
+country's ending such as .my, .sg, .co.uk = international), then for .com / .net / .org the language of the titles it
+read (fewer than a quarter with Indonesian words, from at least 8 titles = international; fewer titles = not decided,
+never paused). Media Database shows them (INTL, filter *International*) and an admin can mark an outlet either way.
+
+Stream settings → **Pause international (non-Indonesian) outlets**: their feeds and sitemaps are not checked, so the
+readers work on Indonesian news. Turned off again, they are checked at once, and the paused period shows as
+"missed": **Catch up international outlets** for those dates (or any period) — up to 7 days back a sweep of their
+sitemaps; longer, one media-archive job per outlet (Media Database → Media archive).
+
 ## When a site refuses the normal request (Googlebot / cloudscraper)
 
 The article reader (the team's engine) tries a normal browser request, then — when refused — asks again as

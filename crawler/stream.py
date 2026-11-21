@@ -35,7 +35,8 @@ DEFAULTS = {"enabled": False, "threads": 8, "discovery_threads": 8, "rss_minutes
             "retention_days": 0, "max_age_hours": 48, "all_links": True, "old_per_check": 1000, "homepage": True, "domain_gap": 1.5, "rss": True, "sitemaps": True,
             "keywords": [], "robots": True, "exclude_domains": [],
             "fetch_googlebot": True, "fetch_cloudscraper": True,     # refused pages: see fetch_policy.py
-            "auto_add_media": True, "retry_failed": True}             # outlets found by News Search; retry later
+            "auto_add_media": True, "retry_failed": True,             # outlets found by News Search; retry later
+            "pause_international": False}                             # non-Indonesian outlets: see intl.py
 LIMITS = {"threads": (2, 64), "discovery_threads": (2, 48), "rss_minutes": (2, 240), "sitemap_minutes": (10, 720),
           "old_per_check": (0, 20000),
           "catchup_days": (0, 7), "catchup_hour": (0, 23), "health_weekday": (0, 6), "health_hour": (0, 23), "report_weekday": (0, 6), "report_hour": (0, 23),
@@ -72,6 +73,8 @@ CREATE INDEX IF NOT EXISTS a_pub ON articles(status, pub_date);
 CREATE INDEX IF NOT EXISTS a_disc ON articles(discovered);
 CREATE TABLE IF NOT EXISTS seen(key TEXT PRIMARY KEY, t REAL);
 CREATE TABLE IF NOT EXISTS fetch_methods(day TEXT, method TEXT, n INTEGER DEFAULT 0, PRIMARY KEY(day, method));
+CREATE TABLE IF NOT EXISTS outlet_country(domain TEXT PRIMARY KEY, country TEXT, id_share REAL, n INTEGER DEFAULT 0,
+  checked REAL, mark TEXT DEFAULT '');
 CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS feed_outbox(id INTEGER PRIMARY KEY AUTOINCREMENT, feed_id TEXT, article TEXT, tries INTEGER,
   next_try REAL, created REAL);
@@ -136,7 +139,7 @@ def save_settings(data: dict) -> dict:
         elif k == "domain_gap":
             v = max(0.5, min(30.0, float(v)))
         elif k in ("rss", "sitemaps", "robots", "weekly_report", "health_on_start", "all_links", "homepage",
-                   "fetch_googlebot", "fetch_cloudscraper", "auto_add_media", "retry_failed"):
+                   "fetch_googlebot", "fetch_cloudscraper", "auto_add_media", "retry_failed", "pause_international"):
             v = bool(v)
         elif k == "exclude_domains":
             items = v if isinstance(v, list) else re.split(r"[\n,\s]+", str(v or ""))
@@ -182,7 +185,8 @@ class Stream:
         for sql in ("ALTER TABLE hourly ADD COLUMN skipped INTEGER DEFAULT 0",          # databases from v23
                     "ALTER TABLE sources ADD COLUMN tier TEXT DEFAULT 'new'",
                     "ALTER TABLE articles ADD COLUMN sentiment TEXT DEFAULT ''",             # databases before v33
-                    "ALTER TABLE articles ADD COLUMN tries INTEGER DEFAULT 0"):               # before v47
+                    "ALTER TABLE articles ADD COLUMN tries INTEGER DEFAULT 0",                # before v47
+                    "ALTER TABLE sources ADD COLUMN paused INTEGER DEFAULT 0"):               # before v49
             if self.schema_busy:
                 break
             try:
@@ -325,7 +329,7 @@ class Stream:
         if not kinds:
             return []
         return self.q(f"SELECT * FROM sources WHERE next_check <= ? AND kind IN ({','.join('?' * len(kinds))}) "
-                      "ORDER BY next_check LIMIT ?", (time.time(), *kinds, limit))
+                      "AND COALESCE(paused, 0) = 0 ORDER BY next_check LIMIT ?", (time.time(), *kinds, limit))
 
     def interval(self, kind: str, tier: str) -> float:
         c = self.cfg
@@ -940,6 +944,7 @@ class Stream:
         last_purge = last_tiers = 0.0
         last_retry = time.time()
         last_disk = 0.0
+        last_intl = time.time() - 86400 + 900                # first decision 15 min after the start
         try:
             self.ensure_indexes()
         except Exception as e:  # noqa: BLE001
@@ -960,6 +965,13 @@ class Stream:
                     self.disk_guard()
                 except Exception as e:  # noqa: BLE001
                     self.last_error = f"disk check: {str(e)[:120]}"
+            if time.time() - last_intl > 86400:
+                last_intl = time.time()
+                try:
+                    from . import intl
+                    intl.classify(self)
+                except Exception as e:  # noqa: BLE001
+                    self.last_error = f"countries: {str(e)[:120]}"
             if time.time() - last_retry > 1800:
                 last_retry = time.time()
                 try:
@@ -1054,13 +1066,19 @@ class Stream:
         r = self.q("SELECT v FROM meta WHERE k=?", (k,))
         return r[0]["v"] if r else ""
 
-    def run_catchup(self) -> dict:
+    def run_catchup(self, days: int | None = None, domains: list | None = None) -> dict:
         """Every reachable outlet's sitemaps for the last `catchup_days` days, once: links published earlier but
-        listed late, or missed while an outlet was checked rarely. Known links are skipped (one row per article)."""
+        listed late, or missed while an outlet was checked rarely. Known links are skipped (one row per article).
+        days / domains: a one-off sweep of some outlets (e.g. international ones after a pause) — paused outlets
+        are skipped by the daily sweep."""
         ev = self.stop_event
-        days = int(self.cfg.get("catchup_days") or 0)
+        one_off = domains is not None
+        days = int(days if days is not None else (self.cfg.get("catchup_days") or 0))
+        want = set(domains or [])
         srcs = [r for r in self.rq("SELECT * FROM sources WHERE kind='sitemap' AND fails < 3 AND checked > 0")
-                if not self.excluded("https://" + r["domain"])] if days else []
+                if not self.excluded("https://" + r["domain"])
+                and ((r["domain"] in want) if one_off else not (r["paused"] if "paused" in r.keys() else 0))] \
+            if days else []
         with self.lock:
             self.catchup = {"running": True, "done": 0, "total": len(srcs), "found": 0, "started": time.time(),
                             "finished": 0, "days": days}
@@ -1080,7 +1098,7 @@ class Stream:
         with self.lock:
             self.catchup.update(running=False, finished=time.time())
             out = dict(self.catchup)
-        if ev.is_set():
+        if ev.is_set() or one_off:
             return out                                      # cut short: today's sweep runs again after the restart
         self.meta("catchup_last", datetime.now(WIB).strftime("%Y-%m-%d"))
         self.meta("catchup_result", json.dumps({k: out[k] for k in ("total", "found", "started", "finished")}))
@@ -1333,6 +1351,13 @@ class Stream:
                 self.queued.clear()
                 self.qn = self.qn_old = 0
 
+    def _intl_status(self) -> dict:
+        try:
+            from . import intl
+            return intl.status(self)
+        except Exception:  # noqa: BLE001
+            return {}
+
     def slow_counts(self) -> dict:
         """Waiting / recent news waiting / stored: counting millions of rows takes seconds, so it is done in the
         background at most every minute and the dashboard gets the last numbers at once (None the very first time)."""
@@ -1428,7 +1453,7 @@ class Stream:
                 "disk": __import__("crawler.overview", fromlist=["disk"]).disk(),
                 "readers_busy": len(self.busy_domains), "last_error": self.last_error, "export": dict(self.export),
                 "days": self.days_with_articles(), "fetch_methods": self.fetch_methods(7),
-                "maintenance": self.meta("maintenance"),
+                "maintenance": self.meta("maintenance"), "international": self._intl_status(),
                 "latest": [dict(r) for r in rows]}
         if live:                                             # the engine runs in its own process: its live state
             for k in ("running", "since", "per_minute", "per_day_pace", "readers_busy", "last_error", "export"):

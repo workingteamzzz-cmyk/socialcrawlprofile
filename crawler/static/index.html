@@ -1334,6 +1334,17 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
           <label class="opt-row" style="border:0;padding:4px 0"><span class="t"><b>Cloudflare workaround (cloudscraper)</b><small>Gets past Cloudflare's bot check — against the wishes of sites that turned it on. Off: the page's AMP version is tried next.</small></span><span style="display:flex;align-items:center;gap:10px"><span class="tag gray" id="lsFmCs">–</span><span class="switch"><input type="checkbox" id="lsSfCs"><span></span></span></span></label>
           <p class="hint" id="lsFmAll" style="margin:6px 0 0"></p>
         </div>
+        <div style="border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:0 0 14px">
+          <label class="opt-row" style="border:0;padding:0"><span class="t"><b>Pause international (non-Indonesian) outlets</b><small>Their feeds and sitemaps are not checked, so the readers work on Indonesian news. Turn it off any time; what they published meanwhile can be caught up below.</small></span><span class="switch"><input type="checkbox" id="lsSfIntl"><span></span></span></label>
+          <p class="hint" id="lsIntlInfo" style="margin:6px 0 0">—</p>
+          <div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin-top:8px">
+            <div class="field" style="margin:0"><label for="lsIntlFrom">Catch up from</label><input type="date" id="lsIntlFrom"></div>
+            <div class="field" style="margin:0"><label for="lsIntlTo">to</label><input type="date" id="lsIntlTo"></div>
+            <button class="btn" id="lsIntlGo">Catch up international outlets</button>
+            <button class="btn ghost" id="lsIntlRe" title="Decide again which outlets are international">Re-check countries</button>
+          </div>
+          <p class="hint" id="lsIntlMsg" style="margin:6px 0 0">Up to 7 days back: a quick sweep of their sitemaps. Longer: one media-archive job per outlet (Media Database → Media archive).</p>
+        </div>
         <button class="btn primary" id="lsSfSave">Save settings</button> <span class="hint" id="lsSfMsg"></span>
         <p class="hint">Outlets are ranked every 10 minutes by the new articles they published in the last 7 days: the top ones are checked most often, quiet ones less, unreachable ones rarely — and an outlet that starts publishing again is promoted at once. RSS feeds of active outlets are checked more often (an unchanged feed costs almost nothing). One page at a time per outlet, with the pause above — nobody is hammered. More readers = faster, as long as the server has CPU to spare.</p>
       </div></div>
@@ -1380,6 +1391,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
       <div class="card"><div class="card-hd" style="flex-wrap:wrap;gap:8px"><h3>Outlets</h3>
           <input class="search" id="mdQ" placeholder="Search domain or name…" style="margin-left:auto;max-width:220px;height:36px;padding-top:0;padding-bottom:0">
           <select class="select" id="mdTier" style="max-width:170px;height:36px;padding-top:0;padding-bottom:0"><option value="">Every activity</option><option value="active">Active</option><option value="active2">Active 2</option><option value="semi">Semi-active</option><option value="rare">Rare</option><option value="inactive">Inactive</option><option value="dead">Unreachable</option><option value="new">Not checked yet</option></select>
+          <select class="select" id="mdCountry" style="max-width:170px;height:36px;padding-top:0;padding-bottom:0" aria-label="Country"><option value="">Every country</option><option value="id">Indonesian</option><option value="intl">International</option><option value="unknown">Not decided yet</option></select>
           <select class="select" id="mdAcc" style="max-width:180px;height:36px;padding-top:0;padding-bottom:0"><option value="">Every access</option><option value="ok">Readable</option><option value="partial">Partly readable</option><option value="blocked">Cannot be read</option><option value="paywall">Paywall?</option><option value="robots">Refused by robots.txt</option><option value="unreachable">Site unreachable</option><option value="quiet">No new articles</option><option value="pending">Not read yet</option><option value="excluded">Excluded</option><option value="unknown">Not checked yet</option></select>
           <select class="select" id="mdSort" style="max-width:150px;height:36px;padding-top:0;padding-bottom:0"><option value="activity">Busiest first</option><option value="name">A–Z</option></select></div>
         <div class="tbl-wrap"><table class="tbl dtbl"><thead><tr><th>Outlet</th><th style="width:130px">Activity</th><th style="width:110px">Articles / day</th><th style="width:170px">Access</th><th style="width:110px">Read / failed</th><th style="width:150px">Last article</th><th style="width:170px"></th></tr></thead><tbody id="mdBody"></tbody></table></div>
@@ -3013,7 +3025,14 @@ function lsFill(cfg){ loadStream.filled = true;
     $('lsSfUseRss').checked = !!cfg.rss; $('lsSfUseSm').checked = !!cfg.sitemaps; $('lsSfRobots').checked = cfg.robots !== false;
     $('lsSfGb').checked = cfg.fetch_googlebot !== false; $('lsSfCs').checked = cfg.fetch_cloudscraper !== false;
     $('lsSfAuto').checked = cfg.auto_add_media !== false; $('lsSfRetry').checked = cfg.retry_failed !== false;
+    $('lsSfIntl').checked = !!cfg.pause_international;
     $('lsSfEx').value = (cfg.exclude_domains || []).join('\n'); }
+$('lsIntlGo').onclick = async () => {
+  const r = await api('/api/stream/intl/catchup', {start: $('lsIntlFrom').value, end: $('lsIntlTo').value});
+  $('lsIntlMsg').textContent = r && r.ok ? (r.how === 'sweep' ? `Sweeping ${fmt(r.outlets)} international outlets' sitemaps for ${r.start} – ${r.end} — their articles join the backlog lane.`
+    : `${fmt(r.jobs)} media-archive jobs queued (${r.start} – ${r.end}) — see Media Database → Media archive.`) : (r && r.error) || 'Not started';
+};
+$('lsIntlRe').onclick = async () => { const r = await api('/api/stream/intl/classify', {}); toast(r && r.ok ? 'Re-checking which outlets are international — a minute or two' : 'Not started'); };
 async function loadStream(){
   if (!loadStream.filled){ const c = await api('/api/stream/config'); if (c && c.settings) lsFill(c.settings); }
   const d = await api('/api/stream?q=' + encodeURIComponent(($('lsStQ').value || '').trim()));
@@ -3022,6 +3041,15 @@ async function loadStream(){
     clearTimeout(loadStream.t); loadStream.t = setTimeout(() => { if ($('p-stream').classList.contains('on')) loadStream(); }, 8000);
     return; }
   ST = d; const cfg = d.settings || {};
+  const it = d.international || {};
+  if (it.international !== undefined){
+    $('lsIntlInfo').textContent = `${fmt(it.international)} international outlet(s) · ${fmt(it.indonesian)} Indonesian · ${fmt(it.undecided)} not decided yet`
+      + (it.paused ? ` · paused since ${it.paused_since || 'now'}` : '') + (it.missed ? ` · missed while paused: ${it.missed.start} – ${it.missed.end} (catch it up below)` : '')
+      + (it.classified ? ` · checked ${it.classified}` : ' · first check about 15 minutes after the stream starts')
+      + (it.sample && it.sample.length ? ` — e.g. ${it.sample.slice(0, 6).join(', ')}` : '');
+    if (!$('lsIntlFrom').value){ const m = it.missed || {}; const today = new Date().toISOString().slice(0, 10);
+      $('lsIntlFrom').value = m.start || it.paused_since || today; $('lsIntlTo').value = m.end || today; }
+  }
   if (d.maintenance) toast('The stream database is being upgraded once (' + d.maintenance + ') — the stream continues by itself.');
   const fm = d.fetch_methods || {total: 0, methods: {}}, fmt1 = m => { const x = (fm.methods || {})[m]; return x ? `${fmt(x.n)} · ${x.pct}%` : '0'; };
   $('lsFmGb').textContent = fmt1('googlebot'); $('lsFmCs').textContent = fmt1('cloudscraper');
@@ -3089,7 +3117,7 @@ $('lsSfSave').onclick = async () => {
     top_n: +$('lsSfTop').value, top2_n: +$('lsSfTop2').value, active2_hours: +$('lsSfA2').value, semi_hours: +$('lsSfSemi').value, rare_hours: +$('lsSfRare').value, inactive_days: +$('lsSfIn').value, dead_days: +$('lsSfDead').value,
     rss: $('lsSfUseRss').checked, sitemaps: $('lsSfUseSm').checked, robots: $('lsSfRobots').checked, exclude_domains: $('lsSfEx').value,
     fetch_googlebot: $('lsSfGb').checked, fetch_cloudscraper: $('lsSfCs').checked,
-    auto_add_media: $('lsSfAuto').checked, retry_failed: $('lsSfRetry').checked});
+    auto_add_media: $('lsSfAuto').checked, retry_failed: $('lsSfRetry').checked, pause_international: $('lsSfIntl').checked});
   $('lsSfMsg').textContent = r && r.ok ? 'Saved.' : (r && r.error) || 'Not saved'; loadStream.filled = false; loadStream(); };
 $('lsExport').onclick = async () => { const r = await api('/api/stream/export', {day: $('lsDay').value});
   if (r && r.ok === false) return toast(r.error || 'Not started'); toast('Making the Excel…'); setTimeout(loadStream, 800);
@@ -3104,7 +3132,7 @@ const TIERL = {active: ['Active', '#16a34a'], active2: ['Active 2', '#14b8a6'], 
 const ACCL = {ok: ['Readable', 'b-ok'], partial: ['Partly readable', 'b-warn'], blocked: ['Cannot be read', 'b-bad'], paywall: ['Paywall?', 'b-warn'],
   robots: ['Refused by robots.txt', 'b-bad'], unreachable: ['Site unreachable', 'b-bad'], quiet: ['No new articles', 'b-neu'], pending: ['Not read yet', 'b-neu'], excluded: ['Excluded', 'b-neu'], unknown: ['Not checked yet', 'b-neu']};
 async function loadMedia(){
-  const qs = new URLSearchParams({q: $('mdQ').value.trim(), tier: $('mdTier').value, access: $('mdAcc').value, sort: $('mdSort').value, page: MD.page, size: 50});
+  const qs = new URLSearchParams({q: $('mdQ').value.trim(), tier: $('mdTier').value, access: $('mdAcc').value, sort: $('mdSort').value, country: $('mdCountry').value, page: MD.page, size: 50});
   const d = await api('/api/media?' + qs);
   const onPage = () => $('p-media') && $('p-media').classList.contains('on');
   if (!d || !d.rows){                                    // the server was busy: say so and try again by itself
@@ -3119,13 +3147,13 @@ async function loadMedia(){
   $('mdK4').textContent = fmt((a.blocked || 0) + (a.paywall || 0) + (a.robots || 0)); $('mdK4s').textContent = `${fmt(a.blocked || 0)} blocked · ${fmt(a.paywall || 0)} paywall? · ${fmt(a.robots || 0)} robots.txt · ${fmt(a.unreachable || 0)} down`;
   const admin = ROLE === 'admin';
   $('mdBody').innerHTML = d.rows.length ? d.rows.map((r, i) => `<tr>
-    <td><b>${esc(r.domain)}</b>${r.name ? `<small>${esc(r.name)}</small>` : ''}${r.subscribed ? ' <span class="badge b-ok" title="Read with the paid login">login</span>' : ''}</td>
+    <td><b>${esc(r.domain)}</b>${r.country === 'intl' ? ' <span class="badge b-neu" title="International (non-Indonesian) outlet">INTL</span>' : ''}${r.name ? `<small>${esc(r.name)}</small>` : ''}${r.subscribed ? ' <span class="badge b-ok" title="Read with the paid login">login</span>' : ''}</td>
     <td><span style="display:inline-flex;align-items:center;gap:6px"><i style="width:8px;height:8px;border-radius:2px;background:${TIERL[r.tier][1]}"></i>${TIERL[r.tier][0]}</span></td>
     <td>${fmt(r.per_day)}<small>${fmt(r.found7)} in 7 days</small></td>
     <td><span class="badge ${ACCL[r.access][1]}">${ACCL[r.access][0]}</span>${r.error && r.access !== 'ok' ? `<small>${esc(r.error)}</small>` : ''}</td>
     <td>${fmt(r.read)} / ${fmt(r.failed + r.short)}${r.robots ? `<small>${fmt(r.robots)} refused</small>` : ''}</td>
     <td>${r.last_day ? dShort(r.last_day) : '–'}<small>${r.rss ? 'RSS + ' : ''}${r.sitemap ? 'sitemap' : r.rss ? '' : 'no feed found yet'}</small></td>
-    <td class="nowrap">${admin ? `<button class="btn sm" data-mdarch="${i}" title="Every article of this outlet over a period">Archive</button> <button class="btn sm" data-mdlogin="${i}">Login</button> <button class="btn sm" data-mdrm="${i}">Remove</button>` : ''}</td></tr>`).join('')
+    <td class="nowrap">${admin ? `<button class="btn sm" data-mdarch="${i}" title="Every article of this outlet over a period">Archive</button> <button class="btn sm" data-mdlogin="${i}">Login</button> <button class="btn sm" data-mdrm="${i}">Remove</button> <button class="btn sm" data-mdcty="${i}" title="Mark this outlet ${r.country === 'intl' ? 'Indonesian' : 'international'}">${r.country === 'intl' ? 'Mark ID' : 'Mark intl'}</button>` : ''}</td></tr>`).join('')
     : '<tr><td colspan="7" class="empty-s">No outlet matches.</td></tr>';
   const from = (d.page - 1) * d.size;
   $('mdPageInfo').textContent = (d.total ? `${fmt(from + 1)}–${fmt(Math.min(d.total, from + d.size))} of ${fmt(d.total)}` : '')
@@ -3135,7 +3163,11 @@ async function loadMedia(){
     $('mdWk').checked = s.settings.weekly_report !== false; $('mdWkDay').value = s.settings.report_weekday; $('mdWkHour').value = s.settings.report_hour; } }
 }
 let _mdq; ['mdQ'].forEach(id => $(id).addEventListener('input', () => { clearTimeout(_mdq); _mdq = setTimeout(() => { MD.page = 1; loadMedia(); }, 300); }));
-['mdTier', 'mdAcc', 'mdSort'].forEach(id => $(id).onchange = () => { MD.page = 1; loadMedia(); });
+['mdTier', 'mdAcc', 'mdSort', 'mdCountry'].forEach(id => $(id).onchange = () => { MD.page = 1; loadMedia(); });
+$('mdBody').addEventListener('click', async e => { const b = e.target.closest('[data-mdcty]'); if (!b) return;
+  const r = MDROWS[+b.dataset.mdcty], to = r.country === 'intl' ? 'id' : 'intl';
+  const x = await api('/api/media/country', {domains: [r.domain], country: to});
+  toast(x && x.ok ? `${r.domain}: marked ${to === 'intl' ? 'international' : 'Indonesian'}` : (x && x.error) || 'Not changed'); loadMedia(); });
 $('mdPrev').onclick = () => { MD.page = Math.max(1, MD.page - 1); loadMedia(); };
 $('mdNext').onclick = () => { MD.page++; loadMedia(); };
 $('mdAddBtn').onclick = async () => { const r = await api('/api/media/add', {text: $('mdAdd').value});

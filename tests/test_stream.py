@@ -438,3 +438,55 @@ def test_dashboard_reads_on_while_the_worker_holds_the_database(tmp_path, monkey
         hold.close()
     out = st.status(5)
     assert "queue" in out and out["settings"]["threads"]
+
+
+def test_international_outlets_pause_and_catch_up(tmp_path, monkeypatch):
+    """Non-Indonesian outlets: recognised (address, then the language of their titles, the admin's mark first),
+    paused on request (their sources are not checked), and the paused period caught up later."""
+    import json as _j
+    import time as _t
+    from crawler import intl, paths, stream
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    st = stream.Stream(str(tmp_path / "data" / "stream"))
+    st.cfg = stream.settings()
+    doms = ["kompas.com", "bbc.com", "thestar.com.my", "radar.id", "baru.com"]
+    with st.lock:
+        st._db.executemany("INSERT INTO sources(id, kind, domain, url, next_check, interval, checked) VALUES "
+                           "(?, 'sitemap', ?, '', 0, 3600, 1)", [(f"sm:{d}", d) for d in doms])
+        rows = [(f"kompas/{i}", "kompas.com", f"Warga Bekasi minta pemerintah perbaiki jalan rusak {i}") for i in range(10)]
+        rows += [(f"bbc/{i}", "bbc.com", f"UK inflation falls as energy prices ease {i}") for i in range(10)]
+        rows += [("baru/1", "baru.com", "Harga cabai naik di pasar")]
+        st._db.executemany("INSERT INTO articles(key, url, domain, title, status, fetched) VALUES "
+                           "(?, 'https://x/' || ?, ?, ?, 'success', ?)", [(k, k, d, t, _t.time()) for k, d, t in rows])
+        st._db.commit()
+    cnt = intl.classify(st)
+    got = {r["domain"]: r["country"] for r in st.rq("SELECT domain, country FROM outlet_country")}
+    assert got == {"kompas.com": "id", "bbc.com": "intl", "thestar.com.my": "intl", "radar.id": "id",
+                   "baru.com": "unknown"} and cnt["intl"] == 2
+    assert intl.mark(st, ["kompas.com"], "intl") == 1 and intl.mark(st, ["kompas.com"], "") == 1
+    assert {r["domain"]: r["country"] for r in st.rq("SELECT domain, country FROM outlet_country")}["kompas.com"] in \
+        ("intl", "id")
+    intl.mark(st, ["kompas.com"], "id")
+    stream.save_settings({"pause_international": True})
+    st.cfg = stream.settings()
+    intl.apply_pause(st)
+    assert {r["domain"] for r in st.due_sources()} == {"kompas.com", "radar.id", "baru.com"}
+    assert intl.status(st)["paused"] and intl.status(st)["paused_since"]
+    stream.save_settings({"pause_international": False})
+    st.cfg = stream.settings()
+    intl.apply_pause(st)
+    assert len(st.due_sources()) == 5
+    missed = intl.status(st)["missed"]
+    assert missed and missed["start"] == missed["end"]
+    sent = []
+    monkeypatch.setattr(stream, "command", lambda c, a="": sent.append((c, _j.loads(a))))
+    out = intl.catch_up(st, missed["start"], missed["end"])
+    assert out["how"] == "sweep" and sent[0][0] == "catchup_domains" and set(sent[0][1]["domains"]) == {
+        "bbc.com", "thestar.com.my"} and intl.status(st)["missed"] is None
+    out = intl.catch_up(st, "2025-01-01", "2025-03-31")                          # a long period: archive jobs
+    assert out["how"] == "archive" and out["jobs"] == 2
+    assert {r["domain"] for r in st.rq("SELECT domain FROM backfill")} == {"bbc.com", "thestar.com.my"}
+    swept = []
+    monkeypatch.setattr(st, "check_sitemap", lambda src, catchup=0: swept.append((src["domain"], catchup)) or (0, False, {}))
+    st.run_catchup(days=2, domains=["bbc.com"])                                  # the worker's one-off sweep
+    assert swept == [("bbc.com", 2)] and not st.meta("catchup_last")             # the daily sweep's date untouched

@@ -62,6 +62,9 @@ def main() -> None:
                     s.start(log)
                 else:
                     s.cfg, s.kw_cache = cfg, (0.0, [])
+                if prev.get("pause_international") != cfg.get("pause_international"):
+                    from crawler import intl
+                    intl.apply_pause(s)                   # international outlets paused / back (within seconds)
             last_mt, prev = mt, cfg
             for cmd, arg in stream.take_commands(s):
                 if cmd == "catchup":
@@ -75,6 +78,13 @@ def main() -> None:
                     s.remove_outlets(json.loads(arg or "[]"))
                 elif cmd == "subs":
                     media_db.install()
+                elif cmd == "catchup_domains":
+                    a = json.loads(arg or "{}")
+                    threading.Thread(target=stream._quiet, args=(s.run_catchup, int(a.get("days") or 1),
+                                                                 list(a.get("domains") or [])), daemon=True).start()
+                elif cmd == "classify":
+                    from crawler import intl
+                    threading.Thread(target=stream._quiet, args=(intl.classify, s), daemon=True).start()
                 elif cmd == "archive_export":
                     from crawler import backfill
                     threading.Thread(target=stream._quiet, args=(backfill.export, s, arg, OUTPUT_DIR), daemon=True).start()

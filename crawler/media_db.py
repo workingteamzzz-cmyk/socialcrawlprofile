@@ -435,8 +435,32 @@ def access(x: dict | None, excluded: bool = False) -> str:
     return "blocked"
 
 
-def listing(q: str = "", tier: str = "", acc: str = "", page: int = 1, size: int = 50, sort: str = "activity") -> dict:
+_COUNTRY: dict = {"t": 0.0, "v": {}}
+
+
+def countries() -> dict:
+    """{domain: 'id' | 'intl' | 'unknown'} from the stream's decision (intl.py), read at most every minute."""
+    if time.time() - _COUNTRY["t"] < 60:
+        return _COUNTRY["v"]
+    out: dict = {}
+    p = _stream_db()
+    if os.path.exists(p):
+        try:
+            c = sqlite3.connect(f"file:{p}?mode=ro", uri=True, timeout=5)
+            try:
+                out = {d: k for d, k in c.execute("SELECT domain, country FROM outlet_country")}
+            finally:
+                c.close()
+        except sqlite3.Error:
+            out = _COUNTRY["v"]
+    _COUNTRY.update(t=time.time(), v=out)
+    return out
+
+
+def listing(q: str = "", tier: str = "", acc: str = "", page: int = 1, size: int = 50, sort: str = "activity",
+            country: str = "") -> dict:
     reg, st = registry(), stats()
+    cty = countries()
     try:
         from . import stream
         excl = set(stream.settings().get("exclude_domains") or [])
@@ -452,8 +476,10 @@ def listing(q: str = "", tier: str = "", acc: str = "", page: int = 1, size: int
                      "per_day": round(x.get("found7", 0) / 7, 1), "last_day": x.get("last_day", ""),
                      "read": x.get("success", 0), "failed": x.get("failed", 0), "short": x.get("filtered", 0),
                      "robots": x.get("skipped", 0), "error": x.get("error", ""), "rss": x.get("rss", 0),
-                     "sitemap": x.get("has_sitemap", False), "subscribed": d in subs, "site": x.get("site", "")})
-    counts = {"total": len(rows), "tiers": Counter(r["tier"] for r in rows), "access": Counter(r["access"] for r in rows)}
+                     "sitemap": x.get("has_sitemap", False), "subscribed": d in subs, "site": x.get("site", ""),
+                     "country": cty.get(d, "unknown")})
+    counts = {"total": len(rows), "tiers": Counter(r["tier"] for r in rows), "access": Counter(r["access"] for r in rows),
+              "countries": Counter(r["country"] for r in rows)}
     ql = (q or "").strip().lower()
     if ql:
         rows = [r for r in rows if ql in r["domain"] or ql in (r["name"] or "").lower()]
@@ -461,6 +487,8 @@ def listing(q: str = "", tier: str = "", acc: str = "", page: int = 1, size: int
         rows = [r for r in rows if r["tier"] == tier]
     if acc:
         rows = [r for r in rows if r["access"] == acc]
+    if country in ("id", "intl", "unknown"):
+        rows = [r for r in rows if r["country"] == country]
     if sort == "name":
         rows.sort(key=lambda r: (r["domain"] != ql, r["domain"]))
     else:

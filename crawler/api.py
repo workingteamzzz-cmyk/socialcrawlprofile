@@ -1175,9 +1175,39 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
     # ---------- registered media ----------
     @app.get("/api/media", tags=["media"], dependencies=auth,
              summary="Registered media: activity tier, access (readable or not), paid login")
-    def media_list(q: str = "", tier: str = "", access: str = "", page: int = 1, size: int = 50, sort: str = "activity"):
+    def media_list(q: str = "", tier: str = "", access: str = "", page: int = 1, size: int = 50, sort: str = "activity",
+                   country: str = ""):
         from . import media_db
-        return media_db.listing(q[:100], tier, access, page, size, sort)
+        return media_db.listing(q[:100], tier, access, page, size, sort, country)
+
+    @app.post("/api/media/country", tags=["media"], dependencies=admin_only,
+              summary="Mark outlets Indonesian ('id') or international ('intl'), or '' for automatic")
+    def media_country(body: dict, request: Request):
+        from . import intl, stream
+        try:
+            n = intl.mark(stream.get(), list(body.get("domains") or [])[:5000], str(body.get("country") or ""))
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        log(request, "marked outlets' country", n=n, country=str(body.get("country") or "auto"))
+        return {"ok": True, "marked": n}
+
+    @app.post("/api/stream/intl/classify", tags=["stream"], dependencies=admin_only,
+              summary="Decide again which outlets are international (runs in the stream's worker)")
+    def intl_classify(request: Request):
+        from . import stream
+        stream.command("classify")
+        return {"ok": True}
+
+    @app.post("/api/stream/intl/catchup", tags=["stream"], dependencies=admin_only,
+              summary="Catch up the international outlets for a period (after a pause)")
+    def intl_catchup(body: dict, request: Request):
+        from . import intl, stream
+        try:
+            out = intl.catch_up(stream.get(), str(body.get("start") or ""), str(body.get("end") or ""))
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        log(request, "caught up international outlets", **{k: out[k] for k in ("outlets", "how", "start", "end")})
+        return {"ok": True, **out}
 
     @app.post("/api/media/add", tags=["media"], dependencies=admin_only, summary="Register outlets")
     def media_add(body: MediaAdd, request: Request):

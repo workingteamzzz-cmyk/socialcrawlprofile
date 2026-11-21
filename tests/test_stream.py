@@ -263,7 +263,7 @@ def test_site_check_marks_down_sites_and_brings_back_living_ones(st, monkeypatch
 
 def test_every_link_not_yet_known_is_taken_old_ones_behind_the_news(st, monkeypatch):
     from crawler.medmas.discovery import sitemaps as sm
-    st.cfg.update(all_links=True, old_per_check=2, homepage=True)
+    st.cfg.update(all_links=True, old_per_check=2, homepage=True, min_date="")
     today = datetime.now(WIB).strftime("%Y-%m-%d")
     urlset = ('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
               f"<url><loc>https://y.id/berita/{today}/kabar-terbaru-hari-ini</loc><lastmod>{today}</lastmod></url>"
@@ -612,3 +612,34 @@ def test_older_links_are_read_only_in_the_night_hours(tmp_path, monkeypatch):
     assert stream.save_settings({"old_hours": "22 - 5"})["old_hours"] == "22-5"
     st.cfg["old_hours"] = "22-5"
     assert stream.Stream.backlog_open(st, datetime(2026, 11, 21, 23, 0, tzinfo=stream.WIB).timestamp())
+
+
+def test_priorities_late_news_by_day_archive_at_night_nothing_before_min_date(tmp_path, monkeypatch):
+    """Fresh first; late news (last late_days days) by day when a reader is free; the archive only at night;
+    nothing published before min_date unless a media-archive job; a title matching a keyword jumps the queue."""
+    from datetime import datetime, timedelta
+    from crawler import paths, stream
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    st = stream.Stream(str(tmp_path / "s"))
+    st.cfg = {**stream.settings(), "old_hours": "1-6", "late_days": 7, "min_date": "2026-01-01", "domain_gap": 0,
+              "keywords": ["banjir bandang"]}
+    day = lambda n: (datetime.now(stream.WIB) - timedelta(days=n)).strftime("%Y-%m-%d")
+    assert st.too_old("2025-12-31") and not st.too_old("2026-01-01")
+    assert st.too_old("", "https://a.id/2019/05/berita") and not st.too_old("", "https://a.id/2026/05/berita")
+    st.cfg["min_date"] = ""
+    assert not st.too_old("2019-01-01")
+    st.cfg["min_date"] = "2026-01-01"
+    n = st.add_found([{"url": "https://x.id/berita/lama", "domain": "x.id", "date": "2024-03-01"},
+                      {"url": "https://x.id/2018/02/berita-lama", "domain": "x.id"}], "sitemap")
+    assert n == 0
+    st._enqueue({"key": "late", "url": "https://l.id/a", "domain": "l.id", "source": "sitemap:old", "feed_date": day(4)})
+    st._enqueue({"key": "arch", "url": "https://r.id/a", "domain": "r.id", "source": "sitemap:old", "feed_date": day(20)})
+    st._enqueue({"key": "kw", "url": "https://k.id/a", "domain": "k.id", "source": "sitemap:old", "feed_date": day(20),
+                 "title": "Banjir bandang di Garut"})
+    assert "k.id" in st.by_domain                                           # keyword in the title: fresh lane
+    monkeypatch.setattr(st, "backlog_open", lambda now=None: False)
+    got = [st.next_job(), st.next_job(), st.next_job()]
+    assert [g[1]["key"] if g else None for g in got] == ["kw", "late", None]   # by day: the archive waits
+    monkeypatch.setattr(st, "backlog_open", lambda now=None: True)
+    assert st.next_job()[1]["key"] == "arch"
+    assert set(st.lag_minutes()) == {"n", "median", "within30"}

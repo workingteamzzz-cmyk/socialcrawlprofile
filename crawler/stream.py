@@ -32,14 +32,14 @@ DEFAULTS = {"enabled": False, "threads": 8, "discovery_threads": 8, "rss_minutes
             "catchup_days": 2, "catchup_hour": 1, "weekly_report": True, "report_weekday": 0, "report_hour": 7,
             "health_on_start": True, "health_weekday": 6, "health_hour": 2,
             "top_n": 1000, "top2_n": 2000, "active2_hours": 2, "semi_hours": 4, "rare_hours": 24, "inactive_days": 3, "dead_days": 7,
-            "retention_days": 0, "max_age_hours": 48, "all_links": True, "old_per_check": 50, "old_per_day": 30000, "old_hours": "1-6", "homepage": True, "domain_gap": 1.5, "rss": True, "sitemaps": True,
+            "retention_days": 0, "max_age_hours": 48, "all_links": True, "old_per_check": 50, "old_per_day": 30000, "old_hours": "1-6", "late_days": 7, "min_date": "2026-01-01", "homepage": True, "domain_gap": 1.5, "rss": True, "sitemaps": True,
             "keywords": [], "robots": True, "exclude_domains": [],
             "fetch_googlebot": True, "fetch_cloudscraper": True,     # refused pages: see fetch_policy.py
             "auto_add_media": True, "retry_failed": True,             # outlets found by News Search; retry later
             "pause_international": False,                             # non-Indonesian outlets: see intl.py
             "reader_processes": 0}                                    # 0 = automatic (CPU cores - 1, max 4)
 LIMITS = {"threads": (2, 64), "reader_processes": (0, 8), "discovery_threads": (2, 48), "rss_minutes": (2, 240), "sitemap_minutes": (10, 720),
-          "old_per_check": (0, 20000), "old_per_day": (0, 2_000_000),
+          "old_per_check": (0, 20000), "old_per_day": (0, 2_000_000), "late_days": (2, 30),
           "catchup_days": (0, 7), "catchup_hour": (0, 23), "health_weekday": (0, 6), "health_hour": (0, 23), "report_weekday": (0, 6), "report_hour": (0, 23),
           "top_n": (50, 20000), "top2_n": (0, 20000), "active2_hours": (1, 24), "semi_hours": (1, 48), "rare_hours": (2, 168), "inactive_days": (1, 30),
           "dead_days": (1, 60),
@@ -150,6 +150,10 @@ def save_settings(data: dict) -> dict:
             if v and not (m and 0 <= int(m[1]) <= 23 and 1 <= int(m[2]) <= 24 and int(m[1]) != int(m[2])):
                 raise ValueError("Older links: hours as from-to, e.g. 1-6 (empty = any time).")
             v = f"{int(m[1])}-{int(m[2])}" if v else ""
+        elif k == "min_date":                              # nothing published before this (unless asked for)
+            v = str(v or "").strip()
+            if v and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", v):
+                raise ValueError("Oldest publication date: YYYY-MM-DD, or empty for no limit.")
         elif k == "domain_gap":
             v = max(0.5, min(30.0, float(v)))
         elif k in ("rss", "sitemaps", "robots", "weekly_report", "health_on_start", "all_links", "homepage",
@@ -447,6 +451,8 @@ class Stream:
             if not url.startswith("http") or not is_article_link(url) or is_junk_page("", url):
                 continue
             d = (it.get("date") or "")[:10]
+            if self.too_old(d, url):
+                continue                                   # published before the oldest date wanted
             old = bool(d and d < cutoff) or bool(it.get("old"))
             if not old:
                 n_fresh += 1
@@ -507,11 +513,47 @@ class Stream:
             self._cut = (time.time(), self.cutoff())
         return self._cut[1]
 
-    def is_fresh(self, job: dict) -> bool:
-        """The fresh-news lane: published within the stream's days (or no date known) and not a media-archive job."""
+    def too_old(self, d: str, url: str = "") -> bool:
+        """Published before min_date (default 2026-01-01): not taken, except by a media-archive job. Undated links
+        are judged by a year in their address (/2019/05/…)."""
+        lim = str(self.cfg.get("min_date", "2026-01-01") or "")
+        if not lim:
+            return False
+        if d and re.match(r"\d{4}-\d{2}-\d{2}$", d):
+            return d < lim
+        m = re.search(r"/((?:19|20)\d{2})/(?:[01]?\d)/", url or "")
+        return bool(m) and m[1] < lim[:4]
+
+    def _title_wanted(self, title: str) -> bool:
+        """The link's title (from the sitemap / RSS) already matches a keyword or report topic."""
+        if not title:
+            return False
+        from .medmas.filters import keyword_match
+        try:
+            return any(keyword_match(kw, title) for kw in self.keywords())
+        except Exception:  # noqa: BLE001
+            return False
+
+    def is_late(self, job: dict) -> bool:
+        """Backlog links worth reading by day when a reader is free: published in the last `late_days` days
+        (news listed late), or a media-archive job."""
         src = job.get("source") or ""
-        if src.startswith("backfill:") or src.endswith(":old"):
-            return False                               # a media-archive job, or a link known to be older
+        if src.startswith("backfill:"):
+            return True
+        d = (job.get("feed_date") or "")[:10]
+        lim = (datetime.now(WIB) - timedelta(days=int(self.cfg.get("late_days", 7)))).strftime("%Y-%m-%d")
+        return bool(d) and d >= lim
+
+    def is_fresh(self, job: dict) -> bool:
+        """The fresh-news lane: published within the stream's days (or no date known) and not a media-archive job —
+        or a link whose title already matches a client's keywords, whatever its date."""
+        src = job.get("source") or ""
+        if src.startswith("backfill:"):
+            return False                               # a media-archive job
+        if self._title_wanted(job.get("title") or ""):
+            return True
+        if src.endswith(":old"):
+            return False                               # a link known to be older
         d = (job.get("feed_date") or "")[:10]
         if not d:                                      # undated: fresh only when just found (2 days)
             return float(job.get("discovered") or time.time()) > time.time() - 2 * 86400
@@ -702,6 +744,7 @@ class Stream:
         return (a <= h < b) if a < b else (h >= a or h < b)
 
     def _take(self, by: dict, rr: deque, now: float, only_archive: bool = False):
+        """only_archive (by day, backlog lane): only late news (last late_days days) and media-archive jobs."""
         for _ in range(len(rr)):
             dom = rr[0]
             rr.rotate(-1)
@@ -715,8 +758,8 @@ class Stream:
                 continue
             if dom in self.busy_domains or self.next_ok.get(dom, 0) > now:
                 continue
-            if only_archive and not str(q[0].get("source") or "").startswith("backfill:"):
-                continue                                   # by day: older links wait for the night hours
+            if only_archive and not self.is_late(q[0]):
+                continue                                   # by day: the archive waits for the night hours
             self.busy_domains.add(dom)
             self.qn -= 1
             return dom, q.popleft()
@@ -808,6 +851,8 @@ class Stream:
             if not bj or bj[0]["status"] == "cancelled" or (re.match(r"\d{4}-\d{2}-\d{2}$", d)
                                                            and not bj[0]["start"] <= d <= bj[0]["end"]):
                 status = "filtered"
+        if status == "success" and not archive_job and self.too_old(d if re.match(r"\d{4}-\d{2}-\d{2}$", d) else ""):
+            status = "old"                                   # published before the oldest date wanted
         if status == "success" and not archive_job and not self.cfg.get("all_links", True) and \
                 re.match(r"\d{4}-\d{2}-\d{2}$", d) and d < cutoff:
             status = "old"
@@ -936,8 +981,8 @@ class Stream:
         out of the queue, a chunk at a time, so the database and its indexes stay light. Nothing is lost for good:
         such links are not marked as seen — an outlet's sitemap lists them again, and the media archive can fetch
         any period."""
-        cut = self.cutoff()
-        st = self.__dict__.setdefault("trim", {})
+        cut = (datetime.now(WIB) - timedelta(days=int(self.cfg.get("late_days", 7)))).strftime("%Y-%m-%d")
+        st = self.__dict__.setdefault("trim", {})                 # late news (last late_days days) stays
         st.update(running=True, removed=0, started=time.time(), finished=0, error="")
         ev = self.stop_event
         try:
@@ -1575,6 +1620,33 @@ class Stream:
                 break
         return out
 
+    def lag_minutes(self) -> dict:
+        """How fast news arrives: minutes from publication to stored, for today's articles read in the last hour
+        (those with a publication time). Median and the share within 30 minutes."""
+        now = time.time()
+        c = self.__dict__.get("_lag")
+        if c and now - c[0] < 60:
+            return c[1]
+        today = datetime.now(WIB).strftime("%Y-%m-%d")
+        lags = []
+        try:
+            for r in self.rq("SELECT pub_time, fetched FROM articles WHERE status='success' AND fetched > ? AND "
+                             "pub_date = ? AND pub_time > '00:00' LIMIT 5000", (now - 3600, today)):
+                try:
+                    t = datetime.strptime(f"{today} {r['pub_time'][:5]}", "%Y-%m-%d %H:%M").replace(tzinfo=WIB)
+                except ValueError:
+                    continue
+                m = (r["fetched"] - t.timestamp()) / 60
+                if -5 <= m <= 24 * 60:
+                    lags.append(max(0.0, m))
+        except sqlite3.Error:
+            pass
+        lags.sort()
+        out = {"n": len(lags), "median": round(lags[len(lags) // 2]) if lags else None,
+               "within30": round(100 * sum(1 for x in lags if x <= 30) / len(lags)) if lags else None}
+        self.__dict__["_lag"] = (now, out)
+        return out
+
     def status(self, latest: int = 30, q: str = "") -> dict:
         now = time.time()
         today = datetime.now(WIB).strftime("%Y-%m-%d")
@@ -1619,7 +1691,8 @@ class Stream:
                 "readers_busy": len(self.busy_domains), "last_error": self.last_error, "export": dict(self.export),
                 "days": self.days_with_articles(), "fetch_methods": self.fetch_methods(7),
                 "maintenance": self.meta("maintenance"), "international": self._intl_status(),
-                "latest": [dict(r) for r in rows], "old_hours": str(settings().get("old_hours", "1-6") or "")}
+                "latest": [dict(r) for r in rows], "old_hours": str(settings().get("old_hours", "1-6") or ""),
+                "late_days": int(settings().get("late_days", 7)), "lag": self.lag_minutes()}
         if live:                                             # the engine runs in its own process: its live state
             for k in ("running", "since", "per_minute", "per_day_pace", "readers_busy", "last_error", "export"):
                 out[k] = live.get(k, out[k])

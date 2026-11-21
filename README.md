@@ -334,10 +334,14 @@ page shows the live pace and the "per day at this pace" figure.
 - **Fresh-news lane**: the Live Stream keeps two queues — news from the stream's days (and undated links) and the
   backlog (older links, media-archive jobs). Readers always take fresh news first; one reader works the backlog, the
   others take it only when no fresh page can be read. "Waiting to be read" shows both.
-- **Older links wait for the night**: older links (not media-archive jobs) are read only in the night hours (Stream
-  settings, default `1-6` = 01:00–06:00 WIB; empty = any time) — by day every reader is on fresh news. At most
-  `old_per_day` older links (default 30,000) are stored a day, and a visit that lists more than 1,500 "new" links at
-  once (an archive listing, or a sitemap whose every entry carries the file's build date) is put in the backlog.
+- **Priorities**: (1) fresh news (the stream's days) — always, at once; a link whose title already matches a keyword
+  or report topic joins it, whatever its date; (2) late news (published in the last `late_days` days, default 7) —
+  by day only when a reader is free; (3) older links — only in the night hours (`old_hours`, default `1-6` = 01:00–
+  06:00 WIB); (4) media-archive jobs — any time. Nothing published before `min_date` (default 2026-01-01; judged by
+  the date, or a year in the address) is taken, except by a media-archive job. At most `old_per_day` older links
+  (default 30,000) are stored a day; a visit listing more than 1,500 "new" links at once (an archive, or a sitemap
+  whose every entry carries the file's build date) goes to the backlog. The Live Stream shows how many minutes after
+  publication news arrives (median, and the share within 30 minutes).
 - **The media list grows by itself**: an outlet News Search or Bulk links found that the list lacks is registered and
   read by the Live Stream from then on (platforms, aggregators and excluded outlets are left out; Stream settings).
 - **Second tries**: articles that failed for a passing reason (timeout, connection, 5xx / 429, empty answer) are

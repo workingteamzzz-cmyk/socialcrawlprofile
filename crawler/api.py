@@ -261,6 +261,8 @@ class StreamSettings(BaseModel):
     old_per_check: int | None = Field(None, description="older links taken per outlet visit (the rest next visit)")
     old_per_day: int | None = Field(None, description="older links stored per day in total (all outlets)")
     old_hours: str | None = Field(None, description="hours (WIB) older links are read, e.g. 1-6; empty = any time")
+    late_days: int | None = Field(None, description="late news (read by day when a reader is free): the last N days")
+    min_date: str | None = Field(None, description="oldest publication date taken (YYYY-MM-DD); older only by media archive")
     homepage: bool | None = Field(None, description="also read each outlet's front page for article links")
     health_weekday: int | None = Field(None, description="weekly site check: 0 = Monday … 6 = Sunday")
     health_hour: int | None = Field(None, description="weekly site check: hour, WIB")

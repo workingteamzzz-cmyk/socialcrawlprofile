@@ -686,3 +686,17 @@ def test_watchdog_restarts_a_hung_or_stalled_worker_but_not_one_starting_up(tmp_
     assert stream._stuck(now - 1000, now - 5000) == ("", 0.0)
     put(per_minute=40)
     assert stream._stuck(now - 1000, now - 5000) == ("", 0.0)
+
+
+def test_an_unchanged_sitemap_file_is_not_processed_again(tmp_path, monkeypatch):
+    """A sitemap file identical to the last visit's is skipped (its links are known); a changed one is read; index
+    files are always followed."""
+    from crawler import paths, stream
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    st = stream.Stream(str(tmp_path / "s"))
+    body = b'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://a.id/x</loc></url></urlset>'
+    assert not st._unchanged("https://a.id/s.xml", body)
+    assert st._unchanged("https://a.id/s.xml", body) and st.sm_unchanged == 1
+    assert not st._unchanged("https://a.id/s.xml", body + b" ")
+    idx = b'<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></sitemapindex>'
+    assert not st._unchanged("https://a.id/i.xml", idx) and not st._unchanged("https://a.id/i.xml", idx)

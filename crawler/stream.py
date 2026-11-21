@@ -434,7 +434,7 @@ class Stream:
         hours = max(self.cfg["max_age_hours"], (self.cfg.get("catchup_days") or 0) * 24 + 24)
         return (datetime.now(WIB) - timedelta(hours=hours)).strftime("%Y-%m-%d")
 
-    def add_found(self, items: list[dict], source: str, front: bool = True) -> int:
+    def add_found(self, items: list[dict], source: str, front: bool = True, note: dict | None = None) -> int:
         """New article links -> the reading queue (front: fresh news first; catch-up links go to the back).
         Only articles, only from the days the stream covers."""
         from .medmas.filters import is_article_link
@@ -459,6 +459,8 @@ class Stream:
                 n_fresh += 1
                 old = n_fresh > FRESH_PER_CHECK            # thousands "new" at once: an archive, not today's news
             if old and not take_all:
+                if note is not None:
+                    note["left_over"] = True
                 continue
             late = old and bool(d) and d >= late_cut and n_fresh <= FRESH_PER_CHECK   # late news: no daily budget
             rows.append(((norm_key(url), url, it.get("domain") or "", (it.get("title") or "")[:500],
@@ -469,6 +471,8 @@ class Stream:
         with self.lock:
             for row, old, late in rows:
                 if old and not late and room_old <= 0:
+                    if note is not None:
+                        note["left_over"] = True              # some left for the next visit
                     continue                                   # older links: a share per visit, the rest next time
                 if self._db.execute("SELECT 1 FROM seen WHERE key=?", (row[0],)).fetchone():
                     continue                                   # read before and purged since: not again
@@ -630,7 +634,7 @@ class Stream:
         months = {d.strftime("%Y-%m") for d in back}
         stamps = [f for d in back[1:catchup + 1] for f in (d.strftime("%Y-%m-%d"), d.strftime("%Y%m%d"),
                                                             d.strftime("%Y/%m/%d"), d.strftime("%Y/%m/") + f"{d.day}")]
-        items, ok_any, queue, seen, reads = [], False, list(roots), set(), 0
+        items, ok_any, queue, seen, reads, sigs = [], False, list(roots), set(), 0, {}
         busy = self.tier_of(src) in ("active", "active2")    # big, busy outlets: read deeper (news sitemaps first)
         limit = 14 if catchup else (SITEMAP_READS_BUSY if busy else 6)
         while queue and reads < limit:
@@ -644,6 +648,8 @@ class Stream:
                 continue
             reads += 1
             ok_any = True
+            if not catchup and self._unchanged(u, body, sigs):
+                continue                                     # same file as last visit: nothing new in it
             kind, data = sm._parse_sitemap(body)
             if kind == "index":
                 ranked = sorted(((x, sm._sitemap_priority(x, frozenset(months))) for x in data),
@@ -673,7 +679,37 @@ class Stream:
             if roots and src["url"]:                         # known sitemaps all failed: look for them again next time
                 extra["url"] = ""
             return 0, True, extra
-        return self.add_found(items, "catchup" if catchup else "sitemap", front=not catchup), False, extra
+        note: dict = {}
+        n = self.add_found(items, "catchup" if catchup else "sitemap", front=not catchup, note=note)
+        if sigs and not note.get("left_over"):
+            self._remember(sigs)                             # every link of these files taken: skip them next time
+        return n, False, extra
+
+    SM_SEEN_MAX = 300_000
+
+    def _unchanged(self, url: str, body: bytes, pending: dict | None = None) -> bool:
+        """The sitemap file is byte-for-byte one whose links were all taken before (size + checksum, in memory):
+        it is not parsed and stored again. Index files are always followed. A new signature goes to `pending` and is
+        kept (_remember) only once every link of the visit was taken — a file with older links left for the next
+        visit (the per-visit share) is read again."""
+        if not body or b"<sitemapindex" in body[:2000]:
+            return False
+        seen = self.__dict__.setdefault("_sm_seen", {})
+        sig = (len(body), zlib.crc32(body))
+        if seen.get(url) == sig:
+            self.sm_unchanged = getattr(self, "sm_unchanged", 0) + 1     # since start (Live Stream page)
+            return True
+        if pending is None:
+            self._remember({url: sig})
+        else:
+            pending[url] = sig
+        return False
+
+    def _remember(self, sigs: dict) -> None:
+        seen = self.__dict__.setdefault("_sm_seen", {})
+        if len(seen) + len(sigs) > self.SM_SEEN_MAX:
+            seen.clear()                                     # memory stays small; the next visits re-learn
+        seen.update(sigs)
 
     def homepage_links(self, dom: str) -> list | None:
         """The article links on an outlet's front page (same site only). None = the page did not answer."""
@@ -1574,10 +1610,11 @@ class Stream:
         background at most every minute and the dashboard gets the last numbers at once (None the very first time)."""
         c = self.__dict__.setdefault("_sc", {"t": 0.0, "v": {"queue": None, "queue_fresh": None, "stored": None},
                                              "busy": False})
-        if time.time() - c["t"] > 60 and not c["busy"]:
+        if time.time() - c["t"] > c.get("every", 60) and not c["busy"]:
             c["busy"] = True
 
             def run():
+                t0 = time.time()
                 try:
                     cut = self.cutoff()
                     one = lambda sql, a=(): self.rq(sql, a)[0]["n"]  # noqa: E731
@@ -1588,6 +1625,7 @@ class Stream:
                                                                "'%:old'", (time.time() - 2 * 86400,)),
                               "stored": one("SELECT COUNT(*) n FROM articles WHERE status='success'")}
                     c["t"] = time.time()
+                    c["every"] = max(60, min(900, 30 * (c["t"] - t0)))   # costly counts: less often (max 15 min)
                 except Exception:  # noqa: BLE001  busy: try again shortly
                     c["t"] = time.time() - 45
                 finally:
@@ -1607,7 +1645,7 @@ class Stream:
             return {"t": now, "running": self.running, "since": int(self.started) if self.running else 0,
                     "per_minute": round(per_min, 1), "per_day_pace": int(per_min * 60 * 24),
                     "readers_busy": len(self.busy_domains), "queue_mem": self.qn, "queue_backlog_mem": self.qn_old,
-                    "trim": dict(self.__dict__.get("trim") or {}),
+                    "trim": dict(self.__dict__.get("trim") or {}), "sm_unchanged": getattr(self, "sm_unchanged", 0),
                     "last_error": self.last_error,
                     "export": dict(self.export), "health": dict(self.health), "catchup": dict(self.catchup)}
 

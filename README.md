@@ -334,6 +334,9 @@ page shows the live pace and the "per day at this pace" figure.
 - **Fresh-news lane**: the Live Stream keeps two queues — news from the stream's days (and undated links) and the
   backlog (older links, media-archive jobs). Readers always take fresh news first; one reader works the backlog, the
   others take it only when no fresh page can be read. "Waiting to be read" shows both.
+- **Light on the server**: a sitemap file identical to the last visit's (size + checksum) is not parsed and stored
+  again — only once every link in it was taken; the waiting-link counts run less often when they are costly (up
+  to every 15 minutes on a big database).
 - **Never stays down**: Docker restarts the app after a crash or a server reboot; the installer adds a watchdog (cron,
   every 2 minutes) that restarts the app when it runs but no longer answers; the web app restarts the stream's worker
   when it dies, when it stops writing its live state for 5 minutes (hung) or when it reads nothing for 20 minutes while

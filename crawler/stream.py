@@ -1736,12 +1736,14 @@ class Stream:
                 "maintenance": self.meta("maintenance"), "international": self._intl_status(),
                 "latest": [dict(r) for r in rows], "old_hours": str(settings().get("old_hours", "1-6") or ""),
                 "late_days": int(settings().get("late_days", 7)), "lag": self.lag_minutes()}
+        ex = [x for x in _WORKER["exits"] if x[0] > time.time() - 86400]   # shown even while it is down
+        out["restarts"] = {"n": len(ex), "last": ex[-1][0] if ex else 0, "code": ex[-1][1] if ex else None}
+        p = _WORKER.get("proc")
+        out["worker_up"] = bool(p is not None and p.poll() is None)
         if live:                                             # the engine runs in its own process: its live state
             for k in ("running", "since", "per_minute", "per_day_pace", "readers_busy", "last_error", "export"):
                 out[k] = live.get(k, out[k])
             out["processes"] = live.get("processes", 1)
-            ex = [x for x in _WORKER["exits"] if x[0] > time.time() - 86400]
-            out["restarts"] = {"n": len(ex), "last": ex[-1][0] if ex else 0, "code": ex[-1][1] if ex else None}
             out["trim"] = live.get("trim") or {}
             out["health"].update(live.get("health") or {})
             out["catchup"].update(live.get("catchup") or {})

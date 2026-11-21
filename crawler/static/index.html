@@ -3084,7 +3084,7 @@ async function loadStream(){
   $('navStream').textContent = d.running ? '●' : '';
   $('lsStRet').textContent = cfg.retention_days ? cfg.retention_days + ' days' : 'for good';
   $('lsSRead').textContent = fmt(d.today.read); $('lsSReadS').textContent = `${fmt(d.today.failed)} could not be read · ${fmt(d.today.skipped || 0)} skipped (robots.txt / excluded) · ${d.stored === null || d.stored === undefined ? '…' : fmt(d.stored)} stored`;
-  $('lsSPace').textContent = fmt(d.per_minute) + ' /min'; $('lsSPaceS').textContent = (d.running ? `≈ ${fmt(d.per_day_pace)} per day at this pace` + (d.processes > 1 ? ` · ${d.processes} reader processes` : '') : 'stream is stopped')
+  $('lsSPace').textContent = fmt(d.per_minute) + ' /min'; $('lsSPaceS').textContent = (d.running ? `≈ ${fmt(d.per_day_pace)} per day at this pace` + (d.processes > 1 ? ` · ${d.processes} reader processes` : '') : (d.worker_up && !d.worker ? 'stream is starting (a big database takes a few minutes)' : 'stream is stopped'))
     + (d.restarts && d.restarts.n ? ` · restarted ${d.restarts.n}× in 24 h (last ${new Date(d.restarts.last * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}${d.restarts.code === -9 ? ', out of memory' : d.restarts.code === 'hung' ? ', hung' : d.restarts.code === 'stalled' ? ', stalled' : d.restarts.code !== null ? ', exit ' + d.restarts.code : ''})` : '');
   if (d.lag && d.lag.median !== null && d.lag.median !== undefined) $('lsSPaceS').textContent += ` · news arrives ${fmt(d.lag.median)} min after publication (median; ${d.lag.within30}% within 30 min)`;
   $('lsSMatch').textContent = fmt(d.today.matched); $('lsSMatchS').textContent = `${d.keywords} keyword(s) incl. report topics`;

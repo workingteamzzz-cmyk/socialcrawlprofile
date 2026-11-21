@@ -370,7 +370,7 @@ def test_fresh_news_lane_comes_before_the_backlog(tmp_path, monkeypatch):
     from crawler import paths, stream
     monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
     st = stream.Stream(str(tmp_path / "s"))
-    st.cfg = {**stream.settings(), "domain_gap": 0}
+    st.cfg = {**stream.settings(), "domain_gap": 0, "old_hours": ""}  # any time (night-hours rule: its own test)
     today = stream.datetime.now(stream.WIB).strftime("%Y-%m-%d")
     rows = [(f"old.id/{i}", f"https://old.id/{i}", "old.id", "2020-01-01", _t.time() + i) for i in range(50)]
     rows += [(f"arch{i}.id/x", f"https://arch{i}.id/x", f"arch{i}.id", "2019-05-05", _t.time()) for i in range(5)]
@@ -569,3 +569,46 @@ def test_reader_processes_share_the_outlets(tmp_path, monkeypatch):
     assert stream.reader_processes({"reader_processes": 0}) == 3 and stream.reader_processes({"reader_processes": 2}) == 2
     monkeypatch.setattr(stream.os, "cpu_count", lambda: 2)
     assert stream.reader_processes({"reader_processes": 0}) == 1
+
+
+def test_older_links_have_a_daily_budget_and_archive_floods_are_not_news(tmp_path, monkeypatch):
+    """Older links: at most old_per_day a day (kept across restarts); thousands of 'new' links in one visit are an
+    archive listing and go to the backlog lane."""
+    from crawler import paths, stream
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    monkeypatch.setattr(stream, "FRESH_PER_CHECK", 5)
+    st = stream.Stream(str(tmp_path / "s"))
+    st.cfg = {**stream.settings(), "old_per_check": 100, "old_per_day": 7}
+    old = [{"url": f"https://b.id/berita/lama-{i}", "domain": "b.id", "old": True} for i in range(10)]
+    assert st.add_found(old, "sitemap") == 7
+    assert st.add_found([{**o, "url": o["url"] + "x"} for o in old], "sitemap") == 0     # the day's budget is used
+    st2 = stream.Stream(str(tmp_path / "s"))                                            # a restart keeps the count
+    st2.cfg = st.cfg
+    assert st2.add_found([{**o, "url": o["url"] + "y"} for o in old], "sitemap") == 0
+    st2.cfg = {**st.cfg, "old_per_day": 1000}
+    many = [{"url": f"https://c.id/berita/baru-{i}", "domain": "c.id"} for i in range(9)]
+    assert st2.add_found(many, "sitemap") == 9
+    src = [r["source"] for r in st2.rq("SELECT source FROM articles WHERE domain='c.id' ORDER BY rowid")]
+    assert src.count("sitemap") == 5 and src.count("sitemap:old") == 4
+
+
+def test_older_links_are_read_only_in_the_night_hours(tmp_path, monkeypatch):
+    """By day every reader is on fresh news; older links wait for old_hours (WIB); media-archive jobs never wait."""
+    from datetime import datetime
+    from crawler import paths, stream
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    st = stream.Stream(str(tmp_path / "s"))
+    st.cfg = {**stream.settings(), "old_hours": "1-6"}
+    noon = datetime(2026, 11, 21, 12, 0, tzinfo=stream.WIB).timestamp()
+    night = datetime(2026, 11, 21, 3, 0, tzinfo=stream.WIB).timestamp()
+    assert not st.backlog_open(noon) and st.backlog_open(night)
+    st._enqueue({"key": "a", "url": "https://a.id/berita/lama", "domain": "a.id", "source": "sitemap:old"})
+    st._enqueue({"key": "b", "url": "https://b.id/berita/arsip", "domain": "b.id", "source": "backfill:x"})
+    monkeypatch.setattr(st, "backlog_open", lambda now=None: False)
+    got = [st.next_job(True), st.next_job(True)]
+    assert [g[1]["key"] if g else None for g in got] == ["b", None]        # by day: only the media-archive job
+    monkeypatch.setattr(st, "backlog_open", lambda now=None: True)
+    assert st.next_job(True)[1]["key"] == "a"
+    assert stream.save_settings({"old_hours": "22 - 5"})["old_hours"] == "22-5"
+    st.cfg["old_hours"] = "22-5"
+    assert stream.Stream.backlog_open(st, datetime(2026, 11, 21, 23, 0, tzinfo=stream.WIB).timestamp())

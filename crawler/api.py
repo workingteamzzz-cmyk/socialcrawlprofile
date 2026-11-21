@@ -259,6 +259,8 @@ class StreamSettings(BaseModel):
     health_on_start: bool | None = Field(None, description="check every registered site when the stream starts")
     all_links: bool | None = Field(None, description="take every link not yet in the database, whatever its date")
     old_per_check: int | None = Field(None, description="older links taken per outlet visit (the rest next visit)")
+    old_per_day: int | None = Field(None, description="older links stored per day in total (all outlets)")
+    old_hours: str | None = Field(None, description="hours (WIB) older links are read, e.g. 1-6; empty = any time")
     homepage: bool | None = Field(None, description="also read each outlet's front page for article links")
     health_weekday: int | None = Field(None, description="weekly site check: 0 = Monday … 6 = Sunday")
     health_hour: int | None = Field(None, description="weekly site check: hour, WIB")

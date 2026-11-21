@@ -334,6 +334,10 @@ page shows the live pace and the "per day at this pace" figure.
 - **Fresh-news lane**: the Live Stream keeps two queues — news from the stream's days (and undated links) and the
   backlog (older links, media-archive jobs). Readers always take fresh news first; one reader works the backlog, the
   others take it only when no fresh page can be read. "Waiting to be read" shows both.
+- **Older links wait for the night**: older links (not media-archive jobs) are read only in the night hours (Stream
+  settings, default `1-6` = 01:00–06:00 WIB; empty = any time) — by day every reader is on fresh news. At most
+  `old_per_day` older links (default 30,000) are stored a day, and a visit that lists more than 1,500 "new" links at
+  once (an archive listing, or a sitemap whose every entry carries the file's build date) is put in the backlog.
 - **The media list grows by itself**: an outlet News Search or Bulk links found that the list lacks is registered and
   read by the Live Stream from then on (platforms, aggregators and excluded outlets are left out; Stream settings).
 - **Second tries**: articles that failed for a passing reason (timeout, connection, 5xx / 429, empty answer) are

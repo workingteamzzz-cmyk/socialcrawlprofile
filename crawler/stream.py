@@ -32,14 +32,14 @@ DEFAULTS = {"enabled": False, "threads": 8, "discovery_threads": 8, "rss_minutes
             "catchup_days": 2, "catchup_hour": 1, "weekly_report": True, "report_weekday": 0, "report_hour": 7,
             "health_on_start": True, "health_weekday": 6, "health_hour": 2,
             "top_n": 1000, "top2_n": 2000, "active2_hours": 2, "semi_hours": 4, "rare_hours": 24, "inactive_days": 3, "dead_days": 7,
-            "retention_days": 0, "max_age_hours": 48, "all_links": True, "old_per_check": 50, "homepage": True, "domain_gap": 1.5, "rss": True, "sitemaps": True,
+            "retention_days": 0, "max_age_hours": 48, "all_links": True, "old_per_check": 50, "old_per_day": 30000, "old_hours": "1-6", "homepage": True, "domain_gap": 1.5, "rss": True, "sitemaps": True,
             "keywords": [], "robots": True, "exclude_domains": [],
             "fetch_googlebot": True, "fetch_cloudscraper": True,     # refused pages: see fetch_policy.py
             "auto_add_media": True, "retry_failed": True,             # outlets found by News Search; retry later
             "pause_international": False,                             # non-Indonesian outlets: see intl.py
             "reader_processes": 0}                                    # 0 = automatic (CPU cores - 1, max 4)
 LIMITS = {"threads": (2, 64), "reader_processes": (0, 8), "discovery_threads": (2, 48), "rss_minutes": (2, 240), "sitemap_minutes": (10, 720),
-          "old_per_check": (0, 20000),
+          "old_per_check": (0, 20000), "old_per_day": (0, 2_000_000),
           "catchup_days": (0, 7), "catchup_hour": (0, 23), "health_weekday": (0, 6), "health_hour": (0, 23), "report_weekday": (0, 6), "report_hour": (0, 23),
           "top_n": (50, 20000), "top2_n": (0, 20000), "active2_hours": (1, 24), "semi_hours": (1, 48), "rare_hours": (2, 168), "inactive_days": (1, 30),
           "dead_days": (1, 60),
@@ -144,6 +144,12 @@ def save_settings(data: dict) -> dict:
                 v = max(lo, min(hi, int(float(v))))
             except (TypeError, ValueError):
                 raise ValueError(f"{k}: a number from {lo} to {hi}.")
+        elif k == "old_hours":                             # "1-6" = 01:00–06:00 WIB; "" = any time
+            v = str(v or "").strip().replace(" ", "").replace("–", "-")
+            m = re.fullmatch(r"(\d{1,2})-(\d{1,2})", v)
+            if v and not (m and 0 <= int(m[1]) <= 23 and 1 <= int(m[2]) <= 24 and int(m[1]) != int(m[2])):
+                raise ValueError("Older links: hours as from-to, e.g. 1-6 (empty = any time).")
+            v = f"{int(m[1])}-{int(m[2])}" if v else ""
         elif k == "domain_gap":
             v = max(0.5, min(30.0, float(v)))
         elif k in ("rss", "sitemaps", "robots", "weekly_report", "health_on_start", "all_links", "homepage",
@@ -169,6 +175,7 @@ def _write_settings(cur: dict) -> None:
 
 
 QUEUE_MAX = 20000                          # articles held in memory at most; the rest wait in the database
+FRESH_PER_CHECK = 1500                    # links per outlet visit taken as news; more at once = an archive listing
 SITEMAP_READS_BUSY = 20                    # sitemap files read per visit of an active outlet (others: 6)
 JUNK_VERSION = "v47"                       # bump when online_clean's page filter learns new titles
 
@@ -430,14 +437,20 @@ class Stream:
         from .online_clean import is_junk_page
         cutoff = self.cutoff()
         take_all = bool(self.cfg.get("all_links", True)) and not self.disk_brake
-        room_old = int(self.cfg.get("old_per_check", 1000)) if take_all else 0
-        now, rows = time.time(), []
+        day = datetime.now(WIB).strftime("%Y-%m-%d")
+        taken = self._old_taken(day)
+        room_old = min(int(self.cfg.get("old_per_check", 50)),
+                       max(0, int(self.cfg.get("old_per_day", 30000)) - taken)) if take_all else 0
+        now, rows, n_fresh = time.time(), [], 0
         for it in items:
             url = (it.get("url") or "").strip()
             if not url.startswith("http") or not is_article_link(url) or is_junk_page("", url):
                 continue
             d = (it.get("date") or "")[:10]
             old = bool(d and d < cutoff) or bool(it.get("old"))
+            if not old:
+                n_fresh += 1
+                old = n_fresh > FRESH_PER_CHECK            # thousands "new" at once: an archive, not today's news
             if old and not take_all:
                 continue
             rows.append(((norm_key(url), url, it.get("domain") or "", (it.get("title") or "")[:500],
@@ -461,9 +474,13 @@ class Stream:
             for row, old in fresh:
                 if not old:                                   # activity = new articles, not the back catalogue
                     per_dom[row[2]] = per_dom.get(row[2], 0) + 1
-            day = datetime.now(WIB).strftime("%Y-%m-%d")
             self._db.executemany("INSERT INTO domain_days(domain, day, n) VALUES (?,?,?) ON CONFLICT(domain, day) "
                                  "DO UPDATE SET n = n + excluded.n", [(d, day, n) for d, n in per_dom.items() if d])
+            n_old = sum(1 for _r, o in fresh if o)
+            if n_old:                                     # older links: a budget per day (the readers' pace)
+                self._oldday = [day, taken + n_old]
+                self._db.execute("INSERT INTO meta(k, v) VALUES ('old_taken', ?) ON CONFLICT(k) DO UPDATE SET "
+                                 "v=excluded.v", (json.dumps(self._oldday),))
             self._db.commit()
             self.counts["found"] += len(fresh)
             if self.running:                     # straight to the readers, at the front: newest first, no waiting
@@ -473,6 +490,17 @@ class Stream:
                     self._enqueue({"key": key, "url": url, "domain": dom, "title": title, "feed_date": fd,
                                    "feed_time": ft, "source": src_}, front=front and not old)  # older ones: behind
         return len(fresh)
+
+    def _old_taken(self, day: str) -> int:
+        """Older links stored today (kept in meta, so a restart does not reset the day's budget)."""
+        cur = getattr(self, "_oldday", None)
+        if cur is None:
+            try:
+                cur = json.loads(self.meta("old_taken") or "null") or ["", 0]
+            except (ValueError, sqlite3.Error):
+                cur = ["", 0]
+            self._oldday = cur
+        return int(cur[1]) if cur[0] == day else 0
 
     def _fresh_cutoff(self) -> str:
         if time.time() - self._cut[0] > 60:
@@ -583,6 +611,8 @@ class Stream:
                 queue.extend((subs or [x for x, p in ranked if p is not None][-2:])[:8 if catchup else (SITEMAP_READS_BUSY if busy else 3)])
                 continue
             news = "news" in u.lower() or "berita" in u.lower()
+            if not news and len(data) > 50 and len({(e.get("date") or "")[:10] for e in data}) == 1:
+                data = [{**e, "date": ""} for e in data]     # one date on every entry = when the file was built
             for e in data:
                 if e.get("date") or news:                    # undated entries of a news sitemap: the last 48 h by rule
                     items.append({**e, "domain": dom})
@@ -660,7 +690,18 @@ class Stream:
                         break
                     self._enqueue(dict(r))
 
-    def _take(self, by: dict, rr: deque, now: float):
+    def backlog_open(self, now: float | None = None) -> bool:
+        """Older links are read only in the night hours (old_hours, WIB) — by day every reader is on fresh news.
+        Media-archive jobs (asked for by hand) are read at any time."""
+        span = str(self.cfg.get("old_hours", "1-6") or "")
+        m = re.fullmatch(r"(\d{1,2})-(\d{1,2})", span)
+        if not m:
+            return True
+        a, b = int(m[1]), int(m[2])
+        h = datetime.fromtimestamp(now or time.time(), WIB).hour
+        return (a <= h < b) if a < b else (h >= a or h < b)
+
+    def _take(self, by: dict, rr: deque, now: float, only_archive: bool = False):
         for _ in range(len(rr)):
             dom = rr[0]
             rr.rotate(-1)
@@ -674,6 +715,8 @@ class Stream:
                 continue
             if dom in self.busy_domains or self.next_ok.get(dom, 0) > now:
                 continue
+            if only_archive and not str(q[0].get("source") or "").startswith("backfill:"):
+                continue                                   # by day: older links wait for the night hours
             self.busy_domains.add(dom)
             self.qn -= 1
             return dom, q.popleft()
@@ -682,13 +725,17 @@ class Stream:
     def next_job(self, backlog_first: bool = False):
         """The next article to read: round robin over outlets, one page at a time per outlet, a pause between.
         Fresh news always first; the backlog lane only when no fresh page can be read right now — except for the
-        one backlog reader (backlog_first), which keeps the archive moving."""
+        one backlog reader (backlog_first), which keeps the archive moving. Outside the night hours (old_hours) the
+        backlog lane gives only media-archive jobs: every reader is on fresh news."""
         with self.lock:
             now = time.time()
             lanes = [(self.by_domain_old, self.rr_old, True), (self.by_domain, self.rr, False)] if backlog_first else \
                 [(self.by_domain, self.rr, False), (self.by_domain_old, self.rr_old, True)]
+            night = self.backlog_open(now)
+            if not night:
+                lanes = [(self.by_domain, self.rr, False), (self.by_domain_old, self.rr_old, True)]
             for by, rr, old in lanes:
-                got = self._take(by, rr, now)
+                got = self._take(by, rr, now, only_archive=old and not night)
                 if got:
                     if old:
                         self.qn_old -= 1
@@ -1572,7 +1619,7 @@ class Stream:
                 "readers_busy": len(self.busy_domains), "last_error": self.last_error, "export": dict(self.export),
                 "days": self.days_with_articles(), "fetch_methods": self.fetch_methods(7),
                 "maintenance": self.meta("maintenance"), "international": self._intl_status(),
-                "latest": [dict(r) for r in rows]}
+                "latest": [dict(r) for r in rows], "old_hours": str(settings().get("old_hours", "1-6") or "")}
         if live:                                             # the engine runs in its own process: its live state
             for k in ("running", "since", "per_minute", "per_day_pace", "readers_busy", "last_error", "export"):
                 out[k] = live.get(k, out[k])

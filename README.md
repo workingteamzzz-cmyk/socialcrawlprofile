@@ -339,7 +339,7 @@ page shows the live pace and the "per day at this pace" figure.
   by day only when a reader is free; (3) older links — only in the night hours (`old_hours`, default `1-6` = 01:00–
   06:00 WIB); (4) media-archive jobs — any time. Nothing published before `min_date` (default 2026-01-01; judged by
   the date, or a year in the address) is taken, except by a media-archive job. At most `old_per_day` older links
-  (default 30,000) are stored a day; a visit listing more than 1,500 "new" links at once (an archive, or a sitemap
+  (default 30,000; late news is not counted) are stored a day; a visit listing more than 1,500 "new" links at once (an archive, or a sitemap
   whose every entry carries the file's build date) goes to the backlog. The Live Stream shows how many minutes after
   publication news arrives (median, and the share within 30 minutes).
 - **The media list grows by itself**: an outlet News Search or Bulk links found that the list lacks is registered and

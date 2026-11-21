@@ -445,6 +445,7 @@ class Stream:
         taken = self._old_taken(day)
         room_old = min(int(self.cfg.get("old_per_check", 50)),
                        max(0, int(self.cfg.get("old_per_day", 30000)) - taken)) if take_all else 0
+        late_cut = (datetime.now(WIB) - timedelta(days=int(self.cfg.get("late_days", 7)))).strftime("%Y-%m-%d")
         now, rows, n_fresh = time.time(), [], 0
         for it in items:
             url = (it.get("url") or "").strip()
@@ -459,30 +460,31 @@ class Stream:
                 old = n_fresh > FRESH_PER_CHECK            # thousands "new" at once: an archive, not today's news
             if old and not take_all:
                 continue
+            late = old and bool(d) and d >= late_cut and n_fresh <= FRESH_PER_CHECK   # late news: no daily budget
             rows.append(((norm_key(url), url, it.get("domain") or "", (it.get("title") or "")[:500],
-                          f"{source}:old" if old else source, d, (it.get("time") or "")[:5], now), old))
+                          f"{source}:old" if old else source, d, (it.get("time") or "")[:5], now), old, late))
         if not rows:
             return 0
         fresh = []
         with self.lock:
-            for row, old in rows:
-                if old and room_old <= 0:
+            for row, old, late in rows:
+                if old and not late and room_old <= 0:
                     continue                                   # older links: a share per visit, the rest next time
                 if self._db.execute("SELECT 1 FROM seen WHERE key=?", (row[0],)).fetchone():
                     continue                                   # read before and purged since: not again
                 cur = self._db.execute("INSERT OR IGNORE INTO articles(key, url, domain, title, source, feed_date, "
                                        "feed_time, discovered) VALUES (?,?,?,?,?,?,?,?)", row)
                 if cur.rowcount:
-                    if old:
+                    if old and not late:
                         room_old -= 1
-                    fresh.append((row, old))
+                    fresh.append((row, old, late))
             per_dom: dict = {}
-            for row, old in fresh:
+            for row, old, _late in fresh:
                 if not old:                                   # activity = new articles, not the back catalogue
                     per_dom[row[2]] = per_dom.get(row[2], 0) + 1
             self._db.executemany("INSERT INTO domain_days(domain, day, n) VALUES (?,?,?) ON CONFLICT(domain, day) "
                                  "DO UPDATE SET n = n + excluded.n", [(d, day, n) for d, n in per_dom.items() if d])
-            n_old = sum(1 for _r, o in fresh if o)
+            n_old = sum(1 for _r, o, lt in fresh if o and not lt)
             if n_old:                                     # older links: a budget per day (the readers' pace)
                 self._oldday = [day, taken + n_old]
                 self._db.execute("INSERT INTO meta(k, v) VALUES ('old_taken', ?) ON CONFLICT(k) DO UPDATE SET "
@@ -490,7 +492,7 @@ class Stream:
             self._db.commit()
             self.counts["found"] += len(fresh)
             if self.running:                     # straight to the readers, at the front: newest first, no waiting
-                for (key, url, dom, title, src_, fd, ft, _t), old in fresh:
+                for (key, url, dom, title, src_, fd, ft, _t), old, _late in fresh:
                     if self.qn >= QUEUE_MAX or (self.qn >= 4000 and (old or not front)):
                         continue                       # the queue is full: it waits in the database (refill)
                     self._enqueue({"key": key, "url": url, "domain": dom, "title": title, "feed_date": fd,

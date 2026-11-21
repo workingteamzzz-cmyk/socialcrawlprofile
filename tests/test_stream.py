@@ -643,3 +643,16 @@ def test_priorities_late_news_by_day_archive_at_night_nothing_before_min_date(tm
     monkeypatch.setattr(st, "backlog_open", lambda now=None: True)
     assert st.next_job()[1]["key"] == "arch"
     assert set(st.lag_minutes()) == {"n", "median", "within30"}
+
+
+def test_late_news_is_not_limited_by_the_older_links_budget(tmp_path, monkeypatch):
+    """News of the last late_days days always comes in; only the archive (older) shares the daily budget."""
+    from datetime import datetime, timedelta
+    from crawler import paths, stream
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    st = stream.Stream(str(tmp_path / "s"))
+    st.cfg = {**stream.settings(), "old_per_check": 2, "old_per_day": 2, "late_days": 7, "min_date": ""}
+    day = lambda n: (datetime.now(stream.WIB) - timedelta(days=n)).strftime("%Y-%m-%d")
+    late = [{"url": f"https://a.id/berita/telat-{i}", "domain": "a.id", "date": day(4)} for i in range(6)]
+    arch = [{"url": f"https://a.id/berita/kabar-lama-{i}", "domain": "a.id", "date": day(30)} for i in range(6)]
+    assert st.add_found(late + arch, "sitemap") == 8                       # 6 late + 2 archive

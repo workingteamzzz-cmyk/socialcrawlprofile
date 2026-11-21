@@ -640,6 +640,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
   .rd-kpis{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.rd-kpi{padding:10px;gap:8px}.rd-face{display:none}.rd-thumb{width:110px;height:78px}}
 .spin{width:14px;height:14px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;display:inline-block;animation:spin .8s linear infinite;flex:none}
 @keyframes spin{to{transform:rotate(360deg)}}
+.busy-note{margin-top:10px;padding:10px 12px;border-radius:10px;background:var(--soft,#f1f5f9);border:1px solid var(--line);font-size:13px;color:var(--muted);display:flex;flex-direction:column;gap:8px;align-items:flex-start}
 </style>
 </head>
 <body>
@@ -809,6 +810,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
               <button class="need-op btn primary lg" id="btnStart"><svg class="i"><use href="#i-play"/></svg>Start collecting</button>
               <button class="need-op btn lg" id="btnSched" style="margin-top:8px" title="Run this search by itself, every day or every few hours"><svg class="i"><use href="#i-cal"/></svg>Schedule it (runs by itself)…</button>
               <button class="need-op btn danger lg" id="btnStop" style="display:none"><svg class="i"><use href="#i-stop"/></svg>Stop (keeps what was collected)</button>
+              <div class="busy-note" id="pBusy" style="display:none"><span></span> <button class="btn sm need-op" data-busystop="1">Stop that run</button></div>
               <div class="alert" id="runMsg"></div>
               <div class="prog" id="prog">
                 <div class="track"><div class="fill" id="progFill"></div></div>
@@ -930,6 +932,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
               <button class="need-op btn primary lg" id="kBtnStart"><svg class="i"><use href="#i-search"/></svg>Start keyword search</button>
               <button class="need-op btn lg" id="kBtnSched" style="margin-top:8px" title="Run this search by itself, every day or every few hours"><svg class="i"><use href="#i-cal"/></svg>Schedule it (runs by itself)…</button>
               <button class="need-op btn danger lg" id="kBtnStop" style="display:none"><svg class="i"><use href="#i-stop"/></svg>Stop (keeps what was collected)</button>
+              <div class="busy-note" id="kBusy" style="display:none"><span></span> <button class="btn sm need-op" data-busystop="1">Stop that run</button></div>
               <div class="alert" id="kMsg"></div>
               <div class="prog" id="kProg">
                 <div class="track"><div class="fill" id="kProgFill"></div></div>
@@ -1077,6 +1080,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
               <button class="need-op btn primary lg" id="nBtnStart"><svg class="i"><use href="#i-news"/></svg>Start news search</button>
               <button class="need-op btn lg" id="nBtnSched" style="margin-top:8px" title="Run this search by itself, every day or every few hours"><svg class="i"><use href="#i-cal"/></svg>Schedule it (runs by itself)…</button>
               <button class="need-op btn danger lg" id="nBtnStop" style="display:none"><svg class="i"><use href="#i-stop"/></svg>Stop (keeps what was collected)</button>
+              <div class="busy-note" id="nBusy" style="display:none"><span></span> <button class="btn sm need-op" data-busystop="1">Stop that run</button></div>
               <div class="alert" id="nMsg"></div>
               <div class="prog" id="nProg">
                 <div class="track"><div class="fill" id="nProgFill"></div></div>
@@ -1452,6 +1456,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
             <button class="btn primary lg need-op" id="apStart"><svg class="i"><use href="#i-play"/></svg>Start API scraper</button>
             <button class="btn lg need-op" id="apSched"><svg class="i"><use href="#i-cal"/></svg>Schedule it (runs by itself)…</button>
             <button class="btn danger lg need-op" id="apStop" style="display:none"><svg class="i"><use href="#i-stop"/></svg>Stop (keeps what was collected)</button>
+              <div class="busy-note" id="apBusy" style="display:none"><span></span> <button class="btn sm need-op" data-busystop="1">Stop that run</button></div>
             <div class="alert" id="apMsg"></div>
             <small class="hint">Progress and the cost estimate show in the Activity Log; the file appears in Exports as <code>Data …xlsx</code>.</small>
           </div></div>
@@ -2435,6 +2440,7 @@ $('nBtnStart').onclick = async () => {
   nwAlert(''); $('log').textContent = ''; logCount = 0; toast('News search started'); started();
 };
 $('nBtnStop').onclick = stopJob;
+document.querySelectorAll('[data-busystop]').forEach(b => b.onclick = stopJob);
 let NWMODE = ls.get('nw_mode', 'kw');
 const nbLinks = () => [...new Set(($('nbLinks').value.match(/https?:\/\/[^\s,;<>"']+/g) || []))];
 function nwSetMode(m){
@@ -3823,6 +3829,15 @@ async function poll(){
     $('btnStop').style.display = running && isProf ? '' : 'none';
     $('kBtnStop').style.display = running && isKw ? '' : 'none';
     $('nBtnStop').style.display = running && isNews ? '' : 'none';
+    {                                                       // another kind of run is going: say so where Start would be
+      const what = {news: 'A News search', keywords: 'A Keyword search', profiles: 'An account collection',
+                    apiscrape: 'An API scraper run', decode: 'A link fix', bulk: 'A Bulk links run'}[s.kind] || 'Another run';
+      for (const [id, mine] of [['pBusy', isProf], ['kBusy', isKw], ['nBusy', isNews], ['apBusy', s.kind === 'apiscrape']]){
+        const el = $(id); if (!el) continue; const show = running && !mine;
+        el.style.display = show ? '' : 'none';
+        if (show) el.querySelector('span').textContent = `${what} is running now${s.current ? ' (' + s.current + ')' : ''} — one run at a time, so Start appears when it ends. Wait, or stop it:`;
+      }
+    }
     $('apStop').style.display = running && s.kind === 'apiscrape' ? '' : 'none';
     for (const id of ['btnStop', 'kBtnStop', 'nBtnStop', 'apStop']){        // after a click: it is stopping, not ignored
       const b = $(id); b.dataset.label = b.dataset.label || b.innerHTML; const busy = !!(running && s.stopping);

@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlparse
 
 from openpyxl import Workbook
+from openpyxl.utils import get_column_letter
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.styles import Font, PatternFill
 
@@ -247,37 +248,50 @@ def write(layout: str, path_xlsx: str, path_csv: str, rows: list, tz, drop_empty
 
 
 def write_values(layout: str, path_xlsx: str, path_csv: str | None, cols: list, values: list, extra=None) -> None:
-    """The team's Excel (+ CSV) from rows already in the layout's columns. extra(wb) may add sheets (reports)."""
-    wb = Workbook(write_only=False)
-    ws = wb.active
-    ws.title = "Sheet1"
-    ws.append(cols)
+    """The team's Excel (+ CSV) from rows already in the layout's columns. extra(wb) may add sheets (reports).
+    Written row by row (openpyxl's write-only mode): a report of hundreds of thousands of rows never holds millions
+    of cell objects in memory — same file, same look."""
+    from openpyxl.cell import WriteOnlyCell
+    wb = Workbook(write_only=True)
+    ws = wb.create_sheet("Sheet1")
     if layout == "online":
         # exactly like the team's Online_News_Template_Upload_2.xlsx: teal header, grey for INFLUENCER/PERSON/SUMMARY
         from openpyxl.styles import Alignment
         from openpyxl.styles.colors import Color
         font = Font(name="Calibri", size=9, bold=True, color=Color(theme=0))
         teal, grey = PatternFill("solid", fgColor="FF15677B"), PatternFill("solid", fgColor=Color(theme=0, tint=-0.5))
-        for c in ws[1]:
-            c.font, c.alignment = font, Alignment(horizontal="left", vertical="center")
-            c.fill = grey if c.value in ("INFLUENCER", "PERSON", "SUMMARY") else teal
         widths = ONLINE_WIDTHS
         ws.sheet_view.zoomScale = 80
+        head = []
+        for col in cols:
+            c = WriteOnlyCell(ws, value=col)
+            c.font, c.alignment = font, Alignment(horizontal="left", vertical="center")
+            c.fill = grey if col in ("INFLUENCER", "PERSON", "SUMMARY") else teal
+            head.append(c)
     else:
         fill, font, widths = PatternFill("solid", fgColor="FF4472C4"), Font(name="Calibri", size=11, bold=True,
                                                                                 color="FFFFFFFF"), MEDSOS_WIDTHS
-        for c in ws[1]:
+        head = []
+        for col in cols:
+            c = WriteOnlyCell(ws, value=col)
             c.fill, c.font = fill, font
-    for row in values:
-        ws.append([_cell(v) for v in row])
-        for c in ws[ws.max_row]:
-            if isinstance(c.value, str) and c.value[:1] in "=+-@":
-                c.data_type = "s"                                 # text that looks like a formula stays text
-    for i, w in enumerate(widths, 1):
-        ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
-    if layout == "medsos":
+            head.append(c)
         ws.freeze_panes = "A2"
-        ws.auto_filter.ref = f"A1:{ws.cell(row=1, column=len(cols)).column_letter}{max(1, ws.max_row)}"
+        ws.auto_filter.ref = f"A1:{get_column_letter(len(cols))}{max(1, len(values) + 1)}"
+    for i, w in enumerate(widths, 1):                      # widths before the rows (write-only)
+        ws.column_dimensions[get_column_letter(i)].width = w
+    ws.append(head)
+    for row in values:
+        out = []
+        for v in row:
+            v = _cell(v)
+            if isinstance(v, str) and v[:1] in "=+-@":
+                c = WriteOnlyCell(ws, value=v)
+                c.data_type = "s"                          # text that looks like a formula stays text
+                out.append(c)
+            else:
+                out.append(v)
+        ws.append(out)
     if extra:
         extra(wb)
     tmp = path_xlsx + ".tmp"

@@ -40,3 +40,18 @@ def test_dashboard_endpoint(tmp_path, monkeypatch):
     app, _ = _app(tmp_path, monkeypatch)
     r = _client(app, "citra").get("/api/dashboard?days=30&q=pln").json()
     assert r["days"] == 30 and len(r["trend"]) == 30 and r["q"] == "pln"
+
+
+def test_home_numbers_are_kept_for_a_minute_and_counted_again_after(tmp_path, monkeypatch):
+    """The same Home view within a minute comes from memory (no second read of the archive); later it is fresh."""
+    from datetime import date
+    from crawler import archive, dashboard, paths
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    dashboard._CACHE.clear()
+    today = date(2026, 11, 22)
+    a = dashboard.build(7, today=today)
+    archive.add("online", [("pln", {"DATE": "22-Nov-2026", "TITLE": "Baru", "URL": "https://x.id/berita/baru",
+                                     "MEDIA": "x.id", "SENTIMENT": "negative"})])
+    assert dashboard.build(7, today=today)["kpi"] == a["kpi"]                 # within the minute: as it was
+    monkeypatch.setattr(dashboard.time, "time", lambda: a["generated"] + 61)
+    assert dashboard.build(7, today=today)["kpi"]["articles"] == a["kpi"]["articles"] + 1

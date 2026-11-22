@@ -10,6 +10,8 @@ from collections import Counter
 from datetime import date, timedelta
 
 SENTIMENTS = ("negative", "neutral", "positive")
+_CACHE: dict = {}             # (days, q, day) -> (time, result): the same view again within a minute is instant
+CACHE_TTL = 60
 
 
 def _sent(v: str) -> str:
@@ -49,39 +51,44 @@ def build(days: int = 14, q: str = "", today: date | None = None) -> dict:
     neg, prev_neg = Counter(), Counter()
     media, plats, kws = Counter(), Counter(), Counter()
     prev_media = set()
+    key = (days, q, today.isoformat())
+    hit = _CACHE.get(key)
+    ttl = CACHE_TTL if days <= 7 else 300 if days <= 30 else 900    # a long view reads far more rows: kept longer
+    if hit and time.time() - hit[0] < ttl:
+        return hit[1]
     try:
-        with archive._LOCK:
-            c = archive._db()
-            try:
-                where, args = "day >= ? AND day <= ?", [prev_start.isoformat(), span[-1]]
-                if q:
-                    where += " AND (text LIKE ? OR keywords LIKE ?)"
-                    args += [f"%{q}%", f"%{q}%"]
-                for r in c.execute(f"SELECT kind, day, source, sentiment, keywords FROM items WHERE {where}", args):
-                    k, d, s = r["kind"], r["day"], _sent(r["sentiment"])
-                    if d < span[0]:
-                        prev[k] += 1
-                        prev_neg[k] += s == "negative"
-                        if k == "online" and r["source"]:
-                            prev_media.add(r["source"].lower())
-                        continue
-                    totals[k] += 1
-                    neg[k] += s == "negative"
-                    out["trend"][idx[d]][k] += 1
-                    out["sentiment"][k][s] += 1
+        # only reading: the archive's write lock is not held
+        c = archive._db()
+        try:
+            where, args = "day >= ? AND day <= ?", [prev_start.isoformat(), span[-1]]
+            if q:
+                where += " AND (text LIKE ? OR keywords LIKE ?)"
+                args += [f"%{q}%", f"%{q}%"]
+            for r in c.execute(f"SELECT kind, day, source, sentiment, keywords FROM items WHERE {where}", args):
+                k, d, s = r["kind"], r["day"], _sent(r["sentiment"])
+                if d < span[0]:
+                    prev[k] += 1
+                    prev_neg[k] += s == "negative"
                     if k == "online" and r["source"]:
-                        media[r["source"].lower()] += 1
-                    elif k == "medsos" and r["source"]:
-                        plats[r["source"]] += 1
-                    for kw in (r["keywords"] or "").strip("|").split("|"):
-                        if kw:
-                            kws[kw] += 1
-                for kind in ("online", "medsos"):
-                    rows = c.execute(f"SELECT * FROM items WHERE kind=? AND {where} ORDER BY day DESC, last_seen DESC "
-                                     "LIMIT 12", [kind] + [span[0], span[-1]] + args[2:]).fetchall()
-                    out["latest"][kind] = [_latest_row(kind, r) for r in rows]
-            finally:
-                c.close()
+                        prev_media.add(r["source"].lower())
+                    continue
+                totals[k] += 1
+                neg[k] += s == "negative"
+                out["trend"][idx[d]][k] += 1
+                out["sentiment"][k][s] += 1
+                if k == "online" and r["source"]:
+                    media[r["source"].lower()] += 1
+                elif k == "medsos" and r["source"]:
+                    plats[r["source"]] += 1
+                for kw in (r["keywords"] or "").strip("|").split("|"):
+                    if kw:
+                        kws[kw] += 1
+            for kind in ("online", "medsos"):
+                rows = c.execute(f"SELECT * FROM items WHERE kind=? AND {where} ORDER BY day DESC, last_seen DESC "
+                                 "LIMIT 12", [kind] + [span[0], span[-1]] + args[2:]).fetchall()
+                out["latest"][kind] = [_latest_row(kind, r) for r in rows]
+        finally:
+            c.close()
     except Exception as e:  # noqa: BLE001
         out["error"] = str(e)
     out["top_media"] = media.most_common(8)
@@ -99,4 +106,7 @@ def build(days: int = 14, q: str = "", today: date | None = None) -> dict:
         "media": len(media), "media_prev": len(prev_media),
     }
     out["generated"] = int(time.time())
+    if len(_CACHE) > 50:
+        _CACHE.clear()
+    _CACHE[key] = (time.time(), out)
     return out

@@ -344,7 +344,9 @@ page shows the live pace and the "per day at this pace" figure.
 - **Light dashboard**: News Stream / client API lists read the newest (or oldest) stored articles straight from an
   index of stored articles (built once by the stream), each source cut to the page before merging; totals per filter
   are kept for a minute (counted again at once after a delete or restore); a tab nobody looks at asks the server every
-  20 s instead of every 2.5 s.
+  20 s instead of every 2.5 s. Home's numbers are kept for a minute (30 days: 5 minutes, 90 days: 15); Reports shows its
+  topics at once and counts the database in the background; a report reads its period row by row (only the topic's
+  rows in memory) and writes the Excel row by row (openpyxl write-only) — 180,000 rows in seconds.
 - **Data by year** (Exports, admins): per year and month the news articles, News Search rows and social media rows
   with an approximate size; a month or a year downloads as a ZIP — *Excel* (per day one Online and one Medsos file in
   the team's layout) or *Backup* (every column exactly as stored, JSON lines). Both upload back through *Restore*

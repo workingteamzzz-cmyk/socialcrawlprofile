@@ -90,6 +90,7 @@ def _filled(row: dict) -> int:
 
 def add(kind: str, items: list[tuple[str, dict]]) -> int:
     """items: (keyword, row in the layout's columns). Returns how many were new."""
+    _STATS["t"] = 0.0                                  # counted again on the next look
     if kind not in ("online", "medsos") or not items:
         return 0
     now = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -318,23 +319,21 @@ def delete_topic(tid: str) -> bool:
 def query(kind: str, start: str, end: str, keywords: list[str], in_text: bool = True) -> list[dict]:
     """Rows of a period whose keyword is one of the topic's keywords — or, with in_text, whose text contains one."""
     kws = [k.strip().lower() for k in keywords if k and k.strip()]
-    with _LOCK:
-        c = _db()
-        try:
-            got = c.execute("SELECT keywords, text, row, day FROM items WHERE kind=? AND day>=? AND day<=? "
-                            "ORDER BY day DESC", (kind, start, end)).fetchall()
-        finally:
-            c.close()
     out = []
-    for g in got:
-        tagged = [k for k in g["keywords"].strip("|").split("|") if k]
-        hit = [k for k in kws if k in tagged or any(k in t for t in tagged)]
-        if not hit and in_text:
-            hit = [k for k in kws if _contains(g["text"], k)]
-        if hit or not kws:
-            row = json.loads(g["row"])
-            row["_keywords"] = ", ".join(hit or tagged)
-            out.append(row)
+    c = _db()                    # only reading: no lock, and row by row — a month can hold millions of rows; only the
+    try:                         # topic's rows are kept in memory, never the whole period
+        for g in c.execute("SELECT keywords, text, row, day FROM items WHERE kind=? AND day>=? AND day<=? "
+                           "ORDER BY day DESC", (kind, start, end)):
+            tagged = [k for k in (g["keywords"] or "").strip("|").split("|") if k]
+            hit = [k for k in kws if k in tagged or any(k in t for t in tagged)]
+            if not hit and in_text:
+                hit = [k for k in kws if _contains(g["text"] or "", k)]
+            if hit or not kws:
+                row = json.loads(g["row"])
+                row["_keywords"] = ", ".join(hit or tagged)
+                out.append(row)
+    finally:
+        c.close()
     return out
 
 
@@ -379,11 +378,19 @@ def report(kind: str, start: str, end: str, keywords: list[str], name: str, out_
     fname = f"Report_{safe}_{'Online' if kind == 'online' else 'Medsos'}_{start}_{end}.xlsx"
 
     def add_summary(wb):
+        from openpyxl.cell import WriteOnlyCell
         from openpyxl.styles import Font
         ws = wb.create_sheet("Summary")
         bold = Font(bold=True)
-        ws.append([f"Report: {name}", f"{'Online news' if kind == 'online' else 'Social media'}", f"{start} to {end}"])
-        ws["A1"].font = bold
+        ws.column_dimensions["A"].width = 40
+        ws.column_dimensions["B"].width = 16
+
+        def b_(v):
+            c = WriteOnlyCell(ws, value=v)
+            c.font = bold
+            return c
+        ws.append([b_(f"Report: {name}"), f"{'Online news' if kind == 'online' else 'Social media'}",
+                   f"{start} to {end}"])
         ws.append(["Keywords", ", ".join(keywords)])
         ws.append(["Total", summ["total"]])
         for title, pairs in (("Per day", summ["per_day"]), ("Sentiment", sorted(summ["sentiment"].items())),
@@ -392,26 +399,49 @@ def report(kind: str, start: str, end: str, keywords: list[str], name: str, out_
                              ("Top accounts" if kind == "medsos" else "Top people",
                               summ.get("top_accounts") or summ.get("top_people") or [])):
             ws.append([])
-            ws.append([title])
-            ws.cell(row=ws.max_row, column=1).font = bold
+            ws.append([b_(title)])
             for k, v in pairs:
                 ws.append([k, v])
-        ws.column_dimensions["A"].width = 40
-        ws.column_dimensions["B"].width = 16
     os.makedirs(out_dir, exist_ok=True)
     templates.write_values(kind, os.path.join(out_dir, fname), None, cols, values, extra=add_summary)
     return {"file": fname, **summ}
 
 
-def stats() -> dict:
-    with _LOCK:
-        c = _db()
-        try:
-            got = {r["kind"]: (r["n"], r["a"], r["b"]) for r in c.execute(
-                "SELECT kind, COUNT(*) n, MIN(day) a, MAX(day) b FROM items WHERE day<>'' GROUP BY kind")}
-        finally:
-            c.close()
+_STATS: dict = {"t": 0.0, "v": None, "busy": False, "path": ""}
+
+
+def _count() -> dict:
+    c = _db()                                    # only reading: the write lock is not held
+    try:
+        got = {r["kind"]: (r["n"], r["a"], r["b"]) for r in c.execute(
+            "SELECT kind, COUNT(*) n, MIN(day) a, MAX(day) b FROM items WHERE day<>'' GROUP BY kind")}
+    finally:
+        c.close()
     return {k: {"items": v[0], "from": v[1], "to": v[2]} for k, v in got.items()}
+
+
+def stats(wait: float = 2.0) -> dict:
+    """What the database holds per kind. Counting millions of rows takes a while: done in the background, kept for
+    10 minutes — the Reports page shows its topics at once and the numbers when they are counted."""
+    st = _STATS
+    path = os.path.join(_dir(), "archive.db")
+    if st["path"] != path:                             # another database (another folder): its own numbers
+        st.update(t=0.0, v=None, path=path)
+    if time.time() - st["t"] > 600 and not st["busy"]:
+        st["busy"] = True
+
+        def run():
+            try:
+                st["v"] = _count()
+                st["t"] = time.time()
+            except Exception:  # noqa: BLE001
+                st["t"] = time.time() - 540            # try again in a minute
+            finally:
+                st["busy"] = False
+        th = threading.Thread(target=run, daemon=True, name="archive-stats")
+        th.start()
+        th.join(wait)                                  # a small database: exact at once; a big one: the last numbers
+    return dict(st["v"] or {})
 
 
 # ---------- shared by both servers ----------
@@ -446,4 +476,5 @@ def import_folder(folder: str) -> dict:
             if kind:
                 done[kind] += n
                 done["files"] += 1
-    return {"ok": True, **done, "stats": stats()}
+    _STATS["t"] = 0.0
+    return {"ok": True, **done, "stats": _count()}         # counted now: the import just changed it

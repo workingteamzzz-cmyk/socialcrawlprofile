@@ -245,6 +245,10 @@ class Stream:
         self.by_domain_old: dict[str, deque] = {}   # the backlog lane: older articles and media-archive jobs
         self.rr_old = deque()
         self.qn_old = 0                        # of qn, how many wait in the backlog lane
+        self.by_domain_hot: dict[str, deque] = {}   # the hot lane: certainly new (RSS, news sitemap, front page, dated address)
+        self.rr_hot = deque()
+        self.qn_hot = 0                        # of qn, how many wait in the hot lane
+        self._hot_refill = 0.0
         self._cut = (0.0, "")                  # cutoff date, cached for a minute
         self.disk_brake = False                # the disk is nearly full: no older links taken in
         self.shard = (0, 1)                    # (this process, processes): each outlet is read by one process only
@@ -347,6 +351,10 @@ class Stream:
                     self.queued.discard(j["key"])
                     self.qn -= 1
                     self.qn_old -= 1
+                for j in self.by_domain_hot.pop(d, None) or []:
+                    self.queued.discard(j["key"])
+                    self.qn -= 1
+                    self.qn_hot -= 1
                 self.tiers.pop(d, None)
             self._db.commit()
 
@@ -455,16 +463,19 @@ class Stream:
             if self.too_old(d, url):
                 continue                                   # published before the oldest date wanted
             old = bool(d and d < cutoff) or bool(it.get("old"))
+            hot = False
             if not old:
                 n_fresh += 1
                 old = n_fresh > FRESH_PER_CHECK            # thousands "new" at once: an archive, not today's news
+                hot = not old and (source == "rss" or bool(it.get("hot")) or self._dated_today(url))
             if old and not take_all:
                 if note is not None:
                     note["left_over"] = True
                 continue
             late = old and bool(d) and d >= late_cut and n_fresh <= FRESH_PER_CHECK   # late news: no daily budget
             rows.append(((norm_key(url), url, it.get("domain") or "", (it.get("title") or "")[:500],
-                          f"{source}:old" if old else source, d, (it.get("time") or "")[:5], now), old, late))
+                          f"{source}:old" if old else (f"{source}:hot" if hot else source), d,
+                          (it.get("time") or "")[:5], now), old, late))
         if not rows:
             return 0
         fresh = []
@@ -513,6 +524,19 @@ class Stream:
                 cur = ["", 0]
             self._oldday = cur
         return int(cur[1]) if cur[0] == day else 0
+
+    def _dated_today(self, url: str) -> bool:
+        """The address carries today's or yesterday's date (/2026/11/22/, 20261122, 2026-11-22): certainly new."""
+        if time.time() - getattr(self, "_dstamp_t", 0) > 300:
+            days = [datetime.now(WIB) - timedelta(days=i) for i in (0, 1)]
+            self._dstamp = [f for x in days for f in (x.strftime("/%Y/%m/%d/"), x.strftime("%Y%m%d"),
+                                                      x.strftime("%Y-%m-%d"), x.strftime("/%Y/%m/%d"))]
+            self._dstamp_t = time.time()
+        return any(f in url for f in self._dstamp)
+
+    @staticmethod
+    def is_hot(job: dict) -> bool:
+        return str(job.get("source") or "").endswith(":hot")
 
     def _fresh_cutoff(self) -> str:
         if time.time() - self._cut[0] > 60:
@@ -578,7 +602,10 @@ class Stream:
         self.queued.add(job["key"])
         self.qn += 1
         dom = job["domain"] or norm_key(job["url"]).split("/")[0]
-        if self.is_fresh(job):
+        if self.is_hot(job):
+            by, rr = self.by_domain_hot, self.rr_hot           # certainly new: read before everything else
+            self.qn_hot += 1
+        elif self.is_fresh(job):
             by, rr = self.by_domain, self.rr
         else:
             by, rr = self.by_domain_old, self.rr_old
@@ -666,7 +693,7 @@ class Stream:
                 data = [{**e, "date": ""} for e in data]     # one date on every entry = when the file was built
             for e in data:
                 if e.get("date") or news:                    # undated entries of a news sitemap: the last 48 h by rule
-                    items.append({**e, "domain": dom})
+                    items.append({**e, "domain": dom, "hot": news})
                 else:                                        # undated elsewhere: taken too, behind the news
                     items.append({**e, "domain": dom, "old": True})
         if self.cfg.get("homepage", True) and not catchup:   # the front page: articles not (yet) in any sitemap
@@ -674,7 +701,8 @@ class Stream:
             if got is not None:
                 ok_any = True
                 first = not (src["checked"] if "checked" in src.keys() else 0)
-                items += [{**g, "old": True} for g in got] if first else got   # first visit: the menu, not news
+                items += [{**g, "old": True} for g in got] if first else \
+                    [{**g, "hot": True} for g in got]          # first visit: the menu; later: what is new on it
         if not ok_any:
             if roots and src["url"]:                         # known sitemaps all failed: look for them again next time
                 extra["url"] = ""
@@ -750,7 +778,13 @@ class Stream:
         k, n = self.shard
         sh = f" AND shard(domain, {int(n)}) = {int(k)}" if n > 1 else ""   # this process's outlets only
         with self.lock:
-            fresh_n = self.qn - self.qn_old
+            if self.qn_hot < 500 and time.time() - self._hot_refill > 20:     # the hot lane: found in the last 6 h
+                self._hot_refill = time.time()
+                for r in self._db.execute(f"SELECT {cols} FROM articles WHERE discovered > ? AND status='new' AND "
+                                          f"source IN ('rss:hot', 'sitemap:hot'){sh} ORDER BY discovered DESC "
+                                          "LIMIT 3000", (time.time() - 6 * 3600,)).fetchall():
+                    self._enqueue(dict(r))
+            fresh_n = self.qn - self.qn_old - self.qn_hot
             if fresh_n < 2000:
                 cut = self._fresh_cutoff()
                 rows = self._db.execute(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date >= ?{sh} "
@@ -816,6 +850,10 @@ class Stream:
             night = self.backlog_open(now)
             if not night:
                 lanes = [(self.by_domain, self.rr, False), (self.by_domain_old, self.rr_old, True)]
+            got = self._take(self.by_domain_hot, self.rr_hot, now)
+            if got:
+                self.qn_hot -= 1
+                return got
             for by, rr, old in lanes:
                 got = self._take(by, rr, now, only_archive=old and not night)
                 if got:
@@ -1015,7 +1053,7 @@ class Stream:
         return {"days": days, "total": total,
                 "methods": {m: {"n": n, "pct": round(n * 100 / total, 2) if total else 0} for m, n in got.items()}}
 
-    def trim_backlog(self, chunk: int = 20000) -> dict:
+    def trim_backlog(self, chunk: int = 5000) -> dict:
         """Older links waiting to be read (older than the stream's days, or undated and found days ago) are taken
         out of the queue, a chunk at a time, so the database and its indexes stay light. Nothing is lost for good:
         such links are not marked as seen — an outlet's sitemap lists them again, and the media archive can fetch
@@ -1036,7 +1074,7 @@ class Stream:
                 st["removed"] += n
                 if n < chunk:
                     break
-                ev.wait(0.5)                                  # readers and finders get the database in between
+                ev.wait(0.3)                                  # readers and finders get the database in between
             with self.lock:
                 for d in list(self.by_domain_old):            # what was queued in memory from them
                     for j in self.by_domain_old.pop(d):
@@ -1597,8 +1635,10 @@ class Stream:
                 self.rr.clear()
                 self.by_domain_old.clear()
                 self.rr_old.clear()
+                self.by_domain_hot.clear()
+                self.rr_hot.clear()
                 self.queued.clear()
-                self.qn = self.qn_old = 0
+                self.qn = self.qn_old = self.qn_hot = 0
 
     def _intl_status(self) -> dict:
         try:
@@ -1647,7 +1687,7 @@ class Stream:
         try:
             return {"t": now, "lock_busy": not got, "running": self.running, "since": int(self.started) if self.running else 0,
                     "per_minute": round(per_min, 1), "per_day_pace": int(per_min * 60 * 24),
-                    "readers_busy": len(self.busy_domains), "queue_mem": self.qn, "queue_backlog_mem": self.qn_old,
+                    "readers_busy": len(self.busy_domains), "queue_mem": self.qn, "queue_backlog_mem": self.qn_old, "queue_hot_mem": self.qn_hot,
                     "trim": dict(self.__dict__.get("trim") or {}), "sm_unchanged": getattr(self, "sm_unchanged", 0),
                     "last_error": self.last_error,
                     "export": dict(self.export), "health": dict(self.health), "catchup": dict(self.catchup)}

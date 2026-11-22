@@ -341,6 +341,9 @@ page shows the live pace and the "per day at this pace" figure.
   every 2 minutes) that restarts the app when it runs but no longer answers; the web app restarts the stream's worker
   when it dies, when it stops writing its live state for 5 minutes (hung) or when it reads nothing for 20 minutes while
   fresh links wait (stalled) — with a Telegram message when Telegram is set up, and the cause on the Live Stream page.
+- **Hot lane**: links that are certainly new — RSS items, news-sitemap entries, new links on a front page and
+  addresses dated today or yesterday — are read before everything else, ahead of links that only carry a recent
+  sitemap date (often an old article whose "last modified" changed).
 - **Priorities**: (1) fresh news (the stream's days) — always, at once; a link whose title already matches a keyword
   or report topic joins it, whatever its date; (2) late news (published in the last `late_days` days, default 7) —
   by day only when a reader is free; (3) older links — only in the night hours (`old_hours`, default `1-6` = 01:00–

@@ -747,3 +747,29 @@ def test_where_stuck_names_the_waiting_step_and_live_state_never_blocks(tmp_path
     live = st.live_state()
     assert live["lock_busy"] and _t.time() - t0 < 2
     assert "test_stream.py" in stream.where_stuck(_th.get_ident())
+
+
+def test_certainly_new_links_take_the_hot_lane_before_doubtful_fresh_ones(tmp_path, monkeypatch):
+    """RSS items, news-sitemap items, new front-page links and addresses dated today go to the hot lane and are read
+    before links that only carry a recent sitemap date (often an old article whose lastmod changed)."""
+    from datetime import datetime
+    from crawler import paths, stream
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    st = stream.Stream(str(tmp_path / "s"))
+    st.cfg = {**stream.settings(), "domain_gap": 0}
+    st.running = True
+    today = datetime.now(stream.WIB)
+    st.add_found([{"url": "https://lama.id/berita/artikel-lama-diperbarui", "domain": "lama.id",
+                   "date": today.strftime("%Y-%m-%d")}], "sitemap")
+    st.add_found([{"url": "https://kabar.id/berita/kabar-baru", "domain": "kabar.id"}], "rss")
+    st.add_found([{"url": "https://ns.id/berita/kabar", "domain": "ns.id", "hot": True}], "sitemap")
+    st.add_found([{"url": f"https://dt.id/{today:%Y/%m/%d}/kabar", "domain": "dt.id"}], "sitemap")
+    assert st.qn_hot == 3
+    got = [st.next_job()[1]["domain"] for _ in range(4)]
+    assert set(got[:3]) == {"kabar.id", "ns.id", "dt.id"} and got[3] == "lama.id"
+    st.running = False
+    st2 = stream.Stream(str(tmp_path / "s"))                    # after a restart: the hot lane comes from the database
+    st2.cfg = st.cfg
+    st2.x("UPDATE articles SET status='new'")
+    st2.refill()
+    assert st2.qn_hot == 3

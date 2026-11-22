@@ -773,3 +773,35 @@ def test_certainly_new_links_take_the_hot_lane_before_doubtful_fresh_ones(tmp_pa
     st2.x("UPDATE articles SET status='new'")
     st2.refill()
     assert st2.qn_hot == 3
+
+
+def test_review_fixes_fresh_cap_counts_only_new_links_budget_and_day_sitemaps(tmp_path, monkeypatch):
+    """The per-visit cap counts only links not known before; the daily budget is counted under the lock; by day an
+    outlet's late news is read even when an archive link stands before it; trim keeps media-archive jobs."""
+    from datetime import datetime, timedelta
+    from crawler import paths, stream
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    monkeypatch.setattr(stream, "FRESH_PER_CHECK", 3)
+    st = stream.Stream(str(tmp_path / "s"))
+    st.cfg = {**stream.settings(), "domain_gap": 0, "old_per_check": 100, "old_per_day": 1000, "min_date": ""}
+    today = datetime.now(stream.WIB).strftime("%Y-%m-%d")
+    known = [{"url": f"https://a.id/berita/lama-dikenal-{i}", "domain": "a.id", "date": today} for i in range(5)]
+    st.add_found(known, "sitemap")                                   # 3 fresh + 2 over the cap
+    new = [{"url": "https://a.id/berita/benar-benar-baru", "domain": "a.id", "date": today}]
+    st.add_found(known + new, "sitemap")                             # the known ones do not use up the cap
+    src = st.rq("SELECT source FROM articles WHERE url LIKE '%benar-benar-baru'")[0]["source"]
+    assert src == "sitemap"
+    # by day: late news behind an archive link of the same outlet
+    day = lambda n: (datetime.now(stream.WIB) - timedelta(days=n)).strftime("%Y-%m-%d")
+    st._enqueue({"key": "arch", "url": "https://b.id/x", "domain": "b.id", "source": "sitemap:old", "feed_date": day(40)})
+    st._enqueue({"key": "late", "url": "https://b.id/y", "domain": "b.id", "source": "sitemap:old", "feed_date": day(3)})
+    monkeypatch.setattr(st, "backlog_open", lambda now=None: False)
+    while (g := st.next_job()) and g[0] == "a.id":
+        pass
+    assert g and g[1]["key"] == "late"
+    # trim never removes a media-archive job
+    st.x("INSERT INTO articles(key, url, domain, source, feed_date, status, discovered) VALUES "
+         "('bf', 'https://c.id/z', 'c.id', 'backfill:abc', ?, 'new', 0)", (day(90),))
+    st.trim_backlog()
+    assert st.rq("SELECT 1 FROM articles WHERE key='bf'")
+    assert stream.save_settings({"old_hours": "22-0"})["old_hours"] == "22-24"

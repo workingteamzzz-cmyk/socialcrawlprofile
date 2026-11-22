@@ -3139,7 +3139,7 @@ $('lsStToggle').onclick = async () => { if (!ST) return;
 $('lsSfSave').onclick = async () => {
   const r = await api('/api/stream', {threads: +$('lsSfThreads').value, rss_minutes: +$('lsSfRss').value, sitemap_minutes: +$('lsSfSm').value,
     max_age_hours: +$('lsSfAge').value, retention_days: +$('lsSfRet').value, domain_gap: +$('lsSfGap').value, keywords: $('lsSfKw').value,
-    old_per_check: +$('lsSfOld').value, old_per_day: +$('lsSfOldDay').value, old_hours: $('lsSfOldH').value, late_days: +$('lsSfLate').value, min_date: $('lsSfMin').value.trim(), all_links: $('lsSfAll').checked, homepage: $('lsSfHome').checked,
+    old_per_check: +$('lsSfOld').value, old_per_day: $('lsSfOldDay').value === '' ? undefined : +$('lsSfOldDay').value, old_hours: $('lsSfOldH').value, late_days: $('lsSfLate').value === '' ? undefined : +$('lsSfLate').value, min_date: $('lsSfMin').value.trim(), all_links: $('lsSfAll').checked, homepage: $('lsSfHome').checked,
     health_weekday: +$('lsSfHDay').value, health_hour: +$('lsSfHHour').value, health_on_start: $('lsSfHStart').checked,
     catchup_days: +$('lsSfCuD').value, catchup_hour: +$('lsSfCuH').value,
     top_n: +$('lsSfTop').value, top2_n: +$('lsSfTop2').value, active2_hours: +$('lsSfA2').value, semi_hours: +$('lsSfSemi').value, rare_hours: +$('lsSfRare').value, inactive_days: +$('lsSfIn').value, dead_days: +$('lsSfDead').value,

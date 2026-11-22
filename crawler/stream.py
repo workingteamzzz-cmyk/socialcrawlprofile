@@ -15,6 +15,7 @@ State: APP_DATA/stream/ (stream.db, settings.json). Admins start/stop it and set
 """
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import random
@@ -147,6 +148,8 @@ def save_settings(data: dict) -> dict:
         elif k == "old_hours":                             # "1-6" = 01:00–06:00 WIB; "" = any time
             v = str(v or "").strip().replace(" ", "").replace("–", "-")
             m = re.fullmatch(r"(\d{1,2})-(\d{1,2})", v)
+            if m and int(m[2]) == 0:
+                v, m = f"{int(m[1])}-24", re.fullmatch(r"(\d{1,2})-(\d{1,2})", f"{int(m[1])}-24")
             if v and not (m and 0 <= int(m[1]) <= 23 and 1 <= int(m[2]) <= 24 and int(m[1]) != int(m[2])):
                 raise ValueError("Older links: hours as from-to, e.g. 1-6 (empty = any time).")
             v = f"{int(m[1])}-{int(m[2])}" if v else ""
@@ -249,6 +252,7 @@ class Stream:
         self.rr_hot = deque()
         self.qn_hot = 0                        # of qn, how many wait in the hot lane
         self._hot_refill = 0.0
+        self.done_recent: dict = {}            # keys read in the last minutes (a refill's snapshot may predate them)
         self._cut = (0.0, "")                  # cutoff date, cached for a minute
         self.disk_brake = False                # the disk is nearly full: no older links taken in
         self.shard = (0, 1)                    # (this process, processes): each outlet is read by one process only
@@ -271,6 +275,10 @@ class Stream:
         if c is None:
             c = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True, timeout=30, check_same_thread=False)
             c.row_factory = sqlite3.Row
+            try:
+                c.create_function("shard", 2, _shard_of, deterministic=True)
+            except sqlite3.Error:
+                pass
             self._local.c = c
         return c.execute(sql, args).fetchall()
 
@@ -450,11 +458,8 @@ class Stream:
         cutoff = self.cutoff()
         take_all = bool(self.cfg.get("all_links", True)) and not self.disk_brake
         day = datetime.now(WIB).strftime("%Y-%m-%d")
-        taken = self._old_taken(day)
-        room_old = min(int(self.cfg.get("old_per_check", 50)),
-                       max(0, int(self.cfg.get("old_per_day", 30000)) - taken)) if take_all else 0
         late_cut = (datetime.now(WIB) - timedelta(days=int(self.cfg.get("late_days", 7)))).strftime("%Y-%m-%d")
-        now, rows, n_fresh = time.time(), [], 0
+        now, rows = time.time(), []
         for it in items:
             url = (it.get("url") or "").strip()
             if not url.startswith("http") or not is_article_link(url) or is_junk_page("", url):
@@ -463,24 +468,26 @@ class Stream:
             if self.too_old(d, url):
                 continue                                   # published before the oldest date wanted
             old = bool(d and d < cutoff) or bool(it.get("old"))
-            hot = False
-            if not old:
-                n_fresh += 1
-                old = n_fresh > FRESH_PER_CHECK            # thousands "new" at once: an archive, not today's news
-                hot = not old and (source == "rss" or bool(it.get("hot")) or self._dated_today(url))
+            hot = not old and (source == "rss" or bool(it.get("hot")) or self._dated_today(url))
             if old and not take_all:
                 if note is not None:
                     note["left_over"] = True
                 continue
-            late = old and bool(d) and d >= late_cut and n_fresh <= FRESH_PER_CHECK   # late news: no daily budget
             rows.append(((norm_key(url), url, it.get("domain") or "", (it.get("title") or "")[:500],
                           f"{source}:old" if old else (f"{source}:hot" if hot else source), d,
-                          (it.get("time") or "")[:5], now), old, late))
+                          (it.get("time") or "")[:5], now), old, bool(d) and d >= late_cut))
         if not rows:
             return 0
-        fresh = []
+        fresh, n_new_fresh = [], 0
         with self.lock:
-            for row, old, late in rows:
+            taken = self._old_taken(day)                   # read and updated under the lock: threads never lose counts
+            room_old = min(int(self.cfg.get("old_per_check", 50)),
+                           max(0, int(self.cfg.get("old_per_day", 30000)) - taken)) if take_all else 0
+            for row, old, dated_late in rows:
+                if not old and n_new_fresh >= FRESH_PER_CHECK:
+                    # thousands of *new* links in one visit: an archive listing, not today's news
+                    row, old = row[:4] + (source + ":old",) + row[5:], True
+                late = old and dated_late                     # late news (last late_days days): no daily budget
                 if old and not late and room_old <= 0:
                     if note is not None:
                         note["left_over"] = True              # some left for the next visit
@@ -492,6 +499,8 @@ class Stream:
                 if cur.rowcount:
                     if old and not late:
                         room_old -= 1
+                    elif not old:
+                        n_new_fresh += 1                      # only links not known before count
                     fresh.append((row, old, late))
             per_dom: dict = {}
             for row, old, _late in fresh:
@@ -501,7 +510,7 @@ class Stream:
                                  "DO UPDATE SET n = n + excluded.n", [(d, day, n) for d, n in per_dom.items() if d])
             n_old = sum(1 for _r, o, lt in fresh if o and not lt)
             if n_old:                                     # older links: a budget per day (the readers' pace)
-                self._oldday = [day, taken + n_old]
+                self._oldday = [day, self._old_taken(day) + n_old]
                 self._db.execute("INSERT INTO meta(k, v) VALUES ('old_taken', ?) ON CONFLICT(k) DO UPDATE SET "
                                  "v=excluded.v", (json.dumps(self._oldday),))
             self._db.commit()
@@ -659,6 +668,8 @@ class Stream:
         now = datetime.now(WIB)
         back = [now - timedelta(days=i) for i in range(0, max(2, catchup) + 1)]
         months = {d.strftime("%Y-%m") for d in back}
+        stamps_today = [f for d in back[:2] for f in (d.strftime("%Y-%m-%d"), d.strftime("%Y%m%d"),
+                                                      d.strftime("%Y/%m/%d"), d.strftime("%Y/%m/") + f"{d.day}")]
         stamps = [f for d in back[1:catchup + 1] for f in (d.strftime("%Y-%m-%d"), d.strftime("%Y%m%d"),
                                                             d.strftime("%Y/%m/%d"), d.strftime("%Y/%m/") + f"{d.day}")]
         items, ok_any, queue, seen, reads, sigs = [], False, list(roots), set(), 0, {}
@@ -689,8 +700,13 @@ class Stream:
                 queue.extend((subs or [x for x, p in ranked if p is not None][-2:])[:8 if catchup else (SITEMAP_READS_BUSY if busy else 3)])
                 continue
             news = "news" in u.lower() or "berita" in u.lower()
-            if not news and len(data) > 50 and len({(e.get("date") or "")[:10] for e in data}) == 1:
-                data = [{**e, "date": ""} for e in data]     # one date on every entry = when the file was built
+            one = {(e.get("date") or "")[:10] for e in data}
+            if not news and not catchup and len(data) > 300 and len(one) == 1 and \
+                    next(iter(one)) >= (now - timedelta(days=1)).strftime("%Y-%m-%d") and \
+                    not any(t in u for t in stamps_today):
+                # hundreds of entries all "changed" today, in a file that is not today's own: the file's build date
+                # (a day's own sitemap, sitemap-2026-11-22.xml, keeps its dates)
+                data = [{**e, "date": ""} for e in data]
             for e in data:
                 if e.get("date") or news:                    # undated entries of a news sitemap: the last 48 h by rule
                     items.append({**e, "domain": dom, "hot": news})
@@ -772,37 +788,48 @@ class Stream:
 
     # ----- readers -----
     def refill(self) -> None:
-        """Articles waiting in the database -> the lanes: fresh news first (by date, then the undated, newest
-        found first); the backlog lane is topped up separately, so millions of older links never crowd the news."""
+        """Articles waiting in the database -> the lanes: the hot lane (certainly new, found in the last 6 h), fresh
+        news (by date, then the undated, newest found first); the backlog lane is topped up separately, so millions
+        of older links never crowd the news. The database is read on this thread's own read-only connection — the
+        readers never wait for these queries — and only the queuing holds the lock."""
         cols = "key, url, domain, title, feed_date, feed_time, source, discovered"
         k, n = self.shard
         sh = f" AND shard(domain, {int(n)}) = {int(k)}" if n > 1 else ""   # this process's outlets only
+        now = time.time()
         with self.lock:
-            if self.qn_hot < 500 and time.time() - self._hot_refill > 20:     # the hot lane: found in the last 6 h
-                self._hot_refill = time.time()
-                for r in self._db.execute(f"SELECT {cols} FROM articles WHERE discovered > ? AND status='new' AND "
-                                          f"source IN ('rss:hot', 'sitemap:hot'){sh} ORDER BY discovered DESC "
-                                          "LIMIT 3000", (time.time() - 6 * 3600,)).fetchall():
+            need_hot = self.qn_hot < 500 and now - self._hot_refill > 20
+            if need_hot:
+                self._hot_refill = now
+            need_fresh = self.qn - self.qn_old - self.qn_hot < 2000
+            need_old = self.qn_old < 1500
+        cut = self._fresh_cutoff()
+        got: list = []
+        if need_hot:
+            got += self.rq(f"SELECT {cols} FROM articles WHERE discovered > ? AND status='new' AND "
+                           f"source IN ('rss:hot', 'sitemap:hot'){sh} ORDER BY discovered DESC LIMIT 3000",
+                           (now - 6 * 3600,))
+        if need_fresh:
+            got += self.rq(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date >= ?{sh} "
+                           "ORDER BY feed_date DESC LIMIT 3000", (cut,))
+            got += self.rq(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date = '' AND "
+                           f"discovered > ? AND source NOT LIKE '%:old'{sh} ORDER BY discovered DESC LIMIT 1500",
+                           (now - 2 * 86400,))
+        old: list = []
+        if need_old:
+            old += self.rq(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date > '' AND "
+                           f"feed_date < ?{sh} ORDER BY feed_date DESC LIMIT 1500", (cut,))
+            old += self.rq(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date = ''{sh} "
+                           "ORDER BY discovered DESC LIMIT 1500")                     # undated backlog
+        if not got and not old:
+            return
+        with self.lock:
+            for r in got:
+                if r["key"] not in self.done_recent:          # read a moment ago: the snapshot did not know yet
                     self._enqueue(dict(r))
-            fresh_n = self.qn - self.qn_old - self.qn_hot
-            if fresh_n < 2000:
-                cut = self._fresh_cutoff()
-                rows = self._db.execute(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date >= ?{sh} "
-                                        "ORDER BY feed_date DESC LIMIT 3000", (cut,)).fetchall()
-                rows += self._db.execute(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date = '' AND "
-                                         f"discovered > ? AND source NOT LIKE '%:old'{sh} ORDER BY discovered DESC "
-                                         "LIMIT 1500", (time.time() - 2 * 86400,)).fetchall()
-                for r in rows:
-                    self._enqueue(dict(r))
-            if self.qn_old < 1500:
-                cut = self._fresh_cutoff()
-                rows = self._db.execute(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date > '' AND "
-                                        f"feed_date < ?{sh} ORDER BY feed_date DESC LIMIT 1500", (cut,)).fetchall()
-                rows += self._db.execute(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date = ''{sh} "
-                                         "ORDER BY discovered DESC LIMIT 1500").fetchall()   # undated backlog
-                for r in rows:
-                    if self.qn >= QUEUE_MAX:
-                        break
+            for r in old:
+                if self.qn >= QUEUE_MAX:
+                    break
+                if r["key"] not in self.done_recent:
                     self._enqueue(dict(r))
 
     def backlog_open(self, now: float | None = None) -> bool:
@@ -831,8 +858,15 @@ class Stream:
                 continue
             if dom in self.busy_domains or self.next_ok.get(dom, 0) > now:
                 continue
-            if only_archive and not self.is_late(q[0]):
-                continue                                   # by day: the archive waits for the night hours
+            if only_archive:                               # by day: only late news / media-archive jobs
+                i = next((j for j, job in enumerate(itertools.islice(q, 300)) if self.is_late(job)), None)
+                if i is None:
+                    continue                               # the archive waits for the night hours
+                job = q[i]
+                del q[i]
+                self.busy_domains.add(dom)
+                self.qn -= 1
+                return dom, job
             self.busy_domains.add(dom)
             self.qn -= 1
             return dom, q.popleft()
@@ -1005,6 +1039,10 @@ class Stream:
                 self.bump("failed")
             finally:
                 with self.lock:
+                    self.done_recent[job["key"]] = None
+                    if len(self.done_recent) > 50000:
+                        for _k in list(self.done_recent)[:10000]:
+                            del self.done_recent[_k]
                     self.busy_domains.discard(dom)
                     self.next_ok[dom] = time.time() + float(self.gap_override.get(dom) or self.cfg["domain_gap"])
                     self.queued.discard(job["key"])
@@ -1068,7 +1106,8 @@ class Stream:
                     n = self._db.execute(
                         "DELETE FROM articles WHERE rowid IN (SELECT rowid FROM articles WHERE status='new' AND "
                         "((feed_date > '' AND feed_date < ?) OR "
-                        "(feed_date = '' AND (source LIKE '%:old' OR discovered < ?))) LIMIT ?)",
+                        "(feed_date = '' AND (source LIKE '%:old' OR discovered < ?))) AND source NOT LIKE 'backfill:%' "
+                        "LIMIT ?)",
                         (cut, time.time() - 2 * 86400, chunk)).rowcount   # dated in the last days: kept
                     self._db.commit()
                 st["removed"] += n
@@ -2018,7 +2057,8 @@ def _stuck(started: float, idle_since: float) -> tuple[str, float]:
     if d.get("loop_ok") and float(d.get("loop_age") or 0) > LOOP_HUNG_AFTER:
         return "stopped answering (hung at " + str(d.get("stuck_at") or "?")[:120] + ")", 0.0
     fresh = int(d.get("queue_mem") or 0) - int(d.get("queue_backlog_mem") or 0)   # by day the archive may wait
-    if not settings().get("enabled") or not d.get("running") or fresh <= 0 or \
+    if not settings().get("enabled") or not d.get("running") or fresh <= 0 or d.get("lock_busy") or \
+            float(d.get("loop_age") or 0) > 30 or \
             float(d.get("per_minute") or 0) > 0 or (d.get("trim") or {}).get("running"):
         return "", 0.0
     if not idle_since:
@@ -2056,7 +2096,8 @@ def start_worker(log=print) -> None:
                     try:
                         p.wait(30)
                     except Exception:  # noqa: BLE001
-                        pass
+                        _WORKER["stop"].wait(30)              # not gone yet: never two workers on one database
+                        continue
                     p.returncode = "hung" if why[0].startswith("stopped") else "stalled"
             if p is None or p.poll() is not None:
                 if p is not None:

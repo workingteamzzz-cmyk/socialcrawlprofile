@@ -241,7 +241,16 @@ class SafetySettings(BaseModel):
 
 
 class StreamSettings(BaseModel):
+    # every stream setting the dashboard sends is passed on (stream.save_settings keeps only known ones, within limits):
+    # a newer setting is never dropped silently again
+    model_config = ConfigDict(extra="allow")
     enabled: bool | None = Field(None, description="start (true) / stop (false) the live news stream")
+    fetch_googlebot: bool | None = Field(None, description="a refused page: try again as Googlebot")
+    fetch_cloudscraper: bool | None = Field(None, description="a refused page: try cloudscraper")
+    auto_add_media: bool | None = Field(None, description="outlets found by News Search join the media list")
+    retry_failed: bool | None = Field(None, description="pages that failed for a passing reason are tried again")
+    pause_international: bool | None = Field(None, description="international outlets are not checked")
+    reader_processes: int | None = Field(None, description="processes reading articles (0 = automatic)")
     threads: int | None = Field(None, description="article readers (2-64)")
     discovery_threads: int | None = None
     rss_minutes: int | None = Field(None, description="each RSS feed checked every … minutes")

@@ -859,3 +859,24 @@ def test_the_status_page_reads_the_worker_live_state(tmp_path, monkeypatch):
     with open(stream._live_path(), "w") as f:
         _j.dump(live, f)
     assert st.status()["running"]                                  # an older worker without the newer numbers
+
+
+def test_every_stream_setting_is_saved_through_the_server(tmp_path, monkeypatch):
+    """Each setting of Stream settings reaches the saved settings through the server's endpoint (none dropped on the
+    way — reader_processes and the fetch / retry / international switches once were)."""
+    pytest.importorskip("fastapi")
+    from crawler import paths, stream
+    from tests.test_users import SITE, _app, _client
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    monkeypatch.setattr(stream, "_STREAM", None)
+    monkeypatch.setattr(stream, "_WORKER_PARENT", True)          # the web server: settings only, no stream here
+    app, _ = _app(tmp_path, monkeypatch)
+    admin = _client(app, "ana")
+    want = {"reader_processes": 6, "fetch_googlebot": False, "fetch_cloudscraper": False, "auto_add_media": False,
+            "retry_failed": False, "pause_international": True, "headline_only": False, "old_per_day": 12345,
+            "late_days": 10, "old_hours": "2-5", "min_date": "2025-01-01", "threads": 16, "old_per_check": 40}
+    r = admin.post("/api/stream", json=want, headers=SITE).json()
+    assert r["ok"], r
+    saved = stream.settings()
+    assert {k: saved.get(k) for k in want} == want
+    stream.get().stop()

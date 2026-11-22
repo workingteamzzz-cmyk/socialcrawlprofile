@@ -89,6 +89,10 @@ def _search_db() -> sqlite3.Connection:
         c.execute("ALTER TABLE rep ADD COLUMN added REAL")
     except sqlite3.OperationalError:
         pass
+    try:                                    # 1 = the live stream has the same article (shown once, from the stream)
+        c.execute("ALTER TABLE rep ADD COLUMN dup INTEGER")
+    except sqlite3.OperationalError:
+        pass
     c.execute("CREATE VIRTUAL TABLE IF NOT EXISTS rdocs USING fts5(skey UNINDEXED, title, summary, "
               "tokenize='unicode61 remove_diacritics 2')")
     # social media posts of the reporting database (Keyword Search, Collect, API scraper) for the client API
@@ -128,6 +132,9 @@ def index_new(limit: int = 5000) -> int:
         for i in range(0, len(keys), 500):                  # a re-read article replaces its old entry
             part = keys[i:i + 500]
             db.execute(f"DELETE FROM docs WHERE key IN ({','.join('?' * len(part))})", part)
+        for i in range(0, len(keys), 500):                  # the same link in the reports: shown once, from here
+            part = keys[i:i + 500]
+            db.execute(f"UPDATE rep SET dup=1 WHERE skey IN ({','.join('?' * len(part))})", part)
         db.executemany("INSERT INTO docs(key, url, domain, pub_date, pub_time, matched, fetched, title, summary) "
                        "VALUES (?,?,?,?,?,?,?,?,?)",
                        [(x["key"], x["url"], x["domain"], x["pub_date"], x["pub_time"], x["matched"], x["fetched"],
@@ -195,6 +202,7 @@ def index_reports(limit: int = 5000) -> int:
                         _sent(x["sentiment"] or row.get("SENTIMENT")), (x["keywords"] or "").strip("|").replace("|", ", "),
                         x["last_seen"] or ""))
         keys = [o[0] for o in out]
+        dups = _in_stream(keys)
         for i in range(0, len(keys), 500):
             part = keys[i:i + 500]
             db.execute(f"DELETE FROM rdocs WHERE skey IN ({','.join('?' * len(part))})", part)
@@ -205,6 +213,7 @@ def index_reports(limit: int = 5000) -> int:
                        "pub_date=excluded.pub_date, pub_time=excluded.pub_time, image=excluded.image, "
                        "summary=excluded.summary, sentiment=excluded.sentiment, keywords=excluded.keywords, "
                        "seen=excluded.seen", [(*o, now) for o in out])  # 'added' stays the first arrival
+        db.executemany("UPDATE rep SET dup=? WHERE skey=?", [(1 if o[0] in dups else 0, o[0]) for o in out])
         db.executemany("INSERT INTO rdocs(skey, title, summary) VALUES (?,?,?)", [(o[0], o[4], o[8]) for o in out])
         db.execute("INSERT INTO meta(k, v) VALUES ('rep_cursor', ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
                    (json.dumps([rows[-1]["last_seen"] or "", rows[-1]["key"]]),))
@@ -213,6 +222,44 @@ def index_reports(limit: int = 5000) -> int:
     finally:
         db.close()
         src.close()
+
+
+def _in_stream(keys: list[str]) -> set:
+    """Which of these links the live stream has read (sorted lookups in batches — never one by one per page view)."""
+    src = _stream_ro()
+    if src is None or not keys:
+        return set()
+    got = set()
+    try:
+        ks = sorted(set(keys))
+        for i in range(0, len(ks), 900):
+            part = ks[i:i + 900]
+            got |= {r[0] for r in src.execute(f"SELECT key FROM articles WHERE key IN ({','.join('?' * len(part))}) "
+                                              "AND status='success'", part)}
+    except sqlite3.Error:
+        pass
+    finally:
+        src.close()
+    return got
+
+
+def mark_duplicates(batch: int = 5000) -> int:
+    """Once (in the stream's background): the report rows indexed before the 'dup' mark get it, a batch at a time,
+    and the index the News Stream reads them by is built. Returns how many rows were marked (0 = all done)."""
+    db = _search_db()
+    try:
+        if not db.execute("SELECT 1 FROM sqlite_master WHERE name='rep_pubt'").fetchone():
+            db.execute("CREATE INDEX IF NOT EXISTS rep_pubt ON rep(pub_date, pub_time)")   # newest first, in order
+            db.commit()
+        rows = [r[0] for r in db.execute("SELECT skey FROM rep WHERE dup IS NULL LIMIT ?", (batch,))]
+        if not rows:
+            return 0
+        dups = _in_stream(rows)
+        db.executemany("UPDATE rep SET dup=? WHERE skey=?", [(1 if k in dups else 0, k) for k in rows])
+        db.commit()
+        return len(rows)
+    finally:
+        db.close()
 
 
 def _int(v):
@@ -611,6 +658,9 @@ def _loop() -> None:
                 pass
             while index_social() >= 5000 and not _STATE["stop"].is_set():
                 pass
+            for _ in range(20):                               # older report rows: their 'dup' mark, bit by bit
+                if not mark_duplicates() or _STATE["stop"].is_set():
+                    break
             if time.time() - last_prune > 3600:
                 last_prune = time.time()
                 prune_reports()

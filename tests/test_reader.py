@@ -324,3 +324,39 @@ def test_dashboard_gets_the_articles_at_once_while_totals_are_counted(rd, monkey
     monkeypatch.setattr(rd, "_count_now", real)
     rd.forget_counts()
     assert rd.articles()["total"] == 5 and "counting" not in rd.articles()            # the client API: exact
+
+
+def test_a_report_row_the_stream_also_has_is_marked_once_and_shown_once(rd, tmp_path):
+    """The 'dup' mark: set when a report row is indexed (the stream has the link), or later when the stream reads
+    a link the reports already had; rows indexed before the mark existed get it from mark_duplicates."""
+    from datetime import timedelta, timezone
+    from crawler import archive, insights, stream
+    s = stream.Stream(str(tmp_path / "data" / "stream"))
+    s.x("INSERT INTO articles(key, url, domain, title, status, discovered, fetched, pub_date, pub_time, sentiment) "
+        "VALUES (?, 'https://a.id/berita/sama', 'a.id', 'Sama di stream', 'success', 0, ?, '2026-11-20', '22:30', 'neutral')",
+        (stream.norm_key("https://a.id/berita/sama"), time.time()))
+    insights.index_new()
+    wib = timezone(timedelta(hours=7))
+    archive.add_rows("online", [{"url": "https://a.id/berita/sama", "title": "Sama di stream", "published_full": "2026-11-20 22:30",
+                                 "text": "x"},
+                                {"url": "https://z.id/berita/baru-nanti", "title": "Nanti dibaca stream",
+                                 "published_full": "2026-11-20 07:00", "text": "y"}], wib)
+    insights.index_reports()
+    db = insights._search_db()
+    marks = {r["url"]: r["dup"] for r in db.execute("SELECT url, dup FROM rep")}
+    assert marks == {"https://a.id/berita/sama": 1, "https://z.id/berita/baru-nanti": 0}
+    # the stream reads the second link later: its report row becomes a duplicate
+    s.x("INSERT INTO articles(key, url, domain, title, status, discovered, fetched, pub_date, pub_time, content, sentiment) "
+        "VALUES (?, 'https://z.id/berita/baru-nanti', 'z.id', 'Nanti dibaca stream', 'success', 0, ?, "
+        "'2026-11-20', '07:00', NULL, 'neutral')", (stream.norm_key("https://z.id/berita/baru-nanti"), time.time() + 10))
+    insights.index_new()
+    assert db.execute("SELECT dup FROM rep WHERE url='https://z.id/berita/baru-nanti'").fetchone()[0] == 1
+    db.execute("UPDATE rep SET dup=NULL")                                     # as on a server before this version
+    db.commit()
+    assert insights.mark_duplicates() == 2 and insights.mark_duplicates() == 0
+    assert {r[0] for r in db.execute("SELECT dup FROM rep")} == {1}
+    db.close()
+    rd.forget_counts()
+    urls = [r["url"] for r in rd.articles(size=50)["rows"]]
+    assert len(urls) == len(set(urls))                                          # each link once
+    s.stop()

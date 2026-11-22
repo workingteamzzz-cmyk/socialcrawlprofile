@@ -58,7 +58,7 @@ def _count_beside(ck, u, args, with_search) -> dict | None:
                 _BUSY.discard(ck)
         th = threading.Thread(target=run, daemon=True, name="reader-count")
         th.start()
-        th.join(1.0)
+        th.join(0.3)                                    # a small database is counted at once; a big one follows
     hit = _COUNTS.get(ck)
     if hit:
         return dict(hit[1])
@@ -226,7 +226,9 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
                 w.append("rd.rdocs MATCH ?")
                 a.append(expr)
             if source == "all":                            # read by the stream too: shown once, from the stream
-                w.append("NOT EXISTS (SELECT 1 FROM articles x WHERE x.key = r.skey AND x.status='success')")
+                # marked once when indexed (insights.dup) — no lookup into the stream's database per row and view;
+                # a row not marked yet is shown (rather twice than missing)
+                w.append("COALESCE(r.dup, 0) = 0")
             selects.append("SELECT r.skey key, r.url, r.domain, r.title, r.pub_date, r.pub_time, r.image, r.summary, "
                            "r.sentiment, r.keywords matched, COALESCE(r.added, 0) fetched, 'reports' origin "
                            f"FROM s.rep r {join}{' WHERE ' + ' AND '.join(w) if w else ''}")

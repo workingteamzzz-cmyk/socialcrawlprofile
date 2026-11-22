@@ -375,6 +375,7 @@ def restore_zip(path: str, st: dict, restore_excel) -> None:
                 raise ValueError("The ZIP holds no Excel (.xlsx) or backup (.jsonl) files.")
             st.update(files=len(todo), files_done=0)
             for n in todo:
+                st["current"] = n
                 if n.lower().endswith(".xlsx"):
                     p = os.path.join(work, "part.xlsx")
                     with z.open(n) as src, open(p, "wb") as dst:
@@ -387,6 +388,7 @@ def restore_zip(path: str, st: dict, restore_excel) -> None:
                     with z.open(n) as src:
                         _restore_jsonl(src, os.path.basename(n), st)
                 st["files_done"] += 1
+            st["current"] = ""
     finally:
         shutil.rmtree(work, ignore_errors=True)
 

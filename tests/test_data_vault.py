@@ -162,3 +162,23 @@ def test_no_zip_without_room_on_the_disk_and_bad_periods_refused(env, monkeypatc
         data_vault.start_build("Oktober", "excel")
     with pytest.raises(ValueError):
         data_vault.start_build("2026-10", "pdf")
+
+
+def test_a_file_in_another_layout_is_named_not_skipped_silently(env, monkeypatch):
+    """A ZIP with one Excel in the team's template and one with other columns: the first is restored, the second is
+    named as skipped (not the team's Online / Medsos template)."""
+    from openpyxl import Workbook
+    _seed()
+    good = _build("2026-10", "excel")
+    other = os.path.join(str(env), "lain.xlsx")
+    wb = Workbook()
+    wb.active.append(["Tanggal", "Judul", "Link"])
+    wb.active.append(["2026-10-05", "Berita", "https://contoh.id/berita/a"])
+    wb.save(other)
+    mixed = os.path.join(str(env), "campur.zip")
+    with zipfile.ZipFile(mixed, "w") as z, zipfile.ZipFile(good) as g:
+        z.writestr("Oktober/Online_2026-10-20.xlsx", g.read("2026-10/Online_2026-10-20.xlsx"))
+        z.write(other, "Oktober/format_lain.xlsx")
+    _fresh_server(env, monkeypatch, "server5")
+    st = _restore(mixed)
+    assert st["articles"] == 1 and st["skipped"] == ["Oktober/format_lain.xlsx"]

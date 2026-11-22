@@ -259,6 +259,9 @@ def _restore(path: str) -> None:
     kind, rep = archive.import_file(path)                      # the reporting database first (Online or Medsos)
     st["report_rows"] = st.get("report_rows", 0) + rep          # added up: a ZIP brings many files
     st["kind"] = kind or st.get("kind", "")
+    if not kind:                                                # not the team's Online / Medsos layout: said, not hidden
+        st.setdefault("skipped", []).append(st.get("current") or os.path.basename(path))
+        return
     if kind != "online":
         return                                                 # a Medsos file: reports only
     s = stream.get()

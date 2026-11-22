@@ -3552,7 +3552,9 @@ $('clRestore').onclick = async () => {
     }
     const poll = async () => { const d = await api('/api/cleanup'); const re_ = (d.status || {}).restore || {};
       if (re_.running){ $('clResMsg').textContent = `Restoring… ${re_.files ? `file ${fmt(re_.files_done || 0)} of ${fmt(re_.files)} · ` : ''}${fmt(re_.rows || 0)} rows read`; return setTimeout(poll, 1500); }
-      $('clResMsg').textContent = re_.error ? 'Not restored: ' + re_.error : `Restored: ${fmt(re_.articles)} articles back in the stream, ${fmt(re_.report_rows)} rows in Reports.`;
+      const sk = re_.skipped || [];
+      $('clResMsg').textContent = re_.error ? 'Not restored: ' + re_.error : `Restored: ${fmt(re_.articles)} articles back in the stream, ${fmt(re_.report_rows)} rows in Reports.`
+        + (sk.length ? ` ${fmt(sk.length)} file(s) skipped — not the team's Online / Medsos template: ${sk.slice(0, 5).join(', ')}${sk.length > 5 ? ', …' : ''}` : '');
       $('clRestore').disabled = false; };
     poll();
   } catch (e){ $('clResMsg').textContent = 'Stopped: ' + e.message; $('clRestore').disabled = false; }

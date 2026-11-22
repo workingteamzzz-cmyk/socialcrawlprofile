@@ -36,7 +36,9 @@ SUMMARY_SENTENCES = 3
 # they also poison keyword verification and person extraction ("PLN" in a
 # "Baca juga" headline must never count as a PLN mention).
 JUNK_LINE_RE = re.compile(
-    r"^\s*(?:baca\s*juga|baca\s*:|simak\s*juga|simak\s*video|simak\s*breaking|"
+    r"^\s*(?:baca\s*juga|baca\s*:|baca\s*selengkapnya|baca\s*artikel|baca\s*berita|"
+    r"berita\s*lainnya|artikel\s*lainnya|terpopuler|read\s*also|read\s*more|"
+    r"related\s*(?:news|articles?|posts?)|most\s*read|simak\s*juga|simak\s*video|simak\s*breaking|"
     r"lihat\s*juga|saksikan\s*video|tonton\s*(?:juga|video)|artikel\s*terkait|"
     r"berita\s*terkait|ringkasan\s*berita|advertisement|advertisment|"
     r"scroll\s*to\s*continue|pilihan\s*editor|video\s*pilihan|"
@@ -55,9 +57,28 @@ JUNK_LINE_RE = re.compile(
 # "Baca juga: Some Headline Title" glued INSIDE a line (newlines lost):
 # remove from the marker up to the end of the embedded headline (the next
 # sentence terminator or end of line).
+# The marker must start a word: "dibaca juga" / "melihat juga" in a real sentence are never touched.
 JUNK_INLINE_RE = re.compile(
-    r"(?:baca|simak|lihat|tonton)\s+juga\s*:?\s*[^.\n!?]*[.!?]?",
+    r"(?<![A-Za-z])(?:(?:baca|simak|lihat|tonton)\s+juga\s*:?|baca(?:\s+selengkapnya)?\s*:|read\s+also\s*:?)"
+    r"\s*[^.\n!?]*[.!?]?",
     re.IGNORECASE)
+
+# A block header alone on its line ("BACA JUGA:", "Berita Terkait") — the headline lines under it go too
+BLOCK_HEADER_RE = re.compile(
+    r"^\s*(?:baca\s*juga|baca|simak\s*juga|lihat\s*juga|baca\s*artikel\s*lainnya|baca\s*berita\s*lainnya|"
+    r"berita\s*terkait|artikel\s*terkait|berita\s*lainnya|artikel\s*lainnya|berita\s*populer|terpopuler|"
+    r"pilihan\s*editor|rekomendasi(?:\s*untuk\s*anda)?|read\s*also|related\s*(?:news|articles?|posts?)|"
+    r"most\s*read)\s*[:：]?\s*$", re.IGNORECASE)
+BLOCK_MAX_LINES = 5            # at most this many headline lines under one header
+CLEAN_MAX_CUT = 0.30           # the extra cleaning never takes more than 30% of an article
+
+
+def _headline_like(line: str) -> bool:
+    """A related-article headline, not a news paragraph: short, and not a full sentence ending with a period."""
+    words = line.split()
+    if not words or len(words) > 18:
+        return False
+    return not (line.rstrip().endswith((".", "!", "?", "\"", "”")) and len(words) >= 8)
 
 # "(Sumber: yt otorider)" / "Sumber: xyz" glued at the end of a line
 SOURCE_INLINE_RE = re.compile(
@@ -86,13 +107,35 @@ _DATELINE_SCAN_LINES = 3  # datelines can hide below a leading caption
 
 def clean_content(text):
     """Drop 'Baca juga' / ads / datelines / source & video credits from
-    extracted text — whole lines and fragments glued inside a line."""
+    extracted text — whole lines and fragments glued inside a line. Under a
+    block header alone on its line ("BACA JUGA:", "Berita Terkait") the
+    headline lines that follow go too (at most 5, up to the first real
+    paragraph). Safety: when that block removal would take more than 30% of
+    the article, only the line-by-line cleaning is kept."""
     if not text:
         return text
+    full = _clean(text, blocks=True)
+    base = _clean(text, blocks=False)
+    if len(full) < len(base) * (1 - CLEAN_MAX_CUT):
+        return base                          # too much would go: never risk the article itself
+    return full
+
+
+def _clean(text, blocks=True):
     lines = []
     seen_content = 0
+    skip = 0
     for line in str(text).splitlines():
         stripped = line.strip()
+        if skip:
+            if stripped and _headline_like(stripped) and not JUNK_LINE_RE.match(stripped):
+                skip -= 1
+                continue                     # a related headline under the block header
+            if stripped:
+                skip = 0                     # a real paragraph: the block is over
+        if blocks and BLOCK_HEADER_RE.match(stripped):
+            skip = BLOCK_MAX_LINES
+            continue
         if JUNK_LINE_RE.match(stripped):
             continue
         stripped = JUNK_INLINE_RE.sub(" ", stripped)

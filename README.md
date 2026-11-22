@@ -341,6 +341,14 @@ page shows the live pace and the "per day at this pace" figure.
   every 2 minutes) that restarts the app when it runs but no longer answers; the web app restarts the stream's worker
   when it dies, when it stops writing its live state for 5 minutes (hung) or when it reads nothing for 20 minutes while
   fresh links wait (stalled) — with a Telegram message when Telegram is set up, and the cause on the Live Stream page.
+- **INFLUENCER / PERSON**: an influencer speaks — a speech verb (kata, ujar, menyatakan, menegaskan…) *and* a
+  quotation by the name; indirect speech ("menurut X", "X mengatakan bahwa…") makes a person only. A person is
+  anyone named — never an organisation (European Commission, Goldman Sachs), a country or a city; each name is
+  written in the fullest form the article uses ("Airlangga" -> "Airlangga Hartarto"), role words dropped.
+- **"Baca juga" cleanup**: besides single "Baca juga: …" lines, a header alone on its line ("BACA JUGA:", "Berita
+  Terkait", "Terpopuler"…) takes the headline lines under it (at most 5, up to the first real paragraph), so their
+  keywords never count; ordinary sentences ("…dibaca juga dalam laporan…") are untouched, and if the block removal
+  would take more than 30% of an article only the line-by-line cleaning is kept.
 - **Hot lane**: links that are certainly new — RSS items, news-sitemap entries, new links on a front page and
   addresses dated today or yesterday — are read before everything else, ahead of links that only carry a recent
   sitemap date (often an old article whose "last modified" changed).

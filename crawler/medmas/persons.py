@@ -68,6 +68,9 @@ desainer perancang arsitek insinyur peneliti ilmuwan wartawan jurnalis
 fotografer presenter pembalap pebisnis youtuber selebgram kreator
 produser komedian pelawak pengacara advokat notaris psikolog pilot chef
 koki perajin pengrajin penceramah dai mubaligh
+perekonomian maritim investasi politik keamanan polhukam pembangunan manusia
+pertahanan perencanaan agraria transmigrasi sekretariat negara luar negeri
+dalam kabinet koordinator bidang urusan hubungan pemberantasan penanggulangan
 kesehatan pendidikan perhubungan pertanian keuangan kominfo komunikasi
 informatika sosial pariwisata perdagangan perindustrian ketenagakerjaan
 kebudayaan olahraga kepemudaan lingkungan kehutanan perikanan kelautan
@@ -113,6 +116,20 @@ media tim unit layanan pelanggan ulp upt uptd cabang wilayah daerah
 nasional internasional group grup holding corp persada karya utama
 warga masyarakat pihak hal ini itu the markas posko tanah air negeri
 atau dan yang di ke dari
+commission council union european europe eropa uni asean apec g20 who imf
+unesco unicef nato opec sachs morgan stanley capital fund trust inc ltd llc
+co company corporation corp limited plc ag gmbh foundation institute agency
+ministry office department authority federation association society club
+party news times post daily herald tribune journal tv radio online channel
+network digital tech technology technologies global international energy
+mining motor motors airlines airways air bank securities sekuritas finance
+group holdings ventures partners industries exchange market index
+serikat republik kerajaan federasi china tiongkok cina beijing shanghai amerika america american usa as washington
+inggris london britania eropa prancis perancis paris jerman berlin rusia moskow
+jepang tokyo korea seoul pyongyang india australia malaysia singapura singapore
+thailand bangkok vietnam filipina manila myanmar kamboja laos brunei timor
+arab saudi mesir iran irak israel palestina gaza ukraina turki belanda italia
+spanyol kanada brasil meksiko afrika asia pasifik timur tengah
 """.split())
 
 # Markers whose following capitalized word is a PLACE name — used to LEARN
@@ -198,8 +215,9 @@ def extract_people(text):
         if not tokens:
             continue
         low = [t.rstrip(".").lower() for t in tokens]
-        if any(t in NON_PERSON or t in places for t in low):
-            continue
+        parts = [p for t in low for p in re.split(r"[-’']", t) if p]
+        if any(t in NON_PERSON or t in places for t in low) or any(p in NON_PERSON for p in parts):
+            continue                       # "Indonesia-European", "Goldman Sachs", "Beijing": not people
         if any(re.search(r"\d", t) for t in tokens):
             continue
         # words of the "name" that exist lowercase in text -> capitalized term
@@ -209,6 +227,8 @@ def extract_people(text):
         if len(name.replace(".", "").replace(" ", "")) < 3:
             continue
         left, right = text[max(0, s - 45):s], text[e:e + 45]
+        if left.rstrip(" ").endswith(tuple(_QUOTES)):
+            continue                       # '"Pasokan listrik aman…"': the quotation's first word, not a name
         # followed by an ALL-CAPS abbreviation in parentheses -> a term
         if re.match(r"\s*\([A-Z]{2,}\)", right):
             continue
@@ -217,7 +237,7 @@ def extract_people(text):
         # means what follows is the COMPANY name, not a person
         if any(t in ("pt", "cv", "ud", "persero", "tbk") for t in prefix_low):
             continue
-        candidates.append((name, tokens, left, right, prefix, prefix_low))
+        candidates.append((name, tokens, left, right, prefix, prefix_low, s, e))
 
     def is_speaker(left, right):
         # only the word IMMEDIATELY before the name counts ("ujar Iwan"),
@@ -230,7 +250,7 @@ def extract_people(text):
                       right.lower())
         return bool(rm and rm.group(1) in SPEECH_VERBS)   # "Iwan mengatakan"
 
-    for name, tokens, left, right, prefix, prefix_low in candidates:
+    for name, tokens, left, right, prefix, prefix_low, s, e in candidates:
         # a speech verb / "menurut" stripped from the candidate's own front
         # ("Menurut Dedi", "Kata Budi") also marks a speaker
         speaking = (is_speaker(left, right)
@@ -265,10 +285,55 @@ def extract_people(text):
                        or bool(re.match(r",?\s*\d{1,2} tahun", right)))     # Budi, 34 tahun
         if has_context:
             _add(persons, name)
-            if speaking:
-                _add(speakers, name)
+            if speaking and _quoted(text, s, e):
+                _add(speakers, name)       # an INFLUENCER speaks: a speech verb AND a quotation
 
+    # the fullest form the article writes: "Airlangga" -> "Airlangga Hartarto", "Trump" -> "Donald Trump"
+    forms = [c[0] for c in candidates
+             if not any(t.rstrip(".").lower() in ROLE_WORDS or t.rstrip(".").lower() in NON_PERSON
+                        for t in c[0].split())]
+    speakers = _dedupe([_fullest(n, forms) for n in speakers])
+    persons = _dedupe([_fullest(n, forms) for n in persons])
     # a speaker is always also a person
-    for s in speakers:
-        _add(persons, s)
+    for sp in speakers:
+        _add(persons, sp)
     return speakers[:15], persons[:25]
+
+
+_QUOTES = "\"“”„«»"
+
+
+def _quoted(text, s, e):
+    """The name stands by a quotation: '"…," kata Budi' (a quote closes just before) or 'Budi mengatakan, "…"'
+    (a quote opens in the same sentence after) — indirect speech without quotation marks is not enough."""
+    left = text[max(0, s - 90):s]
+    q = max(left.rfind(c) for c in _QUOTES)
+    if q >= 0 and not re.search(r"[.!?]\s+[A-Z]", left[q + 1:]):
+        return True                          # the quotation ends in this sentence, right before the name
+    right = text[e:e + 220]
+    qs = [i for i in (right.find(c) for c in _QUOTES) if i >= 0]
+    if qs:
+        first = min(qs)
+        end = re.search(r"[.!?]\s", right)
+        return end is None or first < end.start()
+    return False
+
+
+def _fullest(name, forms):
+    """The longest name in the article that contains this one word for word (at most 4 words)."""
+    toks = name.lower().split()
+    best = name
+    for f in forms:
+        ft = f.lower().split()
+        if len(ft) <= len(best.split()) or len(ft) > 4:
+            continue
+        if any(ft[i:i + len(toks)] == toks for i in range(len(ft) - len(toks) + 1)):
+            best = f
+    return best
+
+
+def _dedupe(names):
+    out = []
+    for n in names:
+        _add(out, n)
+    return out

@@ -222,6 +222,8 @@ def start_delete(start: str, end: str, parts: dict | None = None) -> dict:
             _STATE["delete"]["error"] = str(e)[:200]
         _STATE["delete"]["running"] = False
         _STATE["delete"]["finished"] = int(time.time())
+        from . import reader
+        reader.forget_counts()
     threading.Thread(target=work, daemon=True, name="cleanup-delete").start()
     return {"ok": True}
 
@@ -335,6 +337,8 @@ def start_restore(path: str) -> dict:
             _STATE["restore"]["error"] = str(e)[:200]
         _STATE["restore"]["running"] = False
         _STATE["restore"]["finished"] = int(time.time())
+        from . import reader
+        reader.forget_counts()
         try:
             os.remove(path)
         except OSError:

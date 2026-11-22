@@ -27,6 +27,14 @@ def _dir() -> str:
 
 
 SOURCES = ("all", "stream", "reports")
+def forget_counts() -> None:
+    """Data was deleted or restored: the totals are counted again at once (new articles may take up to a minute)."""
+    _COUNTS.clear()
+
+
+_IDX = [" INDEXED BY a_succ_pub"]      # emptied when the database has no such index yet
+_COUNTS: dict = {}            # (filter) -> (time, sentiment counts): the totals of a filter, kept for a minute
+COUNT_TTL = 60
 
 
 def _conn(with_search: bool) -> sqlite3.Connection:
@@ -139,6 +147,9 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
     c = _conn(bool(expr) or want_rep and os.path.exists(os.path.join(_dir(), "search.db")))
     try:
         selects, args = [], []
+        # the newest (or oldest) stored articles straight from their own index — no sort of the whole collection.
+        # Only for a plain list (no words, no single article); an older database without the index reads as before.
+        use_idx = bool(_IDX[0]) and not expr and not only_key and not since and sort in ("newest", "oldest")
         if source in ("all", "stream"):
             w, a = ["a.status='success'"], []
             pw, pa = _period_sql("a", start, end)
@@ -157,7 +168,7 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
                 a.append(expr)
             selects.append("SELECT a.key, a.url, a.domain, a.title, a.pub_date, a.pub_time, a.image, a.summary, "
                            "COALESCE(NULLIF(a.sentiment,''),'neutral') sentiment, a.matched, a.fetched, 'stream' origin "
-                           f"FROM articles a {join} WHERE {' AND '.join(w)}")
+                           f"FROM articles a{_IDX[0] if use_idx else ''} {join} WHERE {' AND '.join(w)}")
             args += a
         if want_rep and _has_reports(c):
             w, a = _period_sql("r", start, end)
@@ -184,8 +195,16 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
         if selects:
             u = " UNION ALL ".join(selects)
             try:
-                counts = {r["s"]: r["n"] for r in c.execute(
-                    f"SELECT sentiment s, COUNT(*) n FROM ({u}) GROUP BY s", args)}
+                ck = (u, tuple(args))
+                hit = _COUNTS.get(ck)
+                if hit and time.time() - hit[0] < COUNT_TTL and not only_key:
+                    counts = dict(hit[1])                   # the same filter a moment ago: its totals again
+                else:
+                    counts = {r["s"]: r["n"] for r in c.execute(
+                        f"SELECT sentiment s, COUNT(*) n FROM ({u}) GROUP BY s", args)}
+                    if len(_COUNTS) > 200:
+                        _COUNTS.clear()
+                    _COUNTS[ck] = (time.time(), dict(counts))
                 sw, sargs = "", list(args)
                 if sentiment in SENTIMENTS:
                     sw = " WHERE sentiment = ?"
@@ -193,9 +212,20 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
                 order = "ASC" if sort == "oldest" else "DESC"
                 by = "fetched DESC, pub_date DESC" if sort == "received" else \
                     f"pub_date {order}, pub_time {order}, fetched {order}"
+                if not sw:
+                    # only the first page*size of each part can be on this page: each part is cut there (its own
+                    # index) before they are merged — the whole collection is never sorted for 24 rows
+                    cut = page * size
+                    u = " UNION ALL ".join(f"SELECT * FROM (SELECT * FROM ({q}) ORDER BY {by} LIMIT {int(cut)})"
+                                           for q in selects)
                 rows = c.execute(f"SELECT * FROM ({u}){sw} ORDER BY {by} LIMIT ? OFFSET ?",
                                  (*sargs, size, (page - 1) * size)).fetchall()
             except sqlite3.OperationalError as e:
+                if "no such index" in str(e) and _IDX[0]:
+                    _IDX[0] = ""                            # not built yet (the stream builds it once): read without
+                    c.close()
+                    return articles(q, topic, start, end, sentiment, sort, page, size, source, scope, only_key,
+                                    last_hours, received_since)
                 raise ValueError(f"The query could not be read: {e}")
         tiers = {}
         doms = sorted({r["domain"] for r in rows if r["domain"]})

@@ -1260,7 +1260,7 @@ class Stream:
             with self.lock:
                 self._db.execute("DROP INDEX IF EXISTS a_disc")
                 self._db.commit()
-        if {"a_disc_ds", "a_fail_err", "a_new_fd"} <= have:
+        if {"a_disc_ds", "a_fail_err", "a_new_fd", "a_succ_pub"} <= have:
             return
         self.meta("maintenance", f"building indexes since {datetime.now(WIB):%H:%M} (once after an update)")
         with self.lock:
@@ -1269,6 +1269,8 @@ class Stream:
                              "WHERE status='failed'")
             self._db.execute("CREATE INDEX IF NOT EXISTS a_new_fd ON articles(feed_date, discovered) "
                              "WHERE status='new'")      # the fresh lane's refill: news by date, never a scan
+            self._db.execute("CREATE INDEX IF NOT EXISTS a_succ_pub ON articles(pub_date, pub_time, fetched) "
+                             "WHERE status='success'")  # News Stream / client API: newest first without a sort
             self._db.commit()
         self.meta("maintenance", "")
 

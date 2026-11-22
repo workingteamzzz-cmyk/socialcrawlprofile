@@ -277,3 +277,23 @@ def test_client_key_for_every_article(rd, tmp_path, monkeypatch):
     assert c.get("/api/client/me", headers=h).json()["every_article"] is True
     one = c.get("/api/client/articles", headers=h).json()["rows"][0]["key"]
     assert c.get("/api/client/articles/one", params={"key": one}, headers=h).json()["ok"]
+
+
+def test_newest_list_is_the_same_with_and_without_the_new_index(rd, tmp_path):
+    """The plain list reads from the a_succ_pub index when the stream built it, and the same way as before when it
+    has not yet — same rows, same order, every page; totals are kept for a minute but a new filter counts at once."""
+    from crawler import stream
+    rd._IDX[0] = " INDEXED BY a_succ_pub"
+    rd._COUNTS.clear()
+    before = [(r["key"]) for p in (1, 2) for r in rd.articles(size=2, page=p)["rows"]]
+    assert rd._IDX[0] == ""                                         # no index yet: it fell back, and remembers
+    s = stream.Stream(str(tmp_path / "data" / "stream"))
+    s.ensure_indexes()
+    rd._IDX[0] = " INDEXED BY a_succ_pub"
+    rd._COUNTS.clear()
+    after = [(r["key"]) for p in (1, 2) for r in rd.articles(size=2, page=p)["rows"]]
+    assert after == before and rd._IDX[0]
+    assert [r["key"] for r in rd.articles(sort="oldest", size=5)["rows"]] == \
+        list(reversed([r["key"] for r in rd.articles(size=5)["rows"]]))
+    assert rd.articles(start="2026-11-20")["total"] == 4                 # another filter: its own count
+    s.stop()

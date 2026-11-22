@@ -3977,9 +3977,12 @@ async function poll(){
   } catch(e){}
   polling = false;
   clearTimeout(pollTimer);
-  pollTimer = setTimeout(poll, running ? 1200 : 2500);
+  // a tab nobody looks at asks far less often (the server serves the people who are looking)
+  pollTimer = setTimeout(poll, document.visibilityState === 'hidden' ? 20000 : running ? 1200 : 2500);
 }
 
+document.addEventListener('visibilitychange', () => {   // back to the tab: up to date at once
+  if (document.visibilityState === 'visible' && !polling){ clearTimeout(pollTimer); poll(); } });
 go(document.getElementById('p-' + ls.get('page', 'home')) ? ls.get('page', 'home') : 'home');
 loadMe(); loadLists().then(loadAccounts); loadLogins(); loadSchedules(); renderResults(); kwRender(); renderKw(); nwRender(); renderNews(); poll();
 </script>

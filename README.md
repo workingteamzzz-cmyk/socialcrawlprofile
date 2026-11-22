@@ -341,6 +341,10 @@ page shows the live pace and the "per day at this pace" figure.
   every 2 minutes) that restarts the app when it runs but no longer answers; the web app restarts the stream's worker
   when it dies, when it stops writing its live state for 5 minutes (hung) or when it reads nothing for 20 minutes while
   fresh links wait (stalled) — with a Telegram message when Telegram is set up, and the cause on the Live Stream page.
+- **Light dashboard**: News Stream / client API lists read the newest (or oldest) stored articles straight from an
+  index of stored articles (built once by the stream), each source cut to the page before merging; totals per filter
+  are kept for a minute (counted again at once after a delete or restore); a tab nobody looks at asks the server every
+  20 s instead of every 2.5 s.
 - **Data by year** (Exports, admins): per year and month the news articles, News Search rows and social media rows
   with an approximate size; a month or a year downloads as a ZIP — *Excel* (per day one Online and one Medsos file in
   the team's layout) or *Backup* (every column exactly as stored, JSON lines). Both upload back through *Restore*

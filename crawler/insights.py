@@ -285,6 +285,11 @@ def index_social(limit: int = 5000) -> int:
 
 def prune_reports() -> int:
     """Rows deleted from the reporting database (Exports > free up space) leave the reader's index too."""
+    try:
+        from . import reader
+        reader.forget_counts()
+    except Exception:  # noqa: BLE001
+        pass
     from .paths import APP_DATA
     p = os.path.join(APP_DATA, "archive.db")
     db = _search_db()

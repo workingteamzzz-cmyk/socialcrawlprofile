@@ -784,3 +784,22 @@ def test_local_time_marked_as_utc_takes_the_time_printed_on_the_page():
     plain = BeautifulSoup('<html><head><meta property="article:published_time" content="2026-11-21T09:15:00+07:00">'
                           '</head><body><p>21 November 2026 09:15</p></body></html>', "html.parser")
     assert ex._detect_datetime(plain) == ("2026-11-21", "09:15")
+
+
+def test_laptop_server_says_the_local_user_is_the_admin(tmp_path, monkeypatch):
+    """The laptop version has one user, its owner: /api/me answers 'admin' so the admin buttons (Save stream settings,
+    Clear older waiting links, Add missing outlets) are shown — without it they stayed hidden."""
+    import json as _j
+    import threading
+    import urllib.request
+    from crawler import paths
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    from crawler.server import make_server
+    srv = make_server(0) if make_server.__code__.co_argcount else make_server()
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        d = _j.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/api/me", timeout=10).read())
+        assert d["role"] == "admin" and d["local"] is True and d["accounts"] is False
+    finally:
+        srv.shutdown()

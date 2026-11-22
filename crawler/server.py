@@ -103,6 +103,8 @@ class Handler(BaseHTTPRequestHandler):
         if u.path in ("/", "/index.html"):
             with open(os.path.join(STATIC, "index.html"), "rb") as f:
                 return self._send(200, f.read(), "text/html; charset=utf-8")
+        if u.path == "/api/me":                   # the laptop has one user, the owner: an admin (no accounts, no keys)
+            return self._json({"ok": True, "who": "local", "role": "admin", "accounts": False, "local": True})
         if u.path == "/api/status":
             since = int(parse_qs(u.query).get("since", ["0"])[0] or 0)
             return self._json(JOB.state(since))

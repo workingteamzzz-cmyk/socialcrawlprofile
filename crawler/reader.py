@@ -272,7 +272,7 @@ def article(key: str) -> dict:
             "time": r["pub_time"] or ("00:00" if r["pub_date"] else ""), "image": r["image"], "author": r["author"], "summary": r["summary"],
             "sentiment": (r["sentiment"] if "sentiment" in keys else "") or "neutral", "matched": r["matched"],
             "influencer": clean_names(r["influencer"]), "persons": clean_names(r["persons"]), "paragraphs": paras,
-            "origin": "stream"}
+            "origin": "stream", "headline_only": not paras and (r["error"] or "").startswith("Headline only")}
 
 
 POST_FIELDS = ("key", "platform", "username", "url", "date", "time", "text", "sentiment", "emotion", "likes", "replies",

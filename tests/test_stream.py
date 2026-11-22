@@ -805,3 +805,33 @@ def test_review_fixes_fresh_cap_counts_only_new_links_budget_and_day_sitemaps(tm
     st.trim_backlog()
     assert st.rq("SELECT 1 FROM articles WHERE key='bf'")
     assert stream.save_settings({"old_hours": "22-0"})["old_hours"] == "22-24"
+
+
+def test_a_refused_page_keeps_its_clip_and_the_outlet_is_read_more_gently(tmp_path, monkeypatch):
+    """A page the site refuses (403): the headline + link + date from its feed are kept as a 'headline only' clip,
+    the outlet's pause grows with each refusal (half an hour after 5 in a row) and shrinks again once it gives pages."""
+    from crawler import paths, stream
+    from crawler.medmas import extract
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    st = stream.Stream(str(tmp_path / "s"))
+    st.cfg = {**stream.settings(), "domain_gap": 1.5, "robots": False, "keywords": ["listrik"]}
+    monkeypatch.setattr(extract, "extract_article", lambda url, timeout=20: {"content": "", "error": "HTTP 403",
+                                                                             "title": "", "method": ""})
+    st.x("INSERT INTO articles(key, url, domain, title, feed_date, feed_time, status, discovered) VALUES "
+         "('k1', 'https://blok.id/berita/pemadaman-listrik-di-bogor', 'blok.id', 'Pemadaman Listrik di Bogor Meluas', "
+         "'2026-11-22', '10:15', 'new', 0)")
+    job = dict(st.rq("SELECT * FROM articles WHERE key='k1'")[0])
+    assert st.read(job) == "success"
+    r = st.rq("SELECT * FROM articles WHERE key='k1'")[0]
+    assert r["title"] == "Pemadaman Listrik di Bogor Meluas" and r["pub_date"] == "2026-11-22"
+    assert r["error"] == st.HEADLINE_ONLY and r["matched"] == "listrik"          # keywords match the headline
+    assert st._gap("blok.id") >= 10
+    for _ in range(4):
+        st._pace_outlet("blok.id", True)
+    assert st._gap("blok.id") >= 1800                                          # 5 refusals: left alone
+    for _ in range(8):
+        st._pace_outlet("blok.id", False)
+    assert st._gap("blok.id") == 1.5                                           # gives pages again: normal pace
+    st.cfg["headline_only"] = False
+    st.x("UPDATE articles SET status='new' WHERE key='k1'")
+    assert st.read(job) == "failed"                                            # switched off: as before

@@ -37,6 +37,7 @@ DEFAULTS = {"enabled": False, "threads": 8, "discovery_threads": 8, "rss_minutes
             "keywords": [], "robots": True, "exclude_domains": [],
             "fetch_googlebot": True, "fetch_cloudscraper": True,     # refused pages: see fetch_policy.py
             "auto_add_media": True, "retry_failed": True,             # outlets found by News Search; retry later
+            "headline_only": True,                                    # refused pages: keep the clip (title + link)
             "pause_international": False,                             # non-Indonesian outlets: see intl.py
             "reader_processes": 0}                                    # 0 = automatic (CPU cores - 1, max 4)
 LIMITS = {"threads": (2, 64), "reader_processes": (0, 8), "discovery_threads": (2, 48), "rss_minutes": (2, 240), "sitemap_minutes": (10, 720),
@@ -160,7 +161,8 @@ def save_settings(data: dict) -> dict:
         elif k == "domain_gap":
             v = max(0.5, min(30.0, float(v)))
         elif k in ("rss", "sitemaps", "robots", "weekly_report", "health_on_start", "all_links", "homepage",
-                   "fetch_googlebot", "fetch_cloudscraper", "auto_add_media", "retry_failed", "pause_international"):
+                   "fetch_googlebot", "fetch_cloudscraper", "auto_add_media", "retry_failed", "pause_international",
+                   "headline_only"):
             v = bool(v)
         elif k == "exclude_domains":
             items = v if isinstance(v, list) else re.split(r"[\n,\s]+", str(v or ""))
@@ -252,7 +254,8 @@ class Stream:
         self.rr_hot = deque()
         self.qn_hot = 0                        # of qn, how many wait in the hot lane
         self._hot_refill = 0.0
-        self.done_recent: dict = {}            # keys read in the last minutes (a refill's snapshot may predate them)
+        self.done_recent: dict = {}
+        self.backoff: dict = {}                # outlet -> [pause between its pages (s), refusals in a row]            # keys read in the last minutes (a refill's snapshot may predate them)
         self._cut = (0.0, "")                  # cutoff date, cached for a minute
         self.disk_brake = False                # the disk is nearly full: no older links taken in
         self.shard = (0, 1)                    # (this process, processes): each outlet is read by one process only
@@ -953,6 +956,15 @@ class Stream:
         from .online_clean import is_junk_page
         status = "success" if res.get("content") and res.get("is_article", True) and not res.get("is_index") else \
             ("failed" if not res.get("content") else "filtered")
+        refused = not res.get("content") and (res.get("error") or "") in self.REFUSED
+        self._pace_outlet(job.get("domain") or norm_key(job["url"]).split("/")[0], refused)
+        title = (job.get("title") or "").strip()
+        if status == "failed" and refused and self.cfg.get("headline_only", True) and len(title.split()) >= 4 \
+                and not is_junk_page(title, job["url"]):
+            # the outlet refuses this server: the clip is still kept — headline, link, date from its own feed
+            status = "success"
+            res = {**res, "title": title, "content": "", "summary": "", "error": self.HEADLINE_ONLY,
+                   "method": "headline"}
         if status == "success" and is_junk_page(res.get("title") or job.get("title") or "", job["url"]):
             status = "filtered"                              # privacy / terms / a front page: not an article
         cutoff = self.cutoff()
@@ -1044,7 +1056,7 @@ class Stream:
                         for _k in list(self.done_recent)[:10000]:
                             del self.done_recent[_k]
                     self.busy_domains.discard(dom)
-                    self.next_ok[dom] = time.time() + float(self.gap_override.get(dom) or self.cfg["domain_gap"])
+                    self.next_ok[dom] = time.time() + self._gap(dom)
                     self.queued.discard(job["key"])
 
     # ----- discovery + housekeeping -----
@@ -1128,6 +1140,36 @@ class Stream:
         st.update(running=False, finished=time.time())
         return dict(st)
 
+    REFUSED = ("HTTP 401", "HTTP 403", "HTTP 429", "HTTP 451", "HTTP 503")
+    HEADLINE_ONLY = "Headline only (the site refused this server)"
+
+    def _pace_outlet(self, dom: str, refused: bool) -> None:
+        """Reading more gently where an outlet starts refusing: the pause between its pages doubles with every
+        refusal (up to 2 minutes); after 5 in a row it is left alone for 30 minutes. A page it gives again brings
+        the normal pace back step by step."""
+        if not dom:
+            return
+        with self.lock:
+            b = self.backoff.get(dom)
+            if refused:
+                b = b or [float(self.cfg.get("domain_gap", 1.5)), 0]
+                b[0], b[1] = min(120.0, max(b[0] * 2, 10.0)), b[1] + 1
+                self.backoff[dom] = b
+            elif b:
+                b[0], b[1] = b[0] / 2, 0
+                if b[0] <= float(self.cfg.get("domain_gap", 1.5)):
+                    self.backoff.pop(dom, None)
+
+    def _gap(self, dom: str) -> float:
+        """Seconds until this outlet's next page: its own setting, slower while it refuses."""
+        g = float(self.gap_override.get(dom) or self.cfg["domain_gap"])
+        b = self.backoff.get(dom)
+        if b:
+            g = max(g, b[0])
+            if b[1] >= 5:
+                g = max(g, 1800.0)            # refused 5 times in a row: leave it alone for half an hour
+        return g
+
     TEMPORARY = ("Timeout", "ConnectionError", "HTTP 429", "HTTP 500", "HTTP 502", "HTTP 503", "HTTP 504",
                  "HTTP 520", "HTTP 521", "HTTP 522", "HTTP 523", "HTTP 524", "Empty content")
 
@@ -1142,6 +1184,9 @@ class Stream:
             f"SELECT key FROM articles WHERE status='failed' AND discovered > ? AND fetched < ? AND "
             f"COALESCE(tries, 0) < ? AND error IN ({q}) LIMIT 5000",
             (now - days * 86400, now - after_h * 3600, max_tries, *self.TEMPORARY))]
+        keys += [r["key"] for r in self.rq(                   # headline-only clips: the full text, if given now
+            "SELECT key FROM articles WHERE status='success' AND fetched > ? AND fetched < ? AND error = ? AND "
+            "COALESCE(tries, 0) < ? LIMIT 2000", (now - days * 86400, now - 6 * 3600, self.HEADLINE_ONLY, max_tries))]
         if not keys:
             return 0
         with self.lock:
@@ -1728,6 +1773,7 @@ class Stream:
                     "per_minute": round(per_min, 1), "per_day_pace": int(per_min * 60 * 24),
                     "readers_busy": len(self.busy_domains), "queue_mem": self.qn, "queue_backlog_mem": self.qn_old, "queue_hot_mem": self.qn_hot,
                     "trim": dict(self.__dict__.get("trim") or {}), "sm_unchanged": getattr(self, "sm_unchanged", 0),
+                    "slowed": sum(1 for b in self.backoff.values() if b[1]),
                     "last_error": self.last_error,
                     "export": dict(self.export), "health": dict(self.health), "catchup": dict(self.catchup)}
         finally:
@@ -1824,7 +1870,7 @@ class Stream:
         p = _WORKER.get("proc")
         out["worker_up"] = bool(p is not None and p.poll() is None)
         if live:                                             # the engine runs in its own process: its live state
-            for k in ("running", "since", "per_minute", "per_day_pace", "readers_busy", "last_error", "export"):
+            for k in ("running", "since", "per_minute", "per_day_pace", "readers_busy", "last_error", "export", "slowed"):
                 out[k] = live.get(k, out[k])
             out["processes"] = live.get("processes", 1)
             out["loop_age"], out["stuck_at"] = live.get("loop_age", 0), live.get("stuck_at", "")
@@ -1973,7 +2019,7 @@ def read_live() -> dict | None:
             continue
         if time.time() - float(r.get("t", 0)) < 20 and r.get("running"):
             procs += 1
-            for k in ("per_minute", "per_day_pace", "readers_busy"):
+            for k in ("per_minute", "per_day_pace", "readers_busy", "slowed"):
                 d[k] = round(float(d.get(k) or 0) + float(r.get(k) or 0), 1) if k == "per_minute" else \
                     int(d.get(k) or 0) + int(r.get(k) or 0)
     d["processes"] = procs

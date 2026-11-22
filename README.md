@@ -341,6 +341,11 @@ page shows the live pace and the "per day at this pace" figure.
   every 2 minutes) that restarts the app when it runs but no longer answers; the web app restarts the stream's worker
   when it dies, when it stops writing its live state for 5 minutes (hung) or when it reads nothing for 20 minutes while
   fresh links wait (stalled) — with a Telegram message when Telegram is set up, and the cause on the Live Stream page.
+- **Sites that refuse this server** (401 / 403 / 429 / 451 / 503): the Live Stream reads such an outlet more gently —
+  the pause between its pages doubles with every refusal (up to 2 minutes), after 5 refusals in a row it is left
+  alone for 30 minutes, and the normal pace comes back as it gives pages again. The clip is kept all the same: the
+  headline, link and date from the outlet's own RSS / sitemap, marked "headline only" (Stream settings: *Keep the clip
+  when a site refuses*); its full text is tried again 6 hours later. No captcha or bot-protection is worked around.
 - **INFLUENCER / PERSON**: an influencer speaks — a speech verb (kata, ujar, menyatakan, menegaskan…) *and* a
   quotation by the name; indirect speech ("menurut X", "X mengatakan bahwa…") makes a person only. A person is
   anyone named — never an organisation (European Commission, Goldman Sachs), a country or a city; each name is

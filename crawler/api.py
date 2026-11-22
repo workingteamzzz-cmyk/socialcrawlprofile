@@ -259,6 +259,7 @@ class StreamSettings(BaseModel):
     health_on_start: bool | None = Field(None, description="check every registered site when the stream starts")
     all_links: bool | None = Field(None, description="take every link not yet in the database, whatever its date")
     old_per_check: int | None = Field(None, description="older links taken per outlet visit (the rest next visit)")
+    headline_only: bool | None = Field(None, description="a page the site refuses: keep the clip (title + link)")
     old_per_day: int | None = Field(None, description="older links stored per day in total (all outlets)")
     old_hours: str | None = Field(None, description="hours (WIB) older links are read, e.g. 1-6; empty = any time")
     late_days: int | None = Field(None, description="late news (read by day when a reader is free): the last N days")

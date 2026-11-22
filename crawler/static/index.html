@@ -1342,6 +1342,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
           <p class="hint" style="margin:4px 0 8px">The article reader then tries other ways. Two of them get round a site's own refusal — you choose. The numbers show what each brought in the last 7 days, so you can see what turning one off would cost.</p>
           <label class="opt-row" style="border:0;padding:4px 0"><span class="t"><b>Ask again as "Googlebot"</b><small>Claims to be Google's crawler. Sites that check can block this server's address for good. Off: a plain second try instead.</small></span><span style="display:flex;align-items:center;gap:10px"><span class="tag gray" id="lsFmGb">–</span><span class="switch"><input type="checkbox" id="lsSfGb"><span></span></span></span></label>
           <label class="opt-row" style="border:0;padding:4px 0"><span class="t"><b>Cloudflare workaround (cloudscraper)</b><small>Gets past Cloudflare's bot check — against the wishes of sites that turned it on. Off: the page's AMP version is tried next.</small></span><span style="display:flex;align-items:center;gap:10px"><span class="tag gray" id="lsFmCs">–</span><span class="switch"><input type="checkbox" id="lsSfCs"><span></span></span></span></label>
+          <label class="opt-row" style="border:0;padding:4px 0"><span class="t"><b>Keep the clip when a site refuses</b><small>The headline, link and date from the outlet's own RSS / sitemap are kept (marked "headline only"); the full text is tried again 6 hours later.</small></span><span class="switch"><input type="checkbox" id="lsSfHl"><span></span></span></label>
           <p class="hint" id="lsFmAll" style="margin:6px 0 0"></p>
         </div>
         <div style="border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:0 0 14px">
@@ -3041,7 +3042,7 @@ function lsFill(cfg){ loadStream.filled = true;
     $('lsSfTop').value = cfg.top_n; $('lsSfTop2').value = cfg.top2_n; $('lsSfA2').value = cfg.active2_hours; $('lsSfSemi').value = cfg.semi_hours; $('lsSfRare').value = cfg.rare_hours; $('lsSfIn').value = cfg.inactive_days; $('lsSfDead').value = cfg.dead_days; $('lsSfAge').value = cfg.max_age_hours;
     $('lsSfRet').value = cfg.retention_days; $('lsSfGap').value = cfg.domain_gap; $('lsSfKw').value = (cfg.keywords || []).join('\n');
     $('lsSfUseRss').checked = !!cfg.rss; $('lsSfUseSm').checked = !!cfg.sitemaps; $('lsSfRobots').checked = cfg.robots !== false;
-    $('lsSfGb').checked = cfg.fetch_googlebot !== false; $('lsSfCs').checked = cfg.fetch_cloudscraper !== false;
+    $('lsSfGb').checked = cfg.fetch_googlebot !== false; $('lsSfCs').checked = cfg.fetch_cloudscraper !== false; $('lsSfHl').checked = cfg.headline_only !== false;
     $('lsSfAuto').checked = cfg.auto_add_media !== false; $('lsSfRetry').checked = cfg.retry_failed !== false;
     $('lsSfIntl').checked = !!cfg.pause_international; $('lsSfProc').value = cfg.reader_processes || 0;
     $('lsSfEx').value = (cfg.exclude_domains || []).join('\n'); }
@@ -3078,7 +3079,7 @@ async function loadStream(){
   if (d.maintenance) toast('The stream database is being upgraded once (' + d.maintenance + ') — the stream continues by itself.');
   const fm = d.fetch_methods || {total: 0, methods: {}}, fmt1 = m => { const x = (fm.methods || {})[m]; return x ? `${fmt(x.n)} · ${x.pct}%` : '0'; };
   $('lsFmGb').textContent = fmt1('googlebot'); $('lsFmCs').textContent = fmt1('cloudscraper');
-  $('lsFmAll').textContent = fm.total ? `Last 7 days: ${fmt(fm.total)} articles read — normal ${fmt1('normal')}, AMP ${fmt1('amp')}, Googlebot ${fmt1('googlebot')}, cloudscraper ${fmt1('cloudscraper')}.` : 'Counted from now on (per method, per day).';
+  $('lsFmAll').textContent = fm.total ? `Last 7 days: ${fmt(fm.total)} articles read — normal ${fmt1('normal')}, AMP ${fmt1('amp')}, Googlebot ${fmt1('googlebot')}, cloudscraper ${fmt1('cloudscraper')}, headline only (site refused) ${fmt1('headline')}.` : 'Counted from now on (per method, per day).';
   $('lsStPill').classList.toggle('run', d.running); $('lsStState').textContent = d.running ? 'Running' : 'Stopped';
   $('lsStToggle').textContent = d.running ? 'Stop stream' : 'Start stream'; $('lsStToggle').classList.toggle('primary', !d.running);
   $('navStream').textContent = d.running ? '●' : '';
@@ -3087,6 +3088,7 @@ async function loadStream(){
   $('lsSPace').textContent = fmt(d.per_minute) + ' /min'; $('lsSPaceS').textContent = (d.running ? `≈ ${fmt(d.per_day_pace)} per day at this pace` + (d.processes > 1 ? ` · ${d.processes} reader processes` : '') : (d.worker_up && !d.worker ? 'stream is starting (a big database takes a few minutes)' : 'stream is stopped'))
     + (d.restarts && d.restarts.n ? ` · restarted ${d.restarts.n}× in 24 h (last ${new Date(d.restarts.last * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}${d.restarts.code === -9 ? ', out of memory' : d.restarts.code === 'hung' ? ', hung' : d.restarts.code === 'stalled' ? ', stalled' : d.restarts.code !== null ? ', exit ' + d.restarts.code : ''})` : '');
   if (d.lag && d.lag.median !== null && d.lag.median !== undefined) $('lsSPaceS').textContent += ` · news arrives ${fmt(d.lag.median)} min after publication (median; ${d.lag.within30}% within 30 min)`;
+  if (d.slowed) $('lsSPaceS').textContent += ` · ${fmt(d.slowed)} outlet(s) refusing this server: read more gently for now`;
   if (d.loop_age > 30) $('lsSPaceS').textContent += ` · the stream's control loop is busy for ${fmt(d.loop_age)} s` + (d.stuck_at ? ` — at: ${d.stuck_at}` : '');
   $('lsSMatch').textContent = fmt(d.today.matched); $('lsSMatchS').textContent = `${d.keywords} keyword(s) incl. report topics`;
   const cnt = v => v === null || v === undefined ? '…' : fmt(v);                 // counted in the background
@@ -3144,7 +3146,7 @@ $('lsSfSave').onclick = async () => {
     catchup_days: +$('lsSfCuD').value, catchup_hour: +$('lsSfCuH').value,
     top_n: +$('lsSfTop').value, top2_n: +$('lsSfTop2').value, active2_hours: +$('lsSfA2').value, semi_hours: +$('lsSfSemi').value, rare_hours: +$('lsSfRare').value, inactive_days: +$('lsSfIn').value, dead_days: +$('lsSfDead').value,
     rss: $('lsSfUseRss').checked, sitemaps: $('lsSfUseSm').checked, robots: $('lsSfRobots').checked, exclude_domains: $('lsSfEx').value,
-    fetch_googlebot: $('lsSfGb').checked, fetch_cloudscraper: $('lsSfCs').checked,
+    fetch_googlebot: $('lsSfGb').checked, fetch_cloudscraper: $('lsSfCs').checked, headline_only: $('lsSfHl').checked,
     auto_add_media: $('lsSfAuto').checked, retry_failed: $('lsSfRetry').checked, pause_international: $('lsSfIntl').checked, reader_processes: +$('lsSfProc').value || 0});
   $('lsSfMsg').textContent = r && r.ok ? 'Saved.' : (r && r.error) || 'Not saved'; loadStream.filled = false; loadStream(); };
 $('lsExport').onclick = async () => { const r = await api('/api/stream/export', {day: $('lsDay').value});
@@ -3342,7 +3344,7 @@ async function rdOpen(key){
     <h2>${rdHi(a.title)}</h2>
     <div class="rd-dmeta"><span><svg class="i"><use href="#i-building"/></svg>${esc(a.domain)}</span><span><svg class="i"><use href="#i-cal"/></svg>${esc(rdWhen({pub_date: a.date, pub_time: a.time}))}</span>${a.author ? `<span>${esc(a.author)}</span>` : ''}</div>
     ${a.image ? `<img class="rd-dimg" src="${esc(a.image)}" alt="" referrerpolicy="no-referrer">` : ''}
-    <div class="rd-text">${a.paragraphs.map(p => `<p>${rdHi(p)}</p>`).join('')}</div>
+    <div class="rd-text">${a.headline_only ? '<p class="hint">Headline only — the site refused this server; open the link for the full text (it is tried again later).</p>' : ''}${a.paragraphs.map(p => `<p>${rdHi(p)}</p>`).join('')}</div>
     ${a.persons || a.influencer ? `<div class="rd-people">${a.influencer ? `<small>Spokesperson</small><div>${esc(a.influencer)}</div>` : ''}${a.persons ? `<small>People</small><div>${esc(a.persons)}</div>` : ''}</div>` : ''}
     ${a.matched ? `<div style="margin-top:10px">${a.matched.split(', ').map(k => `<span class="badge b-ok">${esc(k)}</span>`).join(' ')}</div>` : ''}`;
   box.querySelector('.rd-dimg')?.addEventListener('error', e => e.target.remove());

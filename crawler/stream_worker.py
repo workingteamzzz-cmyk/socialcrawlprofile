@@ -70,7 +70,8 @@ def reader_main(k: int, n: int) -> None:
         try:
             st = s.live_state()
             stream.write_reader_live(k, {"t": time.time(), "running": True, "per_minute": st["per_minute"],
-                                         "per_day_pace": st["per_day_pace"], "readers_busy": st["readers_busy"]})
+                                         "per_day_pace": st["per_day_pace"], "readers_busy": st["readers_busy"],
+                                         "slowed": st.get("slowed", 0)})
         except Exception:  # noqa: BLE001
             pass
         gone.wait(2)

@@ -297,3 +297,30 @@ def test_newest_list_is_the_same_with_and_without_the_new_index(rd, tmp_path):
         list(reversed([r["key"] for r in rd.articles(size=5)["rows"]]))
     assert rd.articles(start="2026-11-20")["total"] == 4                 # another filter: its own count
     s.stop()
+
+
+def test_dashboard_gets_the_articles_at_once_while_totals_are_counted(rd, monkeypatch):
+    """quick=True (the dashboard): a slow total never holds the list up — the rows come at once with 'counting',
+    the totals arrive on a later call; without quick (client API) the totals are always exact in the answer."""
+    import threading
+    gate = threading.Event()
+    real = rd._count_now
+
+    def slow(c, ck, u, args):
+        gate.wait(5)
+        return real(c, ck, u, args)
+    monkeypatch.setattr(rd, "_count_now", slow)
+    rd.forget_counts()
+    t = time.time()
+    first = rd.articles(quick=True)
+    assert time.time() - t < 3 and first["counting"] and first["total"] is None and len(first["rows"]) == 5
+    gate.set()
+    for _ in range(50):
+        later = rd.articles(quick=True)
+        if not later.get("counting"):
+            break
+        time.sleep(0.1)
+    assert later["total"] == 5 and later["sentiment"]["positive"]["n"] == 2
+    monkeypatch.setattr(rd, "_count_now", real)
+    rd.forget_counts()
+    assert rd.articles()["total"] == 5 and "counting" not in rd.articles()            # the client API: exact

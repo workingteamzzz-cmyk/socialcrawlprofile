@@ -166,7 +166,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True, **reader.articles(g("q")[:500], g("topic")[:100], g("start"), g("end"),
                                                                    g("sentiment"), g("sort", "newest"),
                                                                    int(g("page", "1") or 1), int(g("size", "24") or 24),
-                                                                   g("source", "all")[:10])})
+                                                                   g("source", "all")[:10], quick=g("quick") == "1")})
             except ValueError as e:
                 return self._json({"ok": False, "error": str(e)})
         if u.path in ("/api/search", "/api/stories", "/api/insights"):

@@ -27,12 +27,54 @@ def _dir() -> str:
 
 
 SOURCES = ("all", "stream", "reports")
+
+
+def _count_now(c, ck, u, args) -> dict:
+    counts = {r["s"]: r["n"] for r in c.execute(f"SELECT sentiment s, COUNT(*) n FROM ({u}) GROUP BY s", args)}
+    if len(_COUNTS) > 200:
+        _COUNTS.clear()
+    _COUNTS[ck] = (time.time(), dict(counts))
+    _LAST[ck] = dict(counts)
+    if len(_LAST) > 200:
+        _LAST.clear()
+    return counts
+
+
+def _count_beside(ck, u, args, with_search) -> dict | None:
+    import threading
+    if ck not in _BUSY:
+        _BUSY.add(ck)
+
+        def run():
+            try:
+                c2 = _conn(with_search)
+                try:
+                    _count_now(c2, ck, u, args)
+                finally:
+                    c2.close()
+            except Exception:  # noqa: BLE001
+                pass
+            finally:
+                _BUSY.discard(ck)
+        th = threading.Thread(target=run, daemon=True, name="reader-count")
+        th.start()
+        th.join(1.0)
+    hit = _COUNTS.get(ck)
+    if hit:
+        return dict(hit[1])
+    last = _LAST.get(ck)
+    return dict(last) if last is not None else None
+
+
 def forget_counts() -> None:
     """Data was deleted or restored: the totals are counted again at once (new articles may take up to a minute)."""
     _COUNTS.clear()
+    _LAST.clear()
 
 
 _IDX = [" INDEXED BY a_succ_pub"]      # emptied when the database has no such index yet
+_LAST: dict = {}              # (filter) -> the last totals counted, however old (shown while counting again)
+_BUSY: set = set()            # filters being counted in the background
 _COUNTS: dict = {}            # (filter) -> (time, sentiment counts): the totals of a filter, kept for a minute
 COUNT_TTL = 60
 
@@ -119,7 +161,7 @@ def _period_sql(p: str, start: str, end: str) -> tuple[list[str], list]:
 
 def articles(q: str = "", topic: str = "", start: str = "", end: str = "", sentiment: str = "",
              sort: str = "newest", page: int = 1, size: int = 24, source: str = "all", scope: str = "",
-             only_key: str = "", last_hours: float = 0, received_since="") -> dict:
+             only_key: str = "", last_hours: float = 0, received_since="", quick: bool = False) -> dict:
     """start / end: published from / to (a date, or a date + time to the minute, WIB); last_hours: published in the
     last N hours (instead of start); received_since: what reached this server after that moment — fresh news and
     late arrivals alike, whatever their publication date (use the previous answer's server_time).
@@ -197,14 +239,15 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
             try:
                 ck = (u, tuple(args))
                 hit = _COUNTS.get(ck)
+                with_search = bool(expr) or want_rep and os.path.exists(os.path.join(_dir(), "search.db"))
                 if hit and time.time() - hit[0] < COUNT_TTL and not only_key:
                     counts = dict(hit[1])                   # the same filter a moment ago: its totals again
+                elif quick and not only_key:
+                    # the dashboard: the articles at once — the totals are counted beside it (a second at most is
+                    # waited for); until then the last ones known, or "counting"
+                    counts = _count_beside(ck, u, args, with_search)
                 else:
-                    counts = {r["s"]: r["n"] for r in c.execute(
-                        f"SELECT sentiment s, COUNT(*) n FROM ({u}) GROUP BY s", args)}
-                    if len(_COUNTS) > 200:
-                        _COUNTS.clear()
-                    _COUNTS[ck] = (time.time(), dict(counts))
+                    counts = _count_now(c, ck, u, args)
                 sw, sargs = "", list(args)
                 if sentiment in SENTIMENTS:
                     sw = " WHERE sentiment = ?"
@@ -225,7 +268,7 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
                     _IDX[0] = ""                            # not built yet (the stream builds it once): read without
                     c.close()
                     return articles(q, topic, start, end, sentiment, sort, page, size, source, scope, only_key,
-                                    last_hours, received_since)
+                                    last_hours, received_since, quick=quick)
                 raise ValueError(f"The query could not be read: {e}")
         tiers = {}
         doms = sorted({r["domain"] for r in rows if r["domain"]})
@@ -235,6 +278,16 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
                 doms)}
     finally:
         c.close()
+    if counts is None:                                  # still being counted (dashboard): the rows, no totals yet
+        out_rows = [{**dict(r), "tier": tiers.get(r["domain"], "")} for r in rows]
+        for r in out_rows:
+            if r.get("pub_date") and not r.get("pub_time"):
+                r["pub_time"] = "00:00"
+            r["received_at"] = datetime.fromtimestamp(r["fetched"], WIB).isoformat(timespec="seconds") \
+                if r.get("fetched") else ""
+        return {"total": None, "matching": None, "page": page, "size": size, "query": expr, "source": source,
+                "server_time": datetime.fromtimestamp(now, WIB).isoformat(timespec="milliseconds"), "pages": None,
+                "sentiment": None, "counting": True, "more": len(out_rows) >= size, "rows": out_rows}
     counts = {k: n for k, n in counts.items() if k in SENTIMENTS} | {
         "neutral": sum(n for k, n in counts.items() if k not in ("positive", "negative"))}
     out_rows = [{**dict(r), "tier": tiers.get(r["domain"], "")} for r in rows]

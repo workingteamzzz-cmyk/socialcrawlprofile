@@ -1166,12 +1166,12 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
                      "sentiment; with sentiment counts. For a client's dashboard: send X-API-Key.")
     def articles_get(q: str = "", topic: str = "", start: str = "", end: str = "", sentiment: str = "",
                      sort: str = "newest", page: int = 1, size: int = 24, source: str = "all", last_hours: float = 0,
-                     received_since: str = ""):
+                     received_since: str = "", quick: int = 0):
         from . import reader
         try:
             return {"ok": True, **reader.articles(q[:500], topic[:100], start[:20], end[:20], sentiment, sort, page,
                                                   size, source[:10], last_hours=last_hours,
-                                                  received_since=received_since[:40])}
+                                                  received_since=received_since[:40], quick=bool(quick))}
         except ValueError as e:
             return {"ok": False, "error": str(e)}
 

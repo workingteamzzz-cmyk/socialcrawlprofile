@@ -3364,7 +3364,7 @@ const SENT = {positive: ['b-ok', 'Positive'], negative: ['b-bad', 'Negative'], n
 const TIERN = {active: 'Active', active2: 'Active 2', semi: 'Semi', rare: 'Rare', inactive: 'Inactive', dead: 'Down', new: 'New'};
 function rdParams(page){
   return new URLSearchParams({q: $('rdQ').value.trim(), topic: $('rdTopic').value, start: $('rdStart').value, end: $('rdEnd').value,
-    sentiment: $('rdSent').value, sort: $('rdSort').value, source: $('rdSrc').value, page, size: 24});
+    sentiment: $('rdSent').value, sort: $('rdSort').value, source: $('rdSrc').value, page, size: 24, quick: 1});
 }
 function rdTerms(){
   const q = $('rdQ').value + ' ' + ($('rdTopic').selectedOptions[0]?.dataset.kw || '');
@@ -3383,6 +3383,25 @@ function rdCard(r){
       <small><svg class="i"><use href="#i-cal"/></svg>${rdWhen(r)}${r.tier ? ` <span class="rd-tier">${TIERN[r.tier] || esc(r.tier)}</span>` : ''}</small>
       <small><svg class="i"><use href="#i-building"/></svg>${esc(r.domain)}${r.origin === 'reports' ? ' <span class="rd-tier">News Search</span>' : ''}</small></div></div>`;
 }
+function rdShowTotals(d){
+  $('rdTotal').textContent = fmt(d.total);
+  for (const [k, id] of [['positive', 'Pos'], ['negative', 'Neg'], ['neutral', 'Neu']]){
+    $('rd' + id).textContent = d.sentiment[k].pct + '%'; $('rd' + id + 'N').textContent = `${fmt(d.sentiment[k].n)} news`; }
+}
+async function rdTotals(tries = 0){
+  $('rdTotal').textContent = 'counting…';
+  for (const id of ['Pos', 'Neg', 'Neu']){ $('rd' + id).textContent = '…'; $('rd' + id + 'N').textContent = ''; }
+  const want = rdParams(1).toString();
+  clearTimeout(rdTotals.t);
+  rdTotals.t = setTimeout(async () => {
+    if (rdParams(1).toString() !== want) return;          // the filter changed meanwhile: its own count runs
+    const d = await api('/api/articles?' + want);
+    if (!d || d.ok === false) return;
+    if (d.counting){ if (tries < 40) rdTotals(tries + 1); return; }
+    RD.matching = d.matching; rdShowTotals(d);
+    $('rdMore').textContent = RD.rows.length < RD.matching ? 'Loading more…' : (RD.rows.length ? `All ${fmt(RD.matching)} shown` : '');
+  }, tries ? 3000 : 1500);
+}
 async function loadReader(reset = true){
   if (RD.loading) return; RD.loading = true;
   if (reset){ RD.page = 1; RD.terms = rdTerms(); }
@@ -3390,10 +3409,11 @@ async function loadReader(reset = true){
   const d = await api('/api/articles?' + rdParams(RD.page));
   RD.loading = false;
   if (!d || d.ok === false){ $('rdMsg').textContent = (d && d.error) || 'Could not load'; if (reset) $('rdList').innerHTML = ''; return; }
-  RD.matching = d.matching; RD.rows = reset ? d.rows : RD.rows.concat(d.rows);
-  $('rdTotal').textContent = fmt(d.total);
-  for (const [k, id] of [['positive', 'Pos'], ['negative', 'Neg'], ['neutral', 'Neu']]){
-    $('rd' + id).textContent = d.sentiment[k].pct + '%'; $('rd' + id + 'N').textContent = `${fmt(d.sentiment[k].n)} news`; }
+  RD.rows = reset ? d.rows : RD.rows.concat(d.rows);
+  if (d.counting){                                      // the articles first; the totals follow in a moment
+    RD.matching = d.more ? Infinity : RD.rows.length;
+    if (reset) rdTotals();
+  } else { RD.matching = d.matching; rdShowTotals(d); }
   const html = d.rows.map(rdCard).join('');
   if (reset) $('rdList').innerHTML = html || `<div class="rd-none"><svg class="i"><use href="#i-search"/></svg><b>No article matches</b><small>Widen the dates or the keyword — or start the Live Stream so articles come in.</small></div>`;
   else $('rdList').insertAdjacentHTML('beforeend', html);

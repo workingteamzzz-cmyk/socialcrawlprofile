@@ -36,9 +36,9 @@ SUMMARY_SENTENCES = 3
 # they also poison keyword verification and person extraction ("PLN" in a
 # "Baca juga" headline must never count as a PLN mention).
 JUNK_LINE_RE = re.compile(
-    r"^\s*(?:baca\s*juga|baca\s*:|baca\s*selengkapnya|baca\s*artikel|baca\s*berita|"
-    r"berita\s*lainnya|artikel\s*lainnya|terpopuler|read\s*also|read\s*more|"
-    r"related\s*(?:news|articles?|posts?)|most\s*read|simak\s*juga|simak\s*video|simak\s*breaking|"
+    r"^\s*(?:(?:baca\s*selengkapnya|baca\s*artikel\s*lainnya|baca\s*berita\s*lainnya|berita\s*lainnya|"
+    r"artikel\s*lainnya|terpopuler|read\s*also|read\s*more|related\s*(?:news|articles?|posts?)|most\s*read)"
+    r"\s*[:：]|baca\s*juga|baca\s*:|simak\s*juga|simak\s*video|simak\s*breaking|"
     r"lihat\s*juga|saksikan\s*video|tonton\s*(?:juga|video)|artikel\s*terkait|"
     r"berita\s*terkait|ringkasan\s*berita|advertisement|advertisment|"
     r"scroll\s*to\s*continue|pilihan\s*editor|video\s*pilihan|"
@@ -58,9 +58,11 @@ JUNK_LINE_RE = re.compile(
 # remove from the marker up to the end of the embedded headline (the next
 # sentence terminator or end of line).
 # The marker must start a word: "dibaca juga" / "melihat juga" in a real sentence are never touched.
+# Only where a sentence starts (line start or after . ! ?) — "Warga diminta baca: aturan…" and "sering baca juga
+# buku…" are real sentences — and only a headline-sized span after it.
 JUNK_INLINE_RE = re.compile(
-    r"(?<![A-Za-z])(?:(?:baca|simak|lihat|tonton)\s+juga\s*:?|baca(?:\s+selengkapnya)?\s*:|read\s+also\s*:?)"
-    r"\s*[^.\n!?]*[.!?]?",
+    r"(^|[.!?][\"”’]?\s+)(?:(?:baca|simak|lihat|tonton)\s+juga\s*:?|baca(?:\s+selengkapnya)?\s*:|read\s+also\s*:?)"
+    r"\s*[^.\n!?]{0,160}[.!?]?",
     re.IGNORECASE)
 
 # A block header alone on its line ("BACA JUGA:", "Berita Terkait") — the headline lines under it go too
@@ -74,11 +76,16 @@ CLEAN_MAX_CUT = 0.30           # the extra cleaning never takes more than 30% of
 
 
 def _headline_like(line: str) -> bool:
-    """A related-article headline, not a news paragraph: short, and not a full sentence ending with a period."""
+    """A related-article headline, not a news paragraph: short, no sentence ending (. ! ? or a closing quote), and
+    written in title case (most longer words capitalised) — a short real sentence or a quote is never taken."""
     words = line.split()
     if not words or len(words) > 18:
         return False
-    return not (line.rstrip().endswith((".", "!", "?", "\"", "”")) and len(words) >= 8)
+    if line.rstrip().endswith((".", "!", "?", "\"", "”", "’", ",", ";", ":")):
+        return False
+    long_words = [w for w in words if len(w) > 3 and w[0].isalpha()]
+    caps = sum(1 for w in long_words if w[0].isupper())
+    return bool(long_words) and caps >= 0.6 * len(long_words)
 
 # "(Sumber: yt otorider)" / "Sumber: xyz" glued at the end of a line
 SOURCE_INLINE_RE = re.compile(
@@ -116,8 +123,8 @@ def clean_content(text):
         return text
     full = _clean(text, blocks=True)
     base = _clean(text, blocks=False)
-    if len(full) < len(base) * (1 - CLEAN_MAX_CUT):
-        return base                          # too much would go: never risk the article itself
+    if len(base) - len(full) > CLEAN_MAX_CUT * len(str(text)):
+        return base                          # the headline blocks would take too much: never risk the article
     return full
 
 
@@ -138,7 +145,7 @@ def _clean(text, blocks=True):
             continue
         if JUNK_LINE_RE.match(stripped):
             continue
-        stripped = JUNK_INLINE_RE.sub(" ", stripped)
+        stripped = JUNK_INLINE_RE.sub(lambda m: m.group(1) + " ", stripped)
         stripped = CREDIT_TAIL_RE.sub("", stripped)
         stripped = SOURCE_INLINE_RE.sub("", stripped)
         if stripped and seen_content < _DATELINE_SCAN_LINES:

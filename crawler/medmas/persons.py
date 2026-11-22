@@ -46,6 +46,8 @@ HONORIFICS = frozenset("""
 bapak ibu pak bu saudara saudari sdr sdri h hj kh dr drh ir prof drs dra
 ust ustaz ustadz ustadzah gus kiai kyai habib raden tuan nyonya nona mas
 mbak bang kang mr mrs ms sir madam
+jenderal komjen irjen brigjen kombes kompol iptu ipda aiptu aipda bripka brigpol briptu bripda letjen mayjen
+marsekal laksamana kolonel letkol mayor kapten lettu letda serma sertu kopral prada
 """.split())
 
 # Role/title words stripped from the front — a person name usually follows
@@ -68,9 +70,6 @@ desainer perancang arsitek insinyur peneliti ilmuwan wartawan jurnalis
 fotografer presenter pembalap pebisnis youtuber selebgram kreator
 produser komedian pelawak pengacara advokat notaris psikolog pilot chef
 koki perajin pengrajin penceramah dai mubaligh
-perekonomian maritim investasi politik keamanan polhukam pembangunan manusia
-pertahanan perencanaan agraria transmigrasi sekretariat negara luar negeri
-dalam kabinet koordinator bidang urusan hubungan pemberantasan penanggulangan
 kesehatan pendidikan perhubungan pertanian keuangan kominfo komunikasi
 informatika sosial pariwisata perdagangan perindustrian ketenagakerjaan
 kebudayaan olahraga kepemudaan lingkungan kehutanan perikanan kelautan
@@ -80,10 +79,26 @@ perlindungan pengendalian ketahanan pangan koperasi perizinan
 kesbangpol humas hukum agama pertanahan pendapatan pengelolaan
 """.split())
 
+# Countries in a role ("Presiden *Rusia* Vladimir Putin") — only those that are never a personal name
+# (not Timor, Asia, Paris, Uni, Arab…)
+COUNTRY_AFTER_ROLE = frozenset("""
+china tiongkok rusia prancis perancis jerman jepang korea india australia malaysia singapura filipina vietnam
+thailand myanmar kamboja ukraina turki iran irak israel palestina mesir inggris belanda italia spanyol kanada
+brasil meksiko
+""".split())
+
+# Portfolio words that are part of a role only right after one ("Menko *Perekonomian*", "Menteri *Luar Negeri*") —
+# never stripped at the front of a candidate on their own ("Negara Sitepu" stays a name)
+PORTFOLIO_WORDS = frozenset("""
+perekonomian maritim investasi politik keamanan polhukam pembangunan manusia pertahanan perencanaan agraria
+transmigrasi sekretariat negara luar negeri dalam kabinet koordinator bidang urusan hubungan pemberantasan
+penanggulangan amerika serikat republik
+""".split())
+
 # Left-context words that signal "a person's name follows"
 CONTEXT_WORDS = frozenset("""
 bersama oleh bernama dipimpin dihadiri didampingi diwakili mewakili
-menggandeng menemui menjenguk menghubungi sosok yakni yaitu
+menggandeng menemui bertemu menjenguk menghubungi sosok yakni yaitu
 hadir menghadirkan menugaskan menunjuk melantik mengangkat menyambut
 menerima memanggil memperkenalkan menggantikan almarhum almarhumah
 """.split())
@@ -116,27 +131,32 @@ media tim unit layanan pelanggan ulp upt uptd cabang wilayah daerah
 nasional internasional group grup holding corp persada karya utama
 warga masyarakat pihak hal ini itu the markas posko tanah air negeri
 atau dan yang di ke dari
-commission council union european europe eropa uni asean apec g20 who imf
-unesco unicef nato opec sachs morgan stanley capital fund trust inc ltd llc
-co company corporation corp limited plc ag gmbh foundation institute agency
-ministry office department authority federation association society club
-party news times post daily herald tribune journal tv radio online channel
-network digital tech technology technologies global international energy
-mining motor motors airlines airways air bank securities sekuritas finance
-group holdings ventures partners industries exchange market index
-serikat republik kerajaan federasi china tiongkok cina beijing shanghai amerika america american usa as washington
-inggris london britania eropa prancis perancis paris jerman berlin rusia moskow
-jepang tokyo korea seoul pyongyang india australia malaysia singapura singapore
-thailand bangkok vietnam filipina manila myanmar kamboja laos brunei timor
-arab saudi mesir iran irak israel palestina gaza ukraina turki belanda italia
-spanyol kanada brasil meksiko afrika asia pasifik timur tengah
+""".split())
+
+# Organisation words that never belong to a person's name: any of them in a candidate -> not a person
+# ("European Commission", "Goldman Sachs", "Bank Mandiri"). Only words that are not Indonesian names.
+ORG_WORDS = frozenset("""
+commission council union asean apec unesco unicef nato opec sachs stanley inc ltd llc
+company corporation corp limited plc gmbh foundation institute agency ministry department authority
+federation association society holdings ventures industries securities sekuritas airlines airways
+""".split())
+
+# Countries, foreign cities, regions: a candidate made ONLY of these (and other non-person words) is a place
+# ("Beijing", "Amerika Serikat", "Uni Eropa") — but one of them inside a name keeps the name
+# ("Hotman Paris Hutapea", "Uni Kurniasih", "Agus Asia Pratama").
+PLACE_WORDS = frozenset("""
+serikat republik kerajaan federasi uni eropa europe european china tiongkok cina beijing shanghai amerika
+america american usa washington inggris london britania prancis perancis paris jerman berlin rusia moskow
+jepang tokyo korea seoul pyongyang india australia malaysia singapura singapore thailand bangkok vietnam
+filipina manila myanmar kamboja laos brunei timor leste arab saudi mesir iran irak israel palestina gaza
+ukraina turki belanda italia spanyol kanada brasil meksiko afrika asia pasifik tengah brussels
 """.split())
 
 # Markers whose following capitalized word is a PLACE name — used to LEARN
 # local place names from the article itself ("Kabupaten Nunukan" teaches
 # the extractor that "Nunukan" is a place, not a person).
 _PLACE_MARKER_RE = re.compile(
-    r"\b(?:Kabupaten|Kota|Kecamatan|Kelurahan|Desa|Dusun|Provinsi|Kampung|"
+    r"\b(?:Kabupaten|Kota|Kecamatan|Kelurahan|Desa|Dusun|Provinsi|Kampung|Rumah\s+Sakit|RSUD|RSU|RS|"
     r"Pulau|Gunung|Sungai|Danau|Bandara|Pelabuhan)\s+([A-Z][a-zA-Z]+)")
 _PLACE_PREP_RE = re.compile(r"\b(?:di|ke)\s+([A-Z][a-zA-Z]+)\b")
 _SPEECH_NAME_RE = re.compile(
@@ -183,8 +203,8 @@ def _strip_front(tokens, places=frozenset()):
             i += 1  # org abbreviation like ESDM, PUPR, DPRD
         elif t in places:
             i += 1  # place name learned from the article itself
-        elif saw_role and t in NON_PERSON:
-            i += 1  # "Sekretaris *Daerah* Kusnadi" — part of the role phrase
+        elif saw_role and (t in NON_PERSON or t in PORTFOLIO_WORDS or t in COUNTRY_AFTER_ROLE):
+            i += 1  # "Sekretaris *Daerah* Kusnadi", "Presiden *Amerika Serikat* Donald Trump" — part of the role
         else:
             break
     return tokens[i:], tokens[:i]
@@ -216,8 +236,10 @@ def extract_people(text):
             continue
         low = [t.rstrip(".").lower() for t in tokens]
         parts = [p for t in low for p in re.split(r"[-’']", t) if p]
-        if any(t in NON_PERSON or t in places for t in low) or any(p in NON_PERSON for p in parts):
-            continue                       # "Indonesia-European", "Goldman Sachs", "Beijing": not people
+        if any(t in NON_PERSON or t in places for t in low) or any(p in NON_PERSON or p in ORG_WORDS for p in parts):
+            continue                       # "Indonesia-European Union", "Goldman Sachs": not people
+        if all(p in PLACE_WORDS for p in parts):
+            continue                       # "Beijing", "Amerika Serikat": a place
         if any(re.search(r"\d", t) for t in tokens):
             continue
         # words of the "name" that exist lowercase in text -> capitalized term
@@ -227,7 +249,8 @@ def extract_people(text):
         if len(name.replace(".", "").replace(" ", "")) < 3:
             continue
         left, right = text[max(0, s - 45):s], text[e:e + 45]
-        if left.rstrip(" ").endswith(tuple(_QUOTES)):
+        opens_quote = left.rstrip(" ").endswith(tuple(_QUOTES))
+        if opens_quote and len(raw.split()) == 1:
             continue                       # '"Pasokan listrik aman…"': the quotation's first word, not a name
         # followed by an ALL-CAPS abbreviation in parentheses -> a term
         if re.match(r"\s*\([A-Z]{2,}\)", right):
@@ -237,6 +260,9 @@ def extract_people(text):
         # means what follows is the COMPANY name, not a person
         if any(t in ("pt", "cv", "ud", "persero", "tbk") for t in prefix_low):
             continue
+        if opens_quote and not any(t in HONORIFICS or t in ROLE_WORDS for t in
+                                   [x.rstrip(".").lower() for x in prefix]):
+            continue                       # '"Pasokan BBM aman…"': words opening a quotation, no title before them
         candidates.append((name, tokens, left, right, prefix, prefix_low, s, e))
 
     def is_speaker(left, right):
@@ -250,13 +276,18 @@ def extract_people(text):
                       right.lower())
         return bool(rm and rm.group(1) in SPEECH_VERBS)   # "Iwan mengatakan"
 
+    mentions, spoke_at = [], {}
     for name, tokens, left, right, prefix, prefix_low, s, e in candidates:
         # a speech verb / "menurut" stripped from the candidate's own front
         # ("Menurut Dedi", "Kata Budi") also marks a speaker
         speaking = (is_speaker(left, right)
                     or any(t in SPEECH_VERBS or t == "menurut" for t in prefix_low))
+        if not speaking and _verb_then_role(left):
+            speaking = True                # '…," ujar Manajer PLN UP3 Bogor, Ahmad Sutrisno'
+        if _inside_quote(text, s):
+            speaking = False               # named inside someone else's quotation: mentioned, not speaking
         lw = [w.rstrip(".,").lower() for w in left.strip().split()]
-        prev = lw[-1] if lw else ""
+        prev = "" if re.search(r"[.!?][\"”’]?\s*$", left) else (lw[-1] if lw else "")
         # apposition after a role phrase: "Ketua PMI Nunukan, Saddam Husein, ..."
         apposition = (left.rstrip().endswith(",")
                       and any(w in ROLE_WORDS or w in HONORIFICS for w in lw[-6:]))
@@ -285,15 +316,17 @@ def extract_people(text):
                        or bool(re.match(r",?\s*\d{1,2} tahun", right)))     # Budi, 34 tahun
         if has_context:
             _add(persons, name)
+            mentions.append((name, s))
             if speaking and _quoted(text, s, e):
                 _add(speakers, name)       # an INFLUENCER speaks: a speech verb AND a quotation
+                spoke_at.setdefault(name.lower(), s)
 
     # the fullest form the article writes: "Airlangga" -> "Airlangga Hartarto", "Trump" -> "Donald Trump"
-    forms = [c[0] for c in candidates
-             if not any(t.rstrip(".").lower() in ROLE_WORDS or t.rstrip(".").lower() in NON_PERSON
-                        for t in c[0].split())]
-    speakers = _dedupe([_fullest(n, forms) for n in speakers])
-    persons = _dedupe([_fullest(n, forms) for n in persons])
+    first_at = {}
+    for n, pos in mentions:
+        first_at.setdefault(n.lower(), pos)
+    speakers = _dedupe([_fullest(n, spoke_at.get(n.lower(), 0), mentions) for n in speakers])
+    persons = _dedupe([_fullest(n, first_at.get(n.lower(), 0), mentions) for n in persons])
     # a speaker is always also a person
     for sp in speakers:
         _add(persons, sp)
@@ -303,33 +336,79 @@ def extract_people(text):
 _QUOTES = "\"“”„«»"
 
 
+def _verb_then_role(left):
+    """'… ujar Manajer PLN UP3 Bogor, ' right before the name: a speech verb, then only a title (role words,
+    abbreviations, capitalised words), ending with a comma — the name that follows is the speaker."""
+    seg = re.split(r"[.!?]\s", left)[-1]
+    if not seg.rstrip().endswith(","):
+        return False
+    words = re.findall(r"[A-Za-z][\w.]*", seg)
+    for i in range(len(words) - 1, -1, -1):
+        w = words[i].lower().rstrip(".")
+        if w in SPEECH_VERBS:
+            rest = words[i + 1:]
+            return 0 < len(rest) <= 7 and all(
+                x[0].isupper() or x.lower().rstrip(".") in ROLE_WORDS or x.lower() in FRONT_STOPWORDS for x in rest)
+    return False
+
+
+def _inside_quote(text, s):
+    """The place s lies inside a quotation of its paragraph (curly quotes paired; straight ones counted)."""
+    ps = text.rfind("\n", 0, s) + 1
+    seg = text[ps:s]
+    if seg.count("“") > seg.count("”"):
+        return True
+    return seg.count('"') % 2 == 1
+
+
+def _quote_words(text, a, b):
+    return len(re.findall(r"\w+", text[a:b]))
+
+
 def _quoted(text, s, e):
-    """The name stands by a quotation: '"…," kata Budi' (a quote closes just before) or 'Budi mengatakan, "…"'
-    (a quote opens in the same sentence after) — indirect speech without quotation marks is not enough."""
-    left = text[max(0, s - 90):s]
+    """The name stands by a quotation: '"…," kata Budi' (a quotation closes just before, in the same sentence) or
+    'Budi mengatakan, "…"' (one opens after the name, before the sentence ends). A quotation is speech — at least
+    3 words — so a quoted title ('film "Gundala"') is not. Indirect speech without quotation marks is not enough."""
+    lo = max(0, s - 90)
+    left = text[lo:s]
     q = max(left.rfind(c) for c in _QUOTES)
-    if q >= 0 and not re.search(r"[.!?]\s+[A-Z]", left[q + 1:]):
-        return True                          # the quotation ends in this sentence, right before the name
+    if q >= 0:
+        gap = left[q + 1:]
+        qa = lo + q
+        if len(gap) <= 45 and not re.search(r"[.!?]", gap):
+            opened = max(text.rfind(c, max(0, qa - 1500), qa) for c in _QUOTES)
+            if opened < 0 or _quote_words(text, opened + 1, qa) >= 3:
+                return True                  # '"…," kata Budi'
     right = text[e:e + 220]
     qs = [i for i in (right.find(c) for c in _QUOTES) if i >= 0]
     if qs:
         first = min(qs)
-        end = re.search(r"[.!?]\s", right)
-        return end is None or first < end.start()
+        end = re.search(r"[.!?]\s", right[:first])
+        if end is None:
+            fa = e + first
+            nxt = [i for i in (text.find(c, fa + 1, fa + 1500) for c in _QUOTES) if i >= 0]
+            if not nxt or _quote_words(text, fa + 1, min(nxt)) >= 3:
+                return True                  # 'Budi mengatakan, "…"'
     return False
 
 
-def _fullest(name, forms):
-    """The longest name in the article that contains this one word for word (at most 4 words)."""
+def _fullest(name, pos, mentions):
+    """The fuller form of this name among the people the article names (at most 4 words): "Airlangga" ->
+    "Airlangga Hartarto". With two people sharing the word ("Budi Gunadi Sadikin", "Budi Santoso") the one mentioned
+    last before this place is meant; none before -> the name stays as written."""
     toks = name.lower().split()
-    best = name
-    for f in forms:
+    fits = []
+    for f, at in mentions:
         ft = f.lower().split()
-        if len(ft) <= len(best.split()) or len(ft) > 4:
-            continue
-        if any(ft[i:i + len(toks)] == toks for i in range(len(ft) - len(toks) + 1)):
-            best = f
-    return best
+        if len(toks) < len(ft) <= 4 and any(ft[i:i + len(toks)] == toks for i in range(len(ft) - len(toks) + 1)):
+            fits.append((at, f))
+    if not fits:
+        return name
+    forms = {f.lower() for _a, f in fits}
+    if len(forms) == 1:
+        return fits[0][1]
+    before = [(a, f) for a, f in fits if a <= pos]
+    return max(before)[1] if before else name
 
 
 def _dedupe(names):

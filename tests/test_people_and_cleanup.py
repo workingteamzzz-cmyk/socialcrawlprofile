@@ -56,3 +56,49 @@ def test_safety_brake_never_takes_much_of_an_article():
     lines = ["Baca juga:"] + [f"Baris pendek nomor {i} tanpa titik" for i in range(5)] + ["Kalimat penutup singkat."]
     out = clean_content("\n".join(lines))
     assert "Baris pendek nomor 0" in out
+
+
+INTRO = "Pemerintah memastikan pasokan listrik aman selama libur akhir tahun di seluruh wilayah Indonesia, kata pejabat.\n" * 6
+
+
+def test_short_real_sentences_and_quotes_under_a_header_are_kept():
+    t = INTRO + ("Baca Juga:\nMenteri ESDM Bahlil Lahadalia menyebut pasokan aman.\n"
+                 "\"Kami siap menghadapi lonjakan,\" kata Bahlil.\nBeban puncak naik 5 persen.")
+    out = clean_content(t)
+    assert "Bahlil Lahadalia menyebut" in out and "Kami siap menghadapi lonjakan" in out and "naik 5 persen" in out
+
+
+def test_real_paragraphs_that_start_like_markers_are_kept():
+    for line in ("Terpopuler di kalangan warga, aplikasi ini diunduh jutaan kali.",
+                 "Baca berita ini dengan teliti sebelum membagikannya, ujar Kapolres.",
+                 "Read more about the policy here.",
+                 "Warga diminta baca: aturan baru berlaku mulai besok tanpa pengecualian",
+                 "Program bertajuk Ayo Baca: Gerakan Membaca Nasional diluncurkan Menteri Pendidikan.",
+                 "Ia mengaku sering baca juga buku sejarah di perpustakaan kota."):
+        assert clean_content(line) == line
+    assert clean_content("Baca selengkapnya: Harga Emas Hari Ini Naik") == ""
+
+
+def test_names_are_kept_whole_even_with_place_words_inside():
+    for text, name in (('Pengacara Hotman Paris Hutapea mengatakan, "Kami siap membela klien kami."', "Hotman Paris Hutapea"),
+                       ('Kepala Dinas Kesehatan dr. Uni Kurniasih mengatakan, "Vaksin sudah tersedia di puskesmas."', "Uni Kurniasih"),
+                       ('Ketua DPRD Agus Asia Pratama menegaskan, "Anggaran harus tepat sasaran tahun ini."', "Agus Asia Pratama"),
+                       ('Kapolres AKBP Timor Silalahi menyatakan, "Situasi kondusif di seluruh wilayah."', "Timor Silalahi"),
+                       ('Presiden Rusia Vladimir Putin menegaskan, "Kami terbuka untuk dialog damai."', "Vladimir Putin")):
+        assert extract_people(text) == ([name], [name])
+    assert extract_people('Ketua panitia, Negara Sitepu, menjelaskan acara berlangsung meriah.')[1] == ["Negara Sitepu"]
+
+
+def test_who_speaks_and_who_is_only_mentioned():
+    sp, pe = extract_people('"Presiden Prabowo Subianto meminta kami siap siaga," kata Kapolda Irjen Ahmad Luthfi.')
+    assert sp == ["Ahmad Luthfi"] and pe == ["Prabowo Subianto", "Ahmad Luthfi"]      # named inside a quote: mentioned
+    sp, _ = extract_people('Menteri Kesehatan Budi Gunadi Sadikin hadir. Warga bernama Budi Santoso ikut antre. '
+                           '"Kami senang sekali hari ini," kata Budi.')
+    assert sp == ["Budi Santoso"]                                                     # the Budi mentioned last
+    assert extract_people('"Kami siap bekerja keras." Ia lalu pergi. Budi Santoso mengatakan harga beras naik.')[0] == []
+    assert extract_people('Dalam film "Gundala", sutradara Joko Anwar mengatakan proses syuting berlangsung lama.')[0] == []
+    assert extract_people('Bahlil Lahadalia menuturkan: "Pasokan BBM aman sampai akhir tahun."') == \
+        (["Bahlil Lahadalia"], ["Bahlil Lahadalia"])
+    assert extract_people('Seluruh pejabat hadir. Rapat dimulai pukul sembilan pagi.') == ([], [])
+    assert extract_people('Rumah Sakit Fatmawati menambah ruang rawat. Direktur Fatmawati menyebut kapasitas cukup.') == ([], [])
+    assert extract_people("") == ([], []) and extract_people(None) == ([], [])

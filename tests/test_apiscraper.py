@@ -347,3 +347,30 @@ def test_api_runs_skip_what_earlier_runs_collected(tmp_path, fake_api):
     from crawler.job import _api_rows
     got = _api_rows(str(out / [f for f in files if f.endswith(".xlsx")][0]), ["listrik", "pln"])
     assert got[0]["keywords"] == ["listrik", "pln"] and got[0]["keyword"] == "listrik, pln"
+
+
+def test_twitter_search_waits_and_tries_again_when_the_provider_is_busy(monkeypatch):
+    """429 'Pool · Please try again shortly' / 502 from the X provider: waited for and tried again (failed requests
+    cost no credit) instead of giving up on the keyword at once."""
+    from crawler.apiscraper import engine
+    answers = [(429, {}), (502, {}), (200, {"tweets": [{"id": "1", "text": "pln padam", "createdAt": "2026-11-22"}]})]
+    calls = []
+
+    class R:
+        def __init__(self, code, data):
+            self.status_code, self._d, self.text = code, data, str(data)
+
+        def json(self):
+            return self._d
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        calls.append(params)
+        code, data = answers[min(len(calls) - 1, len(answers) - 1)]
+        return R(code, data)
+    monkeypatch.setattr(engine.requests, "get", fake_get)
+    monkeypatch.setattr(engine.time, "sleep", lambda s: None)
+    monkeypatch.setattr(engine, "TWITTER_API_KEY", "k")
+    logs = []
+    rows = engine._tw_search_one("pln", "Latest", 5, False, logs.append)
+    assert len(calls) == 3 and len(rows) == 1
+    assert any("busy" in m for m in logs)

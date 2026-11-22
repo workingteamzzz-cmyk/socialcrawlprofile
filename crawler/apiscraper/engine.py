@@ -1251,13 +1251,25 @@ def _tw_search_one(term, product, max_items, want_raw, log):
         params = {"q": term, "product": product}
         if cursor:
             params["cursor"] = cursor
-        try:
-            r = requests.get(GETX_BASE + "/twitter/tweet/advanced_search", params=params,
-                             headers={"Authorization": f"Bearer {TWITTER_API_KEY.strip()}"}, timeout=45)
-        except Exception as e:
-            log(f"  Twitter error: {e}"); break
-        if r.status_code != 200:
-            log(f"  Twitter HTTP {r.status_code}: {r.text[:90]}"); break
+        r = None
+        for attempt, wait in enumerate((0, 5, 15, 30)):     # the provider busy (429) / X unstable (5xx): wait, again
+            if wait:
+                log(f"  Twitter provider busy (HTTP {getattr(r, 'status_code', 'no answer')}) — waiting {wait}s, "
+                    f"try {attempt + 1}/4...")
+                time.sleep(wait)
+            try:
+                r = requests.get(GETX_BASE + "/twitter/tweet/advanced_search", params=params,
+                                 headers={"Authorization": f"Bearer {TWITTER_API_KEY.strip()}"}, timeout=45)
+            except Exception as e:  # noqa: BLE001
+                r = None
+                log(f"  Twitter error: {e}")
+                continue
+            if r.status_code == 429 or r.status_code >= 500:
+                continue
+            break
+        if r is None or r.status_code != 200:
+            log(f"  Twitter provider still busy after 4 tries (HTTP {getattr(r, 'status_code', 'no answer')}): "
+                f"'{term}' skipped for now — {len(rows)} items kept"); break
         data = r.json()
         items = find_items(data)
         if page == 0:

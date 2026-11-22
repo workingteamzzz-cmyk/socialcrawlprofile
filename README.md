@@ -341,6 +341,11 @@ page shows the live pace and the "per day at this pace" figure.
   every 2 minutes) that restarts the app when it runs but no longer answers; the web app restarts the stream's worker
   when it dies, when it stops writing its live state for 5 minutes (hung) or when it reads nothing for 20 minutes while
   fresh links wait (stalled) — with a Telegram message when Telegram is set up, and the cause on the Live Stream page.
+- **Data by year** (Exports, admins): per year and month the news articles, News Search rows and social media rows
+  with an approximate size; a month or a year downloads as a ZIP — *Excel* (per day one Online and one Medsos file in
+  the team's layout) or *Backup* (every column exactly as stored, JSON lines). Both upload back through *Restore*
+  (also a ZIP of the team's Excel files made elsewhere); rows already on the server are kept once. A ZIP is only made
+  when the disk has room for it (3 GB always stay free).
 - **Sites that refuse this server** (401 / 403 / 429 / 451 / 503): the Live Stream reads such an outlet more gently —
   the pause between its pages doubles with every refusal (up to 2 minutes), after 5 refusals in a row it is left
   alone for 30 minutes, and the normal pace comes back as it gives pages again. The clip is kept all the same: the

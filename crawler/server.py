@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -19,7 +20,7 @@ def list_outputs() -> list[dict]:
     files = []
     if os.path.isdir(OUTPUT_DIR):
         for name in os.listdir(OUTPUT_DIR):
-            if name.endswith(".xlsx") or re.search(r"_decoded\.(csv|txt)$", name):
+            if name.endswith((".xlsx", ".zip")) or re.search(r"_decoded\.(csv|txt)$", name):
                 try:
                     st = os.stat(os.path.join(OUTPUT_DIR, name))
                 except OSError:
@@ -34,7 +35,7 @@ def delete_outputs(names: list[str]) -> list[str]:
     gone = []
     for n in names or []:
         n = os.path.basename(str(n))
-        if not n or not n.endswith((".xlsx", ".csv", ".txt")) or n.startswith("."):
+        if not n or not n.endswith((".xlsx", ".csv", ".txt", ".zip")) or n.startswith("."):
             continue
         for f in {n, n[:-5] + ".csv" if n.endswith(".xlsx") else n}:
             p = os.path.join(OUTPUT_DIR, f)
@@ -131,6 +132,10 @@ class Handler(BaseHTTPRequestHandler):
             from . import overview as ov
             from .paths import SERVER_MODE
             return self._json(ov.build(SERVER_MODE))
+        if u.path == "/api/vault":
+            from . import data_vault
+            return self._json({"ok": True, **data_vault.overview(
+                fresh=parse_qs(u.query).get("fresh", ["0"])[0] == "1")})
         if u.path == "/api/cleanup":
             from . import cleanup
             qs = parse_qs(u.query)
@@ -224,13 +229,19 @@ class Handler(BaseHTTPRequestHandler):
         if u.path.startswith("/download/"):
             name = os.path.basename(unquote(u.path[len("/download/"):]))
             path = os.path.join(OUTPUT_DIR, name)
-            if not name or not os.path.isfile(path):
+            if not name or name.startswith(".") or not os.path.isfile(path):
                 return self._json({"error": "file not found"}, 404)
-            with open(path, "rb") as f:
-                data = f.read()
-            ctype = "text/csv" if name.endswith(".csv") else \
+            ctype = "text/csv" if name.endswith(".csv") else "application/zip" if name.endswith(".zip") else \
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            return self._send(200, data, ctype, {"Content-Disposition": f'attachment; filename="{name}"'})
+            self.send_response(200)                          # sent in pieces: a ZIP can be many GB
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(os.path.getsize(path)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Disposition", f'attachment; filename="{name}"')
+            self.end_headers()
+            with open(path, "rb") as f:
+                shutil.copyfileobj(f, self.wfile, 1024 * 1024)
+            return None
         self._json({"error": "not found"}, 404)
 
     def _post(self):
@@ -347,6 +358,14 @@ class Handler(BaseHTTPRequestHandler):
                         bool(data.get("clear")))})
                 r = media_db.send_report()
                 return self._json({"ok": True, "file": r["file"], "access": r["access"], "tiers": r["tiers"]})
+            except ValueError as e:
+                return self._json({"ok": False, "error": str(e)})
+        elif u.path in ("/api/vault/build", "/api/vault/cancel"):
+            from . import data_vault
+            try:
+                if u.path.endswith("cancel"):
+                    return self._json(data_vault.cancel_build())
+                return self._json(data_vault.start_build(str(data.get("period") or ""), str(data.get("format") or "")))
             except ValueError as e:
                 return self._json({"ok": False, "error": str(e)})
         elif u.path in ("/api/cleanup/export", "/api/cleanup/delete"):

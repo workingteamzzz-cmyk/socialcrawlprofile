@@ -233,7 +233,7 @@ def upload_chunk(upload_id: str, offset: int, data: bytes, final: bool) -> dict:
         raise ValueError("A piece is larger than 16 MB.")
     folder = os.path.join(APP_DATA, "uploads")
     os.makedirs(folder, exist_ok=True)
-    path = os.path.join(folder, upload_id + ".xlsx")
+    path = os.path.join(folder, upload_id + ".upload")         # an Excel or a ZIP of Excel / backup files
     if offset == 0 and os.path.exists(path):
         os.remove(path)
     size = os.path.getsize(path) if os.path.exists(path) else 0
@@ -257,7 +257,8 @@ def _restore(path: str) -> None:
     from .stream import norm_key
     st = _STATE["restore"]
     kind, rep = archive.import_file(path)                      # the reporting database first (Online or Medsos)
-    st["report_rows"], st["kind"] = rep, kind
+    st["report_rows"] = st.get("report_rows", 0) + rep          # added up: a ZIP brings many files
+    st["kind"] = kind or st.get("kind", "")
     if kind != "online":
         return                                                 # a Medsos file: reports only
     s = stream.get()
@@ -309,8 +310,17 @@ def start_restore(path: str) -> dict:
                              "error": ""}
 
     def work():
+        nonlocal path
+        from . import data_vault
         try:
-            _restore(path)
+            if data_vault.is_zip_of_files(path):
+                data_vault.restore_zip(path, _STATE["restore"], _restore)
+            else:
+                if not path.endswith(".xlsx"):               # the Excel reader goes by the file's ending
+                    xl = os.path.splitext(path)[0] + ".xlsx"
+                    os.replace(path, xl)
+                    path = xl
+                _restore(path)
         except Exception as e:  # noqa: BLE001
             _STATE["restore"]["error"] = str(e)[:200]
         _STATE["restore"]["running"] = False

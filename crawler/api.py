@@ -323,6 +323,11 @@ class ArchiveIn(BaseModel):
     gap: float = Field(1.5, description="seconds between two pages of this outlet (polite: 1.5)")
 
 
+class VaultBuild(BaseModel):
+    period: str = Field(..., description="a year (2026) or a month (2026-11)")
+    format: str = Field("excel", description="excel (Online / Medsos Excel per day) or backup (everything, exactly)")
+
+
 class CleanupIn(BaseModel):
     start: str = Field(..., description="YYYY-MM-DD")
     end: str = Field(..., description="YYYY-MM-DD")
@@ -655,7 +660,8 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
     def download(name: str, request: Request):
         name = os.path.basename(name)
         path = os.path.join(OUTPUT_DIR, name)
-        if not name or not name.endswith((".xlsx", ".csv", ".txt")) or not os.path.isfile(path):
+        if not name or name.startswith(".") or not name.endswith((".xlsx", ".csv", ".txt", ".zip")) \
+                or not os.path.isfile(path):
             raise HTTPException(404, "file not found")
         log(request, "downloaded", file=name)
         return FileResponse(path, filename=name)
@@ -910,6 +916,28 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
         log(request, "DELETED a period from the server", period=f"{body.start}..{body.end}",
             parts=",".join(k for k in ("articles", "reports", "files") if getattr(body, k)))
         return out
+
+    @app.get("/api/vault", tags=["files"], dependencies=admin_only,
+             summary="Data by year: per year and month the articles, report rows and approximate size; the ZIP being made")
+    def vault_get(fresh: int = 0):
+        from . import data_vault
+        return {"ok": True, **data_vault.overview(fresh=bool(fresh))}
+
+    @app.post("/api/vault/build", tags=["files"], dependencies=admin_only,
+              summary="A month or a year as a ZIP (Excel per day, or a full backup) in the results folder")
+    def vault_build(body: VaultBuild, request: Request):
+        from . import data_vault
+        try:
+            out = data_vault.start_build(body.period, body.format)
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        log(request, "made a data ZIP", period=body.period, format=body.format)
+        return out
+
+    @app.post("/api/vault/cancel", tags=["files"], dependencies=admin_only, summary="Stop making the ZIP")
+    def vault_cancel():
+        from . import data_vault
+        return data_vault.cancel_build()
 
     @app.post("/api/restore/chunk", tags=["files"], dependencies=admin_only,
               summary="Restore a period from its backup Excel — sent in pieces (raw bytes), the last one with final=1")

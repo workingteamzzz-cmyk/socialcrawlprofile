@@ -1199,6 +1199,14 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
         <div class="card-bd exports" id="exports" style="padding-top:6px"></div>
         <div class="card-bd" style="display:flex;gap:8px;align-items:center;padding-top:0"><span class="hint" id="expPage"></span>
           <button class="btn sm" id="expPrev" style="margin-left:auto">Previous</button><button class="btn sm" id="expNext">Next</button></div></div>
+      <div class="card need-admin" style="margin-top:16px" id="vlCard"><div class="card-hd"><h3>Data by year</h3><span class="hd-note" id="vlNote">what the server holds — download a month or a year as a ZIP</span>
+          <button class="btn sm" id="vlRefresh" style="margin-left:auto">Count again</button></div>
+        <div class="card-bd">
+          <div class="hint" id="vlDisk" style="margin-bottom:8px"></div>
+          <div class="tblwrap"><table class="tbl" id="vlTable"><thead><tr><th>Period</th><th>News articles</th><th>News Search rows</th><th>Social media rows</th><th>Size (≈)</th><th>Download as ZIP</th></tr></thead><tbody id="vlBody"><tr><td colspan="6" class="hint">Counting…</td></tr></tbody></table></div>
+          <p class="hint" id="vlJob" style="margin:10px 0 0"></p>
+          <small class="hint" style="display:block;margin-top:6px"><b>Excel</b>: per day one Online file (news) and one Medsos file (social media), in the team's layout — to open and share. <b>Backup</b>: everything exactly as stored (every column), smaller — to keep and to restore. Both can be uploaded back below (Restore). The ZIP appears in Files above; sizes are estimates.</small>
+        </div></div>
       <div class="card need-admin" style="margin-top:16px"><div class="card-hd"><h3>Free up space by period</h3><span class="hd-note">save a period elsewhere (e.g. Google Drive), then delete it from the server</span></div>
         <div class="card-bd">
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
@@ -1217,7 +1225,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
               <small class="hint" style="display:block;margin-top:6px">Deleted articles are never read again by the stream. The database reuses the freed space for new articles.</small></div></div>
           </div>
           <div class="cl-step" style="margin-top:6px"><b>↺</b><div><div style="font-weight:600">Restore a period from its backup</div><small class="hint">Changed your mind? Upload the Excel you saved (any Online file: “All_articles…”, “Media_…”, “Stream_All…”) — its articles come back to News Stream, Explore and Reports. A Medsos file goes back to Reports.</small>
-            <div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><input type="file" id="clFile" accept=".xlsx"><button class="btn" id="clRestore">Upload &amp; restore</button><span class="hint" id="clResMsg"></span></div>
+            <div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><input type="file" id="clFile" accept=".xlsx,.zip"><button class="btn" id="clRestore">Upload &amp; restore</button><span class="hint" id="clResMsg"></span></div>
             <div class="me-bar" style="background:var(--soft);margin-top:8px;max-width:420px" hidden id="clBarW"><span id="clBar" style="width:0;background:var(--accent)"></span></div></div></div>
         </div></div>
       <div class="card need-op" style="margin-top:16px">
@@ -1916,7 +1924,7 @@ function go(p){
   document.querySelectorAll('.page').forEach(s => s.classList.toggle('on', s.id === 'p-' + p));
   ls.set('page', p); window.scrollTo(0, 0);
   const nb = document.querySelector(`#nav button[data-p="${p}"]`); if (nb && $('tbPage')) { const c = nb.cloneNode(true); c.querySelectorAll('.count,svg').forEach(x => x.remove()); $('tbPage').textContent = c.textContent.trim(); }
-  if (p === 'exports'){ loadExports(); if (SERVER && ROLE === 'admin') loadAudit(); }
+  if (p === 'exports'){ loadExports(); if (SERVER && ROLE === 'admin') loadAudit(); if (ROLE === 'admin') loadVault(); }
   if (p === 'schedules') loadSchedules();
   if (p === 'users') loadUsers();
   if (p === 'clients') loadClients();
@@ -2184,6 +2192,43 @@ async function refreshResults(){ results = await api('/api/results?mode=profiles
 
 let EXP = {files: [], page: 1, sel: new Set(), canDel: false};
 const fsize = b => b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
+/* ---------- data by year ---------- */
+const vlSize = b => !b ? '0' : b < 1024 ** 2 ? '< 1 MB' : b >= 1024 ** 3 ? (b / 1024 ** 3).toFixed(1) + ' GB' : (b / 1024 ** 2).toFixed(0) + ' MB';
+const MONTHS_EN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+let VL_OPEN = new Set();
+async function loadVault(){
+  const d = await api('/api/vault');
+  if (!d || d.ok === false){ $('vlBody').innerHTML = `<tr><td colspan="6" class="hint">${esc((d && d.error) || 'Not available')}</td></tr>`; return; }
+  const ov = d.overview || {}, dk = d.disk || {};
+  $('vlDisk').textContent = (dk.total ? `Disk: ${vlSize(dk.free)} free of ${vlSize(dk.total)}. ` : '') + (ov.counted ? `Counted ${new Date(ov.counted * 1000).toLocaleString()}` : '') + (d.counting ? ' · counting again…' : '');
+  const btns = p => `<button class="btn sm" data-vl="${p}" data-f="excel">Excel</button> <button class="btn sm" data-vl="${p}" data-f="backup">Backup</button>`;
+  const row = (label, v, p, cls, toggle) => `<tr class="${cls || ''}">
+      <td>${toggle ? `<button class="btn sm" data-vlt="${p}" style="min-width:28px">${VL_OPEN.has(p) ? '−' : '+'}</button> ` : ''}<b>${label}</b></td>
+      <td>${fmt(v.articles)}</td><td>${fmt(v.online_rows)}</td><td>${fmt(v.medsos_rows)}</td><td>${vlSize(v.bytes)}</td><td>${btns(p)}</td></tr>`;
+  if (ov.error){ $('vlBody').innerHTML = `<tr><td colspan="6" class="hint">Not counted: ${esc(ov.error)}</td></tr>`; }
+  else if (!(ov.years || []).length){ $('vlBody').innerHTML = `<tr><td colspan="6" class="hint">${d.counting ? 'Counting…' : 'Nothing stored yet.'}</td></tr>`; }
+  else {
+    $('vlBody').innerHTML = ov.years.map(y => row(y.year, y, y.year, '', true) + (VL_OPEN.has(y.year) ? y.months.map(m =>
+      row('&nbsp;&nbsp;&nbsp;&nbsp;' + MONTHS_EN[+m.month.slice(5) - 1] + ' ' + m.month.slice(0, 4), m, m.month, 'vl-month')).join('') : '')).join('')
+      + (ov.undated ? `<tr><td colspan="6" class="hint">${fmt(ov.undated)} articles without a publication date (≈ ${vlSize(ov.undated_bytes)}) go in the month they were found.</td></tr>` : '');
+  }
+  const b = d.build || {};
+  $('vlJob').innerHTML = b.running ? `Making <b>${esc(b.file)}</b>… day ${fmt(b.done_days)} of ${fmt(b.days)} · ${fmt(b.rows)} rows <button class="btn sm" id="vlCancel">Cancel</button>`
+    : b.file ? (b.error ? `Not made: ${esc(b.error)}` : `Ready: <a href="/download/${encodeURIComponent(b.file)}">${esc(b.file)}</a> — ${fmt(b.rows)} rows (also in Files above)`) : '';
+  if ($('vlCancel')) $('vlCancel').onclick = async () => { await act('/api/vault/cancel', {}, 'Cancelling…'); loadVault(); };
+  if (b.running || d.counting) setTimeout(() => { if ($('p-exports').classList.contains('on')) loadVault(); }, 3000);
+  else if (b.file && !b.error && !loadVault.listed){ loadVault.listed = true; loadExports(); }
+}
+$('vlBody').addEventListener('click', async e => {
+  const t = e.target.closest('[data-vlt]');
+  if (t){ const p = t.dataset.vlt; VL_OPEN.has(p) ? VL_OPEN.delete(p) : VL_OPEN.add(p); loadVault(); return; }
+  const b = e.target.closest('[data-vl]'); if (!b) return;
+  const what = b.dataset.f === 'excel' ? 'an Excel ZIP (Online + Medsos per day)' : 'a full backup ZIP';
+  if (!confirm(`Make ${what} of ${b.dataset.vl}? A year can take a long time and many GB.`)) return;
+  const r = await act('/api/vault/build', {period: b.dataset.vl, format: b.dataset.f}, 'Making the ZIP — it appears in Files when ready');
+  if (r){ loadVault.listed = false; loadVault(); }
+});
+$('vlRefresh').onclick = async () => { $('vlBody').innerHTML = '<tr><td colspan="6" class="hint">Counting…</td></tr>'; await api('/api/vault?fresh=1'); loadVault(); };
 async function loadExports(){
   const d = await api('/api/outputs');
   if (!d || !d.files) return;
@@ -3493,7 +3538,7 @@ $('clDelete').onclick = async () => {
 ['clStart', 'clEnd'].forEach(id => $(id).addEventListener('change', () => { $('clSteps').hidden = true; $('clPrev').hidden = true; }));
 
 $('clRestore').onclick = async () => {
-  const f = $('clFile').files[0]; if (!f) return toast('Choose the backup Excel first');
+  const f = $('clFile').files[0]; if (!f) return toast('Choose the backup Excel or ZIP first');
   const id = [...crypto.getRandomValues(new Uint8Array(12))].map(b => b.toString(16).padStart(2, '0')).join(''), step = 8 * 1024 * 1024;
   $('clBarW').hidden = false; $('clRestore').disabled = true;
   try {
@@ -3506,7 +3551,7 @@ $('clRestore').onclick = async () => {
       if (last) break;
     }
     const poll = async () => { const d = await api('/api/cleanup'); const re_ = (d.status || {}).restore || {};
-      if (re_.running){ $('clResMsg').textContent = `Restoring… ${fmt(re_.rows || 0)} rows read`; return setTimeout(poll, 1500); }
+      if (re_.running){ $('clResMsg').textContent = `Restoring… ${re_.files ? `file ${fmt(re_.files_done || 0)} of ${fmt(re_.files)} · ` : ''}${fmt(re_.rows || 0)} rows read`; return setTimeout(poll, 1500); }
       $('clResMsg').textContent = re_.error ? 'Not restored: ' + re_.error : `Restored: ${fmt(re_.articles)} articles back in the stream, ${fmt(re_.report_rows)} rows in Reports.`;
       $('clRestore').disabled = false; };
     poll();

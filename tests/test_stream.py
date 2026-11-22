@@ -835,3 +835,27 @@ def test_a_refused_page_keeps_its_clip_and_the_outlet_is_read_more_gently(tmp_pa
     st.cfg["headline_only"] = False
     st.x("UPDATE articles SET status='new' WHERE key='k1'")
     assert st.read(job) == "failed"                                            # switched off: as before
+
+
+def test_the_status_page_reads_the_worker_live_state(tmp_path, monkeypatch):
+    """With the worker's live state present (the stream running in its own process), the Live Stream page's status
+    is built without errors and carries the worker's numbers."""
+    import json as _j
+    import time as _t
+    from crawler import paths, stream
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    monkeypatch.setattr(stream, "_WORKER_PARENT", True)                # the web process, as on the server
+    st = stream.Stream(str(tmp_path / "s"))
+    live = {"t": _t.time(), "running": True, "since": int(_t.time()), "per_minute": 12.5, "per_day_pace": 18000,
+            "readers_busy": 3, "last_error": "", "export": {}, "slowed": 2, "health": {}, "catchup": {},
+            "trim": {}, "loop_age": 1, "stuck_at": ""}
+    import os as _o
+    _o.makedirs(stream._dir(), exist_ok=True)
+    with open(stream._live_path(), "w") as f:
+        _j.dump(live, f)
+    d = st.status()
+    assert d["running"] and d["per_minute"] == 12.5 and d["slowed"] == 2 and d["worker"]
+    live.pop("slowed")
+    with open(stream._live_path(), "w") as f:
+        _j.dump(live, f)
+    assert st.status()["running"]                                  # an older worker without the newer numbers

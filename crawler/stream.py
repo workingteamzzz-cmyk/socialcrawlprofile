@@ -1871,7 +1871,7 @@ class Stream:
         out["worker_up"] = bool(p is not None and p.poll() is None)
         if live:                                             # the engine runs in its own process: its live state
             for k in ("running", "since", "per_minute", "per_day_pace", "readers_busy", "last_error", "export", "slowed"):
-                out[k] = live.get(k, out[k])
+                out[k] = live.get(k, out.get(k))
             out["processes"] = live.get("processes", 1)
             out["loop_age"], out["stuck_at"] = live.get("loop_age", 0), live.get("stuck_at", "")
             out["trim"] = live.get("trim") or {}

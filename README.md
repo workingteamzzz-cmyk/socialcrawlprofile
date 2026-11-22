@@ -349,7 +349,9 @@ page shows the live pace and the "per day at this pace" figure.
   rows in memory) and writes the Excel row by row (openpyxl write-only) — 180,000 rows in seconds. News Stream shows
   its articles at once and its totals a moment later; a News Search row the stream also has is marked once when it
   is indexed (rep.dup), so no page view looks every row up in the stream's database (older rows are marked once, in
-  the background).
+  the background, a little at a time). The totals read two covering indexes only (a_succ_cov: stored articles by
+  date with their sentiment; rep_cov) — the large table is not read to count. The search index re-checks the last 5
+  minutes, so an article stored out of order by parallel readers is never left out of keyword search.
 - **Data by year** (Exports, admins): per year and month the news articles, News Search rows and social media rows
   with an approximate size; a month or a year downloads as a ZIP — *Excel* (per day one Online and one Medsos file in
   the team's layout) or *Backup* (every column exactly as stored, JSON lines). Both upload back through *Restore*

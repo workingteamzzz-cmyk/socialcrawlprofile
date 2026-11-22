@@ -115,6 +115,9 @@ def _stream_ro() -> sqlite3.Connection | None:
     return c
 
 
+OVERLAP_S = 300
+
+
 def index_new(limit: int = 5000) -> int:
     """Articles the stream read since the last call -> the search index. Returns how many were added."""
     src = _stream_ro()
@@ -124,8 +127,16 @@ def index_new(limit: int = 5000) -> int:
     try:
         r = db.execute("SELECT v FROM meta WHERE k='last_fetched'").fetchone()
         last = float(r["v"]) if r else 0.0
-        rows = src.execute("SELECT key, url, domain, title, summary, pub_date, pub_time, matched, fetched FROM articles "
-                           "WHERE status='success' AND fetched > ? ORDER BY fetched LIMIT ?", (last, limit)).fetchall()
+        cols = "key, url, domain, title, summary, pub_date, pub_time, matched, fetched"
+        new = src.execute(f"SELECT {cols} FROM articles WHERE status='success' AND fetched > ? ORDER BY fetched LIMIT ?",
+                          (last, limit)).fetchall()
+        # late ones: parallel readers can store an article a moment after a later one was indexed — those of the
+        # last 5 minutes that were not indexed yet (kept in memory) are added, so none is skipped for good
+        recent = _STATE.setdefault("recent_keys", {})
+        late = [x for x in src.execute(f"SELECT {cols} FROM articles WHERE status='success' AND fetched > ? AND "
+                                       "fetched <= ?", (max(0.0, last - OVERLAP_S), last))
+                if x["key"] not in recent] if last else []
+        rows = late + list(new)
         if not rows:
             return 0
         keys = [x["key"] for x in rows]
@@ -139,12 +150,19 @@ def index_new(limit: int = 5000) -> int:
                        "VALUES (?,?,?,?,?,?,?,?,?)",
                        [(x["key"], x["url"], x["domain"], x["pub_date"], x["pub_time"], x["matched"], x["fetched"],
                          x["title"] or "", x["summary"] or "") for x in rows])
-        db.execute("INSERT INTO meta(k, v) VALUES ('last_fetched', ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
-                   (str(rows[-1]["fetched"]),))
+        if new:
+            db.execute("INSERT INTO meta(k, v) VALUES ('last_fetched', ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+                       (str(new[-1]["fetched"]),))
         db.commit()
+        for x in rows:
+            recent[x["key"]] = float(x["fetched"] or 0)
+        edge = (float(new[-1]["fetched"]) if new else last) - 2 * OVERLAP_S
+        if len(recent) > 20000:                         # only the last minutes are needed
+            for k in [k for k, t in recent.items() if t < edge]:
+                del recent[k]
         with _LOCK:
             _STATE["indexed"] += len(rows)
-        return len(rows)
+        return len(new)                                  # the loop goes on while new ones keep coming
     finally:
         db.close()
         src.close()
@@ -243,19 +261,29 @@ def _in_stream(keys: list[str]) -> set:
     return got
 
 
-def mark_duplicates(batch: int = 5000) -> int:
-    """Once (in the stream's background): the report rows indexed before the 'dup' mark get it, a batch at a time,
-    and the index the News Stream reads them by is built. Returns how many rows were marked (0 = all done)."""
+def mark_duplicates(batch: int = 20000) -> int:
+    """Once (in the stream's background): the report rows indexed before the 'dup' mark get it, and the index the
+    News Stream reads them by is built. The stream's links come from the search index (docs: every stored article),
+    read once in order — never looked up one by one in the stream's large database. Returns how many rows were
+    marked this call (0 = all done)."""
     db = _search_db()
     try:
-        if not db.execute("SELECT 1 FROM sqlite_master WHERE name='rep_pubt'").fetchone():
-            db.execute("CREATE INDEX IF NOT EXISTS rep_pubt ON rep(pub_date, pub_time)")   # newest first, in order
+        have = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+        if "rep_cov" not in have:              # newest first, and the counts read the index alone
+            db.execute("CREATE INDEX IF NOT EXISTS rep_cov ON rep(pub_date, pub_time, dup, sentiment)")
+            db.execute("DROP INDEX IF EXISTS rep_pubt")
             db.commit()
-        rows = [r[0] for r in db.execute("SELECT skey FROM rep WHERE dup IS NULL LIMIT ?", (batch,))]
-        if not rows:
+        if not db.execute("SELECT 1 FROM rep WHERE dup IS NULL LIMIT 1").fetchone():
+            _STATE.pop("stream_keys", None)
             return 0
-        dups = _in_stream(rows)
-        db.executemany("UPDATE rep SET dup=? WHERE skey=?", [(1 if k in dups else 0, k) for k in rows])
+        keys = _STATE.get("stream_keys")
+        if keys is None:                       # every link the stream has stored, once (sequential read)
+            keys = _STATE["stream_keys"] = {r[0] for r in db.execute("SELECT key FROM docs")}
+        rows = [r[0] for r in db.execute("SELECT skey FROM rep WHERE dup IS NULL LIMIT ?", (batch,))]
+        # the search index may miss a stored article (read out of order by parallel readers): the rest are asked of
+        # the stream itself, sorted, in batches — only the rows not found above
+        more = _in_stream([k for k in rows if k not in keys])
+        db.executemany("UPDATE rep SET dup=? WHERE skey=?", [(1 if k in keys or k in more else 0, k) for k in rows])
         db.commit()
         return len(rows)
     finally:
@@ -658,8 +686,8 @@ def _loop() -> None:
                 pass
             while index_social() >= 5000 and not _STATE["stop"].is_set():
                 pass
-            for _ in range(20):                               # older report rows: their 'dup' mark, bit by bit
-                if not mark_duplicates() or _STATE["stop"].is_set():
+            for _ in range(2):                                # older report rows: their 'dup' mark, a little per
+                if not mark_duplicates() or _STATE["stop"].is_set():   # round (15 s apart) — never a long burden
                     break
             if time.time() - last_prune > 3600:
                 last_prune = time.time()

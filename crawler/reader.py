@@ -72,7 +72,9 @@ def forget_counts() -> None:
     _LAST.clear()
 
 
-_IDX = [" INDEXED BY a_succ_pub"]      # emptied when the database has no such index yet
+# the stored-articles index, best first: a_succ_cov also holds the sentiment (counts read only the index);
+# a_succ_pub is the older one; dropped from the list when the database does not have it (yet)
+_IDX = [" INDEXED BY a_succ_cov", " INDEXED BY a_succ_pub"]
 _LAST: dict = {}              # (filter) -> the last totals counted, however old (shown while counting again)
 _BUSY: set = set()            # filters being counted in the background
 _COUNTS: dict = {}            # (filter) -> (time, sentiment counts): the totals of a filter, kept for a minute
@@ -188,10 +190,10 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
     want_rep = source in ("all", "reports")
     c = _conn(bool(expr) or want_rep and os.path.exists(os.path.join(_dir(), "search.db")))
     try:
-        selects, args = [], []
+        selects, csel, args = [], [], []          # csel: the same parts with only what the counts need
         # the newest (or oldest) stored articles straight from their own index — no sort of the whole collection.
         # Only for a plain list (no words, no single article); an older database without the index reads as before.
-        use_idx = bool(_IDX[0]) and not expr and not only_key and not since and sort in ("newest", "oldest")
+        use_idx = bool(_IDX) and not expr and not only_key and not since and sort in ("newest", "oldest")
         if source in ("all", "stream"):
             w, a = ["a.status='success'"], []
             pw, pa = _period_sql("a", start, end)
@@ -208,9 +210,12 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
                 join = "JOIN s.docs d ON d.key = a.key"
                 w.append("d.docs MATCH ?")
                 a.append(expr)
+            idx = _IDX[0] if use_idx and _IDX else ""
             selects.append("SELECT a.key, a.url, a.domain, a.title, a.pub_date, a.pub_time, a.image, a.summary, "
                            "COALESCE(NULLIF(a.sentiment,''),'neutral') sentiment, a.matched, a.fetched, 'stream' origin "
-                           f"FROM articles a{_IDX[0] if use_idx else ''} {join} WHERE {' AND '.join(w)}")
+                           f"FROM articles a{idx} {join} WHERE {' AND '.join(w)}")
+            csel.append("SELECT COALESCE(NULLIF(a.sentiment,''),'neutral') sentiment "
+                        f"FROM articles a{idx} {join} WHERE {' AND '.join(w)}")
             args += a
         if want_rep and _has_reports(c):
             w, a = _period_sql("r", start, end)
@@ -232,14 +237,16 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
             selects.append("SELECT r.skey key, r.url, r.domain, r.title, r.pub_date, r.pub_time, r.image, r.summary, "
                            "r.sentiment, r.keywords matched, COALESCE(r.added, 0) fetched, 'reports' origin "
                            f"FROM s.rep r {join}{' WHERE ' + ' AND '.join(w) if w else ''}")
+            csel.append(f"SELECT r.sentiment sentiment FROM s.rep r {join}{' WHERE ' + ' AND '.join(w) if w else ''}")
             args += a
         counts: dict = {}
         rows: list = []
         size, page = max(1, min(int(size or 24), 100)), max(1, min(int(page or 1), 100000))
         if selects:
             u = " UNION ALL ".join(selects)
+            cu = " UNION ALL ".join(csel)                   # the counts read the index only (sentiment is in it)
             try:
-                ck = (u, tuple(args))
+                ck = (cu, tuple(args))
                 hit = _COUNTS.get(ck)
                 with_search = bool(expr) or want_rep and os.path.exists(os.path.join(_dir(), "search.db"))
                 if hit and time.time() - hit[0] < COUNT_TTL and not only_key:
@@ -247,9 +254,9 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
                 elif quick and not only_key:
                     # the dashboard: the articles at once — the totals are counted beside it (a second at most is
                     # waited for); until then the last ones known, or "counting"
-                    counts = _count_beside(ck, u, args, with_search)
+                    counts = _count_beside(ck, cu, args, with_search)
                 else:
-                    counts = _count_now(c, ck, u, args)
+                    counts = _count_now(c, ck, cu, args)
                 sw, sargs = "", list(args)
                 if sentiment in SENTIMENTS:
                     sw = " WHERE sentiment = ?"
@@ -266,8 +273,8 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
                 rows = c.execute(f"SELECT * FROM ({u}){sw} ORDER BY {by} LIMIT ? OFFSET ?",
                                  (*sargs, size, (page - 1) * size)).fetchall()
             except sqlite3.OperationalError as e:
-                if "no such index" in str(e) and _IDX[0]:
-                    _IDX[0] = ""                            # not built yet (the stream builds it once): read without
+                if "no such index" in str(e) and _IDX:
+                    _IDX.pop(0)                             # not built (yet): the next one, or none
                     c.close()
                     return articles(q, topic, start, end, sentiment, sort, page, size, source, scope, only_key,
                                     last_hours, received_since, quick=quick)

@@ -280,22 +280,30 @@ def test_client_key_for_every_article(rd, tmp_path, monkeypatch):
 
 
 def test_newest_list_is_the_same_with_and_without_the_new_index(rd, tmp_path):
-    """The plain list reads from the a_succ_pub index when the stream built it, and the same way as before when it
-    has not yet — same rows, same order, every page; totals are kept for a minute but a new filter counts at once."""
+    """The plain list reads from the stored-articles index when the stream built it (a_succ_cov, which also holds
+    the sentiment so the counts read the index alone), and the same way as before when it has not — same rows, same
+    order, every page; the fallback goes down the list of indexes to none."""
     from crawler import stream
-    rd._IDX[0] = " INDEXED BY a_succ_pub"
-    rd._COUNTS.clear()
-    before = [(r["key"]) for p in (1, 2) for r in rd.articles(size=2, page=p)["rows"]]
-    assert rd._IDX[0] == ""                                         # no index yet: it fell back, and remembers
+    rd._IDX[:] = [" INDEXED BY a_succ_cov", " INDEXED BY a_succ_pub"]
+    rd.forget_counts()
+    before = [r["key"] for p in (1, 2) for r in rd.articles(size=2, page=p)["rows"]]
+    assert rd._IDX == []                                            # neither index yet: fell back to none
     s = stream.Stream(str(tmp_path / "data" / "stream"))
     s.ensure_indexes()
-    rd._IDX[0] = " INDEXED BY a_succ_pub"
-    rd._COUNTS.clear()
-    after = [(r["key"]) for p in (1, 2) for r in rd.articles(size=2, page=p)["rows"]]
-    assert after == before and rd._IDX[0]
+    names = {r["name"] for r in s.rq("SELECT name FROM sqlite_master WHERE type='index'")}
+    assert "a_succ_cov" in names and "a_succ_pub" not in names
+    rd._IDX[:] = [" INDEXED BY a_succ_cov", " INDEXED BY a_succ_pub"]
+    rd.forget_counts()
+    after = [r["key"] for p in (1, 2) for r in rd.articles(size=2, page=p)["rows"]]
+    assert after == before and rd._IDX[0] == " INDEXED BY a_succ_cov"
     assert [r["key"] for r in rd.articles(sort="oldest", size=5)["rows"]] == \
         list(reversed([r["key"] for r in rd.articles(size=5)["rows"]]))
-    assert rd.articles(start="2026-11-20")["total"] == 4                 # another filter: its own count
+    r = rd.articles(start="2026-11-20")
+    assert r["total"] == 4 and r["sentiment"]["negative"]["n"] == 1       # counted from the index
+    plan = " ".join(x[3] for x in s.rq("EXPLAIN QUERY PLAN SELECT COALESCE(NULLIF(a.sentiment,''),'neutral') FROM "
+                                       "articles a INDEXED BY a_succ_cov WHERE a.status='success' AND a.pub_date >= "
+                                       "'2026-11-20'"))
+    assert "COVERING INDEX a_succ_cov" in plan                                # the table itself is not read
     s.stop()
 
 
@@ -359,4 +367,24 @@ def test_a_report_row_the_stream_also_has_is_marked_once_and_shown_once(rd, tmp_
     rd.forget_counts()
     urls = [r["url"] for r in rd.articles(size=50)["rows"]]
     assert len(urls) == len(set(urls))                                          # each link once
+    s.stop()
+
+
+def test_an_article_stored_out_of_order_is_still_indexed_and_the_loop_ends(rd, tmp_path):
+    """Two readers: an article stored with an earlier time after a later one was indexed is indexed on the next
+    round (not skipped for good); with nothing new the indexer returns 0 (its loop ends)."""
+    from crawler import insights, stream
+    s = stream.Stream(str(tmp_path / "data" / "stream"))
+    assert insights.index_new() == 0                                         # nothing new: the loop ends
+    db = insights._search_db()
+    last = float(db.execute("SELECT v FROM meta WHERE k='last_fetched'").fetchone()[0])
+    s.x("INSERT INTO articles(key, url, domain, title, status, discovered, fetched, pub_date, pub_time, sentiment) "
+        "VALUES ('late.id/berita/telat', 'https://late.id/berita/telat', 'late.id', 'Terlambat tercatat', 'success', 0, ?, "
+        "'2026-11-20', '10:00', 'neutral')", (last - 60,))
+    insights.index_new()
+    keys = {r[0] for r in db.execute("SELECT key FROM docs")}
+    assert "late.id/berita/telat" in keys
+    n = len(keys)
+    assert insights.index_new() == 0 and len({r[0] for r in db.execute("SELECT key FROM docs")}) == n   # not doubled
+    db.close()
     s.stop()

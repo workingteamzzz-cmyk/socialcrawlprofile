@@ -457,3 +457,49 @@ def _put_reports(rows: list[dict]) -> int:
             c.close()
     _STATE["overview"]["t"] = 0.0                       # counted again next time
     return n
+
+
+# ---------- before a period is deleted: a backup that holds all of it ----------
+def covering_backup(start: str, end: str) -> tuple[str, str]:
+    """(ZIP name, "") when a Backup ZIP in the results folder holds every month of start..end and was made after the
+    newest data of the period arrived (late articles too); else ("", why not). Only a Backup ZIP counts: it keeps
+    every column and the report rows; one Excel file can hold at most about a million rows."""
+    from .paths import OUTPUT_DIR
+    months = set()
+    d = datetime.strptime(start[:7] + "-01", "%Y-%m-%d")
+    while d.strftime("%Y-%m") <= end[:7]:
+        months.add(d.strftime("%Y-%m"))
+        d = (d + timedelta(days=32)).replace(day=1)
+    zips = []
+    try:
+        for n in os.listdir(OUTPUT_DIR):
+            m = re.fullmatch(r"Data_(\d{4}(?:-\d{2})?)_Backup_(\d{8}-\d{4})\.zip", n)
+            if m:                       # its start time (in the name): data that came later may not be inside
+                began = datetime.strptime(m.group(2), "%Y%m%d-%H%M").replace(tzinfo=WIB).timestamp()
+                zips.append((began, n, set(_months_of(m.group(1)))))
+    except OSError:
+        pass
+    covered = [(t, n) for t, n, ms in zips if months <= ms]
+    if not covered:
+        return "", (f"No Backup ZIP holds {start} .. {end} yet — make one first (Exports → Data by year → Backup) and "
+                    "download it; then delete.")
+    t, name = max(covered)
+    s = _stream()
+    a = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=WIB).timestamp()
+    b = (datetime.strptime(end, "%Y-%m-%d") + timedelta(days=1)).replace(tzinfo=WIB).timestamp()
+    newest = s.rq("SELECT MAX(fetched) n FROM articles WHERE status='success' AND (pub_date BETWEEN ? AND ? OR "
+                  "(pub_date = '' AND discovered >= ? AND discovered < ?))", (start, end, a, b))[0]["n"] or 0
+    rep = ""
+    try:
+        c = _archive_conn()
+        try:
+            rep = c.execute("SELECT MAX(last_seen) FROM items WHERE day BETWEEN ? AND ?", (start, end)).fetchone()[0] or ""
+        finally:
+            c.close()
+    except Exception:  # noqa: BLE001
+        pass
+    made = datetime.fromtimestamp(t, WIB)
+    if newest > t or (rep and rep > made.strftime("%Y-%m-%d %H:%M:%S")):
+        return "", (f"Articles of {start} .. {end} arrived after the newest Backup ZIP ({name}) was made — make a new "
+                    "Backup first, so nothing is lost.")
+    return name, ""

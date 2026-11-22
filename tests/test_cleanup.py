@@ -1,4 +1,5 @@
-"""Free up space by period: back up as Excel -> delete (never read again) -> restore from the Excel."""
+"""Free up space by period: back up (a Backup ZIP is required) -> delete (never read again) -> restore from the
+Excel or the ZIP."""
 import os
 import sys
 import time
@@ -28,7 +29,7 @@ def test_backup_delete_restore(tmp_path, monkeypatch):
     for k in ("export", "delete", "restore"):
         cleanup._STATE[k] = {}
     s = stream.get()
-    now = time.time()
+    now = time.time() - 300                       # read a while ago: before the backup below began
     rows = []
     for i, day in enumerate(["2026-10-05", "2026-10-20", "2026-11-10"]):
         t = f"Banjir besar melanda kota nomor {i}"
@@ -48,6 +49,15 @@ def test_backup_delete_restore(tmp_path, monkeypatch):
     assert cleanup.start_export("2026-10-01", "2026-10-31")["ok"]
     ex = wait(cleanup, "export")
     assert ex["rows"] == 2 and (out / ex["file"]).exists()
+    r = cleanup.start_delete("2026-10-01", "2026-10-31")
+    assert not r["ok"] and "Backup ZIP" in r["error"]                   # one Excel is not a backup: refused
+    from crawler import data_vault
+    data_vault._STATE["overview"] = {"t": 0.0, "v": None, "busy": False}
+    assert data_vault.start_build("2026-10", "backup")["ok"]
+    t = time.time()
+    while data_vault._STATE["build"].get("running") and time.time() - t < 30:
+        time.sleep(0.05)
+    assert not data_vault._STATE["build"].get("error"), data_vault._STATE["build"]
     assert cleanup.start_delete("2026-10-01", "2026-10-31")["ok"]
     de = wait(cleanup, "delete")
     assert de["articles"] == 2 and de["report_rows"] == 2 and de["files"] == 1 and (out / ex["file"]).exists()

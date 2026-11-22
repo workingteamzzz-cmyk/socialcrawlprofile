@@ -182,3 +182,46 @@ def test_a_file_in_another_layout_is_named_not_skipped_silently(env, monkeypatch
     _fresh_server(env, monkeypatch, "server5")
     st = _restore(mixed)
     assert st["articles"] == 1 and st["skipped"] == ["Oktober/format_lain.xlsx"]
+
+
+def _delete_period(start, end, **parts):
+    from crawler import cleanup
+    r = cleanup.start_delete(start, end, {"articles": True, "reports": True, "files": True, **parts})
+    if r.get("ok"):
+        assert _wait(lambda: not cleanup._STATE["delete"].get("running"))
+        assert not cleanup._STATE["delete"].get("error"), cleanup._STATE["delete"]
+    return r
+
+
+def test_delete_needs_a_backup_then_restore_brings_it_all_back(env, monkeypatch):
+    """Delete a month: refused without a Backup ZIP; with one, the month goes (and the ZIP stays); the ZIP brings back
+    every article and report row."""
+    from crawler import archive, stream
+    from crawler.paths import OUTPUT_DIR
+    _seed()
+    before = {r["key"] for r in stream.get().rq("SELECT key FROM articles WHERE pub_date LIKE '2026-10%'")}
+    r = _delete_period("2026-10-01", "2026-10-31")
+    assert not r["ok"] and "Backup ZIP" in r["error"]                       # no backup: nothing deleted
+    assert len(stream.get().rq("SELECT key FROM articles WHERE pub_date LIKE '2026-10%'")) == 3
+    zipped = _build("2026-10", "backup")
+    # the backup's start time is in its name (minute): treat the data as older than it
+    s = stream.get()
+    s.x("UPDATE articles SET fetched = fetched - 120")
+    assert _delete_period("2026-10-01", "2026-10-31")["ok"]
+    assert not stream.get().rq("SELECT key FROM articles WHERE pub_date LIKE '2026-10%'")
+    c = archive._db()
+    assert c.execute("SELECT COUNT(*) FROM items WHERE day LIKE '2026-10%'").fetchone()[0] == 0
+    c.close()
+    assert os.path.exists(zipped) and os.path.basename(zipped) in os.listdir(OUTPUT_DIR)   # the backup stays
+    st = _restore(zipped)
+    assert st["articles"] == 3 and st["report_rows"] == 2
+    assert {r["key"] for r in stream.get().rq("SELECT key FROM articles WHERE pub_date LIKE '2026-10%'")} == before
+
+
+def test_delete_refused_when_articles_arrived_after_the_backup(env):
+    from crawler import stream
+    _seed()
+    _build("2026-10", "backup")
+    stream.get().x("UPDATE articles SET fetched = ? WHERE pub_date = '2026-10-20'", (time.time() + 3600,))
+    r = _delete_period("2026-10-01", "2026-10-31")
+    assert not r["ok"] and "arrived after" in r["error"]

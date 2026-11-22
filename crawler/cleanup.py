@@ -193,11 +193,18 @@ def _delete(start: str, end: str, parts: dict) -> None:
             pass
     if parts.get("files", True):
         keep = set(parts.get("keep_files") or [])
-        st["files"] = len(delete_outputs([f["name"] for f in _files(start, end) if f["name"] not in keep]))
+        st["files"] = len(delete_outputs([f["name"] for f in _files(start, end) if f["name"] not in keep
+                                          and not re.fullmatch(r"Data_.+\.zip", f["name"])]))   # backups stay
 
 
 def start_delete(start: str, end: str, parts: dict | None = None) -> dict:
     _check(start, end)
+    p0 = dict(parts or {})
+    if p0.get("articles", True) or p0.get("reports", True):    # data goes only when a full backup of it exists
+        from . import data_vault
+        name, why = data_vault.covering_backup(start, end)
+        if not name:
+            return {"ok": False, "error": why}
     with _LOCK:
         if _STATE["export"].get("running") or _STATE["delete"].get("running"):
             return {"ok": False, "error": "Another export or delete is running."}

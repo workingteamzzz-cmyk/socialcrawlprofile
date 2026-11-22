@@ -345,7 +345,9 @@ page shows the live pace and the "per day at this pace" figure.
   with an approximate size; a month or a year downloads as a ZIP — *Excel* (per day one Online and one Medsos file in
   the team's layout) or *Backup* (every column exactly as stored, JSON lines). Both upload back through *Restore*
   (also a ZIP of the team's Excel files made elsewhere); rows already on the server are kept once. A ZIP is only made
-  when the disk has room for it (3 GB always stay free).
+  when the disk has room for it (3 GB always stay free). A month (Delete) or a period (Free up space) is deleted
+  from the server only when a Backup ZIP holds all of it and was made after its newest data arrived; backup ZIPs are
+  never deleted with a period's files. Restored rows land in their own year and month by their dates.
 - **Sites that refuse this server** (401 / 403 / 429 / 451 / 503): the Live Stream reads such an outlet more gently —
   the pause between its pages doubles with every refusal (up to 2 minutes), after 5 refusals in a row it is left
   alone for 30 minutes, and the normal pace comes back as it gives pages again. The clip is kept all the same: the

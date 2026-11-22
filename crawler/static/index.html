@@ -1215,7 +1215,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
             <button class="btn" id="clCheck" style="height:40px">Check the period</button></div>
           <div id="clPrev" class="cl-prev" hidden></div>
           <div id="clSteps" hidden>
-            <div class="cl-step"><b>1</b><div><div style="font-weight:600">Download everything of the period</div><small class="hint">One Excel (Online layout) with every article — save it to your Drive before deleting.</small>
+            <div class="cl-step"><b>1</b><div><div style="font-weight:600">Back the period up first</div><small class="hint">Required before deleting: a <b>Backup ZIP</b> of every month of the period (Data by year above → Backup), downloaded to your Drive — it holds everything and restores exactly. The single Excel below is for reading only (one Excel holds at most about a million rows).</small>
               <div style="margin-top:8px"><button class="btn primary" id="clExport"><svg class="i"><use href="#i-dl"/></svg>Make the Excel</button> <span class="hint" id="clExpMsg"></span></div></div></div>
             <div class="cl-step"><b>2</b><div><div style="font-weight:600">Delete the period from the server</div>
               <div style="display:flex;gap:16px;flex-wrap:wrap;margin:8px 0"><label class="opt-row" style="border:0;padding:0"><input type="checkbox" id="clA" checked> Stream articles</label>
@@ -1224,7 +1224,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
               <button class="btn danger" id="clDelete">Delete the period</button> <span class="hint" id="clDelMsg"></span>
               <small class="hint" style="display:block;margin-top:6px">Deleted articles are never read again by the stream. The database reuses the freed space for new articles.</small></div></div>
           </div>
-          <div class="cl-step" style="margin-top:6px"><b>↺</b><div><div style="font-weight:600">Restore a period from its backup</div><small class="hint">Changed your mind? Upload the Excel you saved (any Online file: “All_articles…”, “Media_…”, “Stream_All…”) — its articles come back to News Stream, Explore and Reports. A Medsos file goes back to Reports.</small>
+          <div class="cl-step" style="margin-top:6px"><b>↺</b><div><div style="font-weight:600">Upload back (restore) — a Backup ZIP, an Excel ZIP or one Excel</div><small class="hint">Changed your mind? Upload the Excel you saved (any Online file: “All_articles…”, “Media_…”, “Stream_All…”) — its articles come back to News Stream, Explore and Reports. A Medsos file goes back to Reports.</small>
             <div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><input type="file" id="clFile" accept=".xlsx,.zip"><button class="btn" id="clRestore">Upload &amp; restore</button><span class="hint" id="clResMsg"></span></div>
             <div class="me-bar" style="background:var(--soft);margin-top:8px;max-width:420px" hidden id="clBarW"><span id="clBar" style="width:0;background:var(--accent)"></span></div></div></div>
         </div></div>
@@ -2201,7 +2201,8 @@ async function loadVault(){
   if (!d || d.ok === false){ $('vlBody').innerHTML = `<tr><td colspan="6" class="hint">${esc((d && d.error) || 'Not available')}</td></tr>`; return; }
   const ov = d.overview || {}, dk = d.disk || {};
   $('vlDisk').textContent = (dk.total ? `Disk: ${vlSize(dk.free)} free of ${vlSize(dk.total)}. ` : '') + (ov.counted ? `Counted ${new Date(ov.counted * 1000).toLocaleString()}` : '') + (d.counting ? ' · counting again…' : '');
-  const btns = p => `<button class="btn sm" data-vl="${p}" data-f="excel">Excel</button> <button class="btn sm" data-vl="${p}" data-f="backup">Backup</button>`;
+  const btns = p => `<button class="btn sm" data-vl="${p}" data-f="excel">Excel</button> <button class="btn sm" data-vl="${p}" data-f="backup">Backup</button>`
+    + (p.length === 7 ? ` <button class="btn sm danger" data-vld="${p}" title="Delete this month from the server — only after its Backup ZIP is made and downloaded">Delete</button>` : '');
   const row = (label, v, p, cls, toggle) => `<tr class="${cls || ''}">
       <td>${toggle ? `<button class="btn sm" data-vlt="${p}" style="min-width:28px">${VL_OPEN.has(p) ? '−' : '+'}</button> ` : ''}<b>${label}</b></td>
       <td>${fmt(v.articles)}</td><td>${fmt(v.online_rows)}</td><td>${fmt(v.medsos_rows)}</td><td>${vlSize(v.bytes)}</td><td>${btns(p)}</td></tr>`;
@@ -2220,6 +2221,17 @@ async function loadVault(){
   else if (b.file && !b.error && !loadVault.listed){ loadVault.listed = true; loadExports(); }
 }
 $('vlBody').addEventListener('click', async e => {
+  const del = e.target.closest('[data-vld]');
+  if (del){
+    const mo = del.dataset.vld, last = new Date(+mo.slice(0, 4), +mo.slice(5), 0).getDate();
+    const typed = prompt(`Delete ${mo} from the server, for good: its news articles and report rows.\n\n`
+      + `Only possible when its Backup ZIP is made (and you downloaded it). To bring it back: Restore below.\n\nType DELETE to go on.`);
+    if ((typed || '').trim().toUpperCase() !== 'DELETE') return toast('Nothing deleted');
+    const r = await act('/api/cleanup/delete', {start: mo + '-01', end: `${mo}-${String(last).padStart(2, '0')}`, articles: true, reports: true, files: false},
+                        `Deleting ${mo} — the counts update when it is done`);
+    if (r) setTimeout(() => api('/api/vault?fresh=1').then(loadVault), 5000);
+    return;
+  }
   const t = e.target.closest('[data-vlt]');
   if (t){ const p = t.dataset.vlt; VL_OPEN.has(p) ? VL_OPEN.delete(p) : VL_OPEN.add(p); loadVault(); return; }
   const b = e.target.closest('[data-vl]'); if (!b) return;
@@ -3531,7 +3543,7 @@ $('clDelete').onclick = async () => {
   if (!CL) return; const st = $('clStart').value, en = $('clEnd').value;
   const what = [$('clA').checked && `${fmt(CL.articles)} stream articles`, $('clR').checked && `${fmt(CL.report_rows)} report rows`, $('clF').checked && `${fmt(CL.files)} result files`].filter(Boolean);
   if (!what.length) return toast('Choose what to delete');
-  const typed = prompt(`Delete from the server, for good:\n• ${what.join('\n• ')}\nPeriod ${st} – ${en}\n\nDid you save the Excel to your Drive? Type DELETE to go on.`);
+  const typed = prompt(`Delete from the server, for good:\n• ${what.join('\n• ')}\nPeriod ${st} – ${en}\n\nA Backup ZIP of the period must exist (Data by year) — did you download it? Type DELETE to go on.`);
   if ((typed || '').trim().toUpperCase() !== 'DELETE') return toast('Nothing deleted');
   const r = await api('/api/cleanup/delete', {start: st, end: en, articles: $('clA').checked, reports: $('clR').checked, files: $('clF').checked});
   if (!r || r.ok === false) return toast((r && r.error) || 'Not started'); setTimeout(clStatus, 500); };

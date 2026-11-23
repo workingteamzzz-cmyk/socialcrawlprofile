@@ -599,6 +599,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
 .rd-view{display:flex}.rd-view button{flex:1;text-align:center}
 .rd-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:14px}
 .rd-kpi{display:flex;gap:12px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;box-shadow:var(--shadow)}
+.rd-kpi-btn{cursor:pointer}.rd-kpi.on{border-color:var(--accent,#2563eb);box-shadow:0 0 0 2px rgba(37,99,235,.15)}.rd-kpi-btn:hover{border-color:var(--accent,#2563eb)}
 .rd-kpi small{display:block;font-size:12px;color:var(--muted)}.rd-kpi b{display:block;font-size:22px;font-weight:650;letter-spacing:-.02em}
 .rd-kpi span:last-child{font-size:12px;color:var(--faint)}
 .rd-face{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;flex:none}
@@ -1875,6 +1876,8 @@ const PLATS = [
 ];
 const PL = Object.fromEntries(PLATS.map(p => [p.k, p]));
 const $ = id => document.getElementById(id);
+// today / a date on this computer's calendar (toISOString is UTC: before 07:00 WIB it gave yesterday)
+const localDay = (d = new Date()) => new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt = n => n >= 1e6 ? (n / 1e6).toFixed(2).replace(/\.?0+$/, '') + 'M' : n >= 1e4 ? (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'K' : n.toLocaleString('en-US');
 const ls = {
@@ -3143,7 +3146,7 @@ async function loadStream(){
       + (it.paused ? ` · paused since ${it.paused_since || 'now'}` : '') + (it.missed ? ` · missed while paused: ${it.missed.start} – ${it.missed.end} (catch it up below)` : '')
       + (it.classified ? ` · checked ${it.classified}` : ' · first check about 15 minutes after the stream starts')
       + (it.sample && it.sample.length ? ` — e.g. ${it.sample.slice(0, 6).join(', ')}` : '');
-    if (!$('lsIntlFrom').value){ const m = it.missed || {}; const today = new Date().toISOString().slice(0, 10);
+    if (!$('lsIntlFrom').value){ const m = it.missed || {}; const today = localDay();
       $('lsIntlFrom').value = m.start || it.paused_since || today; $('lsIntlTo').value = m.end || today; }
   }
   if (d.maintenance) toast('The stream database is being upgraded once (' + d.maintenance + ') — the stream continues by itself.');
@@ -3377,13 +3380,14 @@ const rdHi = txt => { let h = esc(txt); for (const t of RD.terms){ const re = ne
 const rdWhen = r => `${r.pub_date ? new Date(r.pub_date + 'T00:00:00').toLocaleDateString([], {day: '2-digit', month: 'short', year: 'numeric'}) : ''} ${esc(r.pub_time || (r.pub_date ? '00:00' : ''))}`.trim();
 function rdCard(r){
   return `<div class="rd-card${r.key === RD.key ? ' on' : ''}" data-k="${esc(r.key)}" tabindex="0">
-    ${r.image ? `<img class="rd-thumb" src="${esc(r.image)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : '<div class="rd-thumb rd-noimg"><svg class="i"><use href="#i-file"/></svg></div>'}
+    ${r.image ? `<img class="rd-thumb" src="${esc(r.image)}" alt="" loading="lazy" decoding="async" fetchpriority="low" referrerpolicy="no-referrer">` : '<div class="rd-thumb rd-noimg"><svg class="i"><use href="#i-file"/></svg></div>'}
     <div class="rd-body"><span class="badge ${SENT[r.sentiment][0]}">${SENT[r.sentiment][1]}</span>
       <h4>${esc(r.title || r.url)}</h4>
       <small><svg class="i"><use href="#i-cal"/></svg>${rdWhen(r)}${r.tier ? ` <span class="rd-tier">${TIERN[r.tier] || esc(r.tier)}</span>` : ''}</small>
       <small><svg class="i"><use href="#i-building"/></svg>${esc(r.domain)}${r.origin === 'reports' ? ' <span class="rd-tier">News Search</span>' : ''}</small></div></div>`;
 }
 function rdShowTotals(d){
+  [['Pos', 'positive'], ['Neg', 'negative'], ['Neu', 'neutral']].forEach(([id, v]) => $('rd' + id).closest('.rd-kpi').classList.toggle('on', $('rdSent').value === v));
   $('rdTotal').textContent = fmt(d.total);
   for (const [k, id] of [['positive', 'Pos'], ['negative', 'Neg'], ['neutral', 'Neu']]){
     $('rd' + id).textContent = d.sentiment[k].pct + '%'; $('rd' + id + 'N').textContent = `${fmt(d.sentiment[k].n)} news`; }
@@ -3402,7 +3406,7 @@ async function rdTotals(tries = 0){
     $('rdMore').textContent = RD.rows.length < RD.matching ? 'Loading more…' : (RD.rows.length ? `All ${fmt(RD.matching)} shown` : '');
   }, tries ? 3000 : 1500);
 }
-async function loadReader(reset = true){
+async function loadReader(reset = true, live = false){
   if (RD.loading) return; RD.loading = true;
   if (reset){ RD.page = 1; RD.terms = rdTerms(); }
   $('rdMsg').textContent = '';
@@ -3420,7 +3424,8 @@ async function loadReader(reset = true){
   $('rdList').querySelectorAll('img.rd-thumb').forEach(img => img.onerror = () => { const p = document.createElement('div'); p.className = 'rd-thumb rd-noimg'; p.innerHTML = '<svg class="i"><use href="#i-file"/></svg>'; img.replaceWith(p); });
   $('rdMore').textContent = RD.rows.length < RD.matching ? 'Loading more…' : (RD.rows.length ? `All ${fmt(RD.matching)} shown` : '');
   RD.first = RD.rows[0] && RD.rows[0].key; $('rdNew').hidden = true;
-  if (reset && RD.rows.length && innerWidth > 1300)          // the new filter's words highlighted in the open article too
+  if (live) document.querySelectorAll('.rd-card').forEach(c => c.classList.toggle('on', c.dataset.k === RD.key));
+  if (reset && !live && RD.rows.length && innerWidth > 1300)  // the new filter's words highlighted in the open article too
     rdOpen(RD.key && RD.rows.some(r => r.key === RD.key) ? RD.key : RD.rows[0].key);
 }
 async function rdOpen(key){
@@ -3433,7 +3438,7 @@ async function rdOpen(key){
       <button class="iconbtn rd-close" title="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
     <h2>${rdHi(a.title)}</h2>
     <div class="rd-dmeta"><span><svg class="i"><use href="#i-building"/></svg>${esc(a.domain)}</span><span><svg class="i"><use href="#i-cal"/></svg>${esc(rdWhen({pub_date: a.date, pub_time: a.time}))}</span>${a.author ? `<span>${esc(a.author)}</span>` : ''}</div>
-    ${a.image ? `<img class="rd-dimg" src="${esc(a.image)}" alt="" referrerpolicy="no-referrer">` : ''}
+    ${a.image ? `<img class="rd-dimg" src="${esc(a.image)}" alt="" decoding="async" referrerpolicy="no-referrer">` : ''}
     <div class="rd-text">${a.headline_only ? '<p class="hint">Headline only — the site refused this server; open the link for the full text (it is tried again later).</p>' : ''}${a.paragraphs.map(p => `<p>${rdHi(p)}</p>`).join('')}</div>
     ${a.persons || a.influencer ? `<div class="rd-people">${a.influencer ? `<small>Spokesperson</small><div>${esc(a.influencer)}</div>` : ''}${a.persons ? `<small>People</small><div>${esc(a.persons)}</div>` : ''}</div>` : ''}
     ${a.matched ? `<div style="margin-top:10px">${a.matched.split(', ').map(k => `<span class="badge b-ok">${esc(k)}</span>`).join(' ')}</div>` : ''}`;
@@ -3444,9 +3449,12 @@ $('rdList').addEventListener('click', e => { const c = e.target.closest('.rd-car
 $('rdList').addEventListener('keydown', e => { const c = e.target.closest('.rd-card'); if (c && e.key === 'Enter') rdOpen(c.dataset.k); });
 $('rdDetail').addEventListener('click', e => { if (e.target.closest('.rd-close')) $('rdDetail').classList.remove('open'); });
 $('rdGo').onclick = () => loadReader(true);
-$('rdQ').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) loadReader(true); });
+[['rdPos', 'positive'], ['rdNeg', 'negative'], ['rdNeu', 'neutral']].forEach(([id, v]) => {   // a sentiment card filters by it
+  const card = $(id).closest('.rd-kpi'); card.classList.add('rd-kpi-btn'); card.title = 'Show only these (click again: all)';
+  card.onclick = () => { $('rdSent').value = $('rdSent').value === v ? '' : v; loadReader(true); }; });
+$('rdQ').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); loadReader(true); } });
 ['rdTopic', 'rdSrc', 'rdSent', 'rdSort', 'rdStart', 'rdEnd'].forEach(id => $(id).addEventListener('change', () => loadReader(true)));
-$('rdReset').onclick = () => { const t = new Date().toISOString().slice(0, 10); $('rdStart').value = $('rdEnd').value = t; $('rdQ').value = '';
+$('rdReset').onclick = () => { const t = localDay(); $('rdStart').value = $('rdEnd').value = t; $('rdQ').value = '';
   $('rdTopic').value = ''; $('rdSrc').value = 'all'; $('rdSent').value = ''; $('rdSort').value = 'newest'; loadReader(true); };
 document.querySelectorAll('#rdView button').forEach(b => { b.classList.toggle('on', b.dataset.v === RD.view);
   b.onclick = () => { RD.view = b.dataset.v; ls.set('rd_view', RD.view); document.querySelectorAll('#rdView button').forEach(x => x.classList.toggle('on', x === b));
@@ -3460,11 +3468,13 @@ setInterval(async () => {                                // live: tell when new 
   const d = await api('/api/articles?' + rdParams(1));
   if (!d || !d.rows) return;
   const i = d.rows.findIndex(r => r.key === RD.first), n = i < 0 ? d.rows.length : i;
+  if (n > 0 && $('rdSort').value === 'newest' && RD.page === 1 && scrollY < 200 && !$('rdQ').matches(':focus')){
+    loadReader(true, true); return; }                    // at the top: they simply appear (like a live feed)
   if (n > 0 && $('rdSort').value === 'newest'){ $('rdNew').hidden = false; $('rdNew').textContent = `↑ ${n}${n === d.rows.length ? '+' : ''} new article(s) — show`; }
-}, 30000);
+}, 20000);
 async function initReader(){
   if (!initReader.done){ initReader.done = true;
-    const t = new Date().toISOString().slice(0, 10); $('rdStart').value = $('rdStart').value || t; $('rdEnd').value = $('rdEnd').value || t;
+    const t = localDay(); $('rdStart').value = $('rdStart').value || t; $('rdEnd').value = $('rdEnd').value || t;
     const tp = await api('/api/report/topics');
     (tp.topics || []).forEach(x => { const o = document.createElement('option'); o.value = x.id; o.textContent = x.name; o.dataset.kw = (x.keywords || []).join(' '); $('rdTopic').append(o); });
   }
@@ -3510,7 +3520,7 @@ const AR_ST = {queued: ['b-neu', 'Queued'], discovering: ['b-warn', 'Finding sit
 let AR = [];
 async function loadArchive(){
   const d = await api('/api/archive'); if (!d || !d.jobs) return; AR = d.jobs;
-  if (!$('arStart').value){ const t = new Date(), a = new Date(t); a.setFullYear(t.getFullYear() - 2); $('arStart').value = a.toISOString().slice(0, 10); $('arEnd').value = t.toISOString().slice(0, 10); }
+  if (!$('arStart').value){ const t = new Date(), a = new Date(t); a.setFullYear(t.getFullYear() - 2); $('arStart').value = localDay(a); $('arEnd').value = localDay(t); }
   $('arMsg').innerHTML = d.running ? '' : '<b style="color:var(--warn)">The Live Stream is stopped</b> — start it (Live Stream page) so archive jobs run.';
   const admin = ROLE === 'admin';
   $('arBody').innerHTML = AR.length ? AR.map((j, i) => {
@@ -3795,7 +3805,7 @@ function clShowKey(name, key){
   const host = location.origin;
   $('clKeyFor').textContent = name; $('clKey').textContent = key; $('clKeyCard').hidden = false;
   $('clDocLink').textContent = host + '/client-docs';
-  $('clEx').textContent = `curl -H "X-Client-Key: ${key}" "${host}/api/client/articles?start=${new Date().toISOString().slice(0, 10)}&size=50"\n\n// JavaScript (browser or Node)\nfetch("${host}/api/client/articles?size=50", {headers: {"X-Client-Key": "${key}"}}).then(r => r.json())`;
+  $('clEx').textContent = `curl -H "X-Client-Key: ${key}" "${host}/api/client/articles?start=${localDay()}&size=50"\n\n// JavaScript (browser or Node)\nfetch("${host}/api/client/articles?size=50", {headers: {"X-Client-Key": "${key}"}}).then(r => r.json())`;
   $('clKeyCard').scrollIntoView({behavior: 'smooth', block: 'nearest'});
 }
 $('clCopy').onclick = async () => { try { await navigator.clipboard.writeText($('clKey').textContent); toast('Key copied'); }

@@ -66,6 +66,20 @@ def _count_beside(ck, u, args, with_search) -> dict | None:
     return dict(last) if last is not None else None
 
 
+_DUP = {"t": 0.0, "v": False}
+
+
+def _rep_has_dup(c) -> bool:
+    """The search index has the 'dup' mark column (added by the stream's background; checked once a minute)."""
+    if time.time() - _DUP["t"] > 60 or not _DUP["v"]:
+        try:
+            _DUP["v"] = any(r[1] == "dup" for r in c.execute("PRAGMA s.table_info(rep)"))
+        except sqlite3.Error:
+            _DUP["v"] = False
+        _DUP["t"] = time.time()
+    return _DUP["v"]
+
+
 def forget_counts() -> None:
     """Data was deleted or restored: the totals are counted again at once (new articles may take up to a minute)."""
     _COUNTS.clear()
@@ -231,9 +245,12 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
                 w.append("rd.rdocs MATCH ?")
                 a.append(expr)
             if source == "all":                            # read by the stream too: shown once, from the stream
-                # marked once when indexed (insights.dup) — no lookup into the stream's database per row and view;
-                # a row not marked yet is shown (rather twice than missing)
-                w.append("COALESCE(r.dup, 0) = 0")
+                if _rep_has_dup(c):
+                    # marked once when indexed (insights.dup) — no lookup into the stream's database per row and
+                    # view; a row not marked yet is shown (rather twice than missing)
+                    w.append("COALESCE(r.dup, 0) = 0")
+                else:                                       # an index from before the mark: the slow, safe way
+                    w.append("NOT EXISTS (SELECT 1 FROM articles x WHERE x.key = r.skey AND x.status='success')")
             selects.append("SELECT r.skey key, r.url, r.domain, r.title, r.pub_date, r.pub_time, r.image, r.summary, "
                            "r.sentiment, r.keywords matched, COALESCE(r.added, 0) fetched, 'reports' origin "
                            f"FROM s.rep r {join}{' WHERE ' + ' AND '.join(w) if w else ''}")

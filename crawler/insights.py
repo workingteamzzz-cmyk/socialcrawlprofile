@@ -71,6 +71,23 @@ def save_settings(data: dict) -> dict:
 
 
 # ---------- the search index ----------
+def _add_column(c: sqlite3.Connection, table: str, col: str, decl: str) -> None:
+    """A column added once. Checked first (no error to swallow); a busy database is tried again a few times and,
+    if still busy, noted — never passed over silently, the next call tries again."""
+    if col in {r[1] for r in c.execute(f"PRAGMA table_info({table})")}:
+        return
+    for i in range(5):
+        try:
+            c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+            c.commit()
+            return
+        except sqlite3.OperationalError as e:
+            if "duplicate column" in str(e):
+                return
+            _STATE["error"] = f"search index: could not add {table}.{col} yet ({e}) — trying again"
+            time.sleep(1 + i)
+
+
 def _search_db() -> sqlite3.Connection:
     os.makedirs(_dir(), exist_ok=True)
     c = sqlite3.connect(os.path.join(_dir(), "search.db"), timeout=30, check_same_thread=False)
@@ -85,14 +102,8 @@ def _search_db() -> sqlite3.Connection:
     c.execute("CREATE TABLE IF NOT EXISTS rep(skey TEXT PRIMARY KEY, akey TEXT, url TEXT, domain TEXT, title TEXT, "
               "pub_date TEXT, pub_time TEXT, image TEXT, summary TEXT, sentiment TEXT, keywords TEXT, seen TEXT)")
     c.execute("CREATE INDEX IF NOT EXISTS rep_pub ON rep(pub_date)")
-    try:                                                   # when it reached this server (client API: received_since)
-        c.execute("ALTER TABLE rep ADD COLUMN added REAL")
-    except sqlite3.OperationalError:
-        pass
-    try:                                    # 1 = the live stream has the same article (shown once, from the stream)
-        c.execute("ALTER TABLE rep ADD COLUMN dup INTEGER")
-    except sqlite3.OperationalError:
-        pass
+    _add_column(c, "rep", "added", "REAL")         # when it reached this server (client API: received_since)
+    _add_column(c, "rep", "dup", "INTEGER")        # 1 = the live stream has the same article (shown once from there)
     c.execute("CREATE VIRTUAL TABLE IF NOT EXISTS rdocs USING fts5(skey UNINDEXED, title, summary, "
               "tokenize='unicode61 remove_diacritics 2')")
     # social media posts of the reporting database (Keyword Search, Collect, API scraper) for the client API

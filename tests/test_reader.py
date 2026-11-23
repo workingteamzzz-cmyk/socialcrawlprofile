@@ -388,3 +388,25 @@ def test_an_article_stored_out_of_order_is_still_indexed_and_the_loop_ends(rd, t
     assert insights.index_new() == 0 and len({r[0] for r in db.execute("SELECT key FROM docs")}) == n   # not doubled
     db.close()
     s.stop()
+
+
+def test_news_stream_works_while_the_search_index_has_no_dup_column(rd, tmp_path):
+    """A search index from before the 'dup' mark (or one where adding it failed because the database was busy):
+    the News Stream still answers — the old duplicate check — instead of failing on a missing column."""
+    from datetime import timedelta, timezone
+    from crawler import archive, insights
+    archive.add_rows("online", [{"url": "https://z.id/berita/hanya-laporan", "title": "Hanya di laporan",
+                                 "published_full": "2026-11-20 07:00", "text": "y"}], timezone(timedelta(hours=7)))
+    insights.index_reports()
+    db = insights._search_db()
+    db.execute("DROP INDEX IF EXISTS rep_cov")
+    db.execute("ALTER TABLE rep DROP COLUMN dup")
+    db.commit()
+    db.close()
+    rd._DUP.update(t=0.0, v=False)
+    rd.forget_counts()
+    r = rd.articles(size=50)
+    assert r["total"] == 6 and any(x["url"] == "https://z.id/berita/hanya-laporan" for x in r["rows"])
+    db = insights._search_db()                                   # the next round adds the column after all
+    assert "dup" in {c[1] for c in db.execute("PRAGMA table_info(rep)")}
+    db.close()

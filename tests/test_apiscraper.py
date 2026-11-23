@@ -374,3 +374,14 @@ def test_twitter_search_waits_and_tries_again_when_the_provider_is_busy(monkeypa
     rows = engine._tw_search_one("pln", "Latest", 5, False, logs.append)
     assert len(calls) == 3 and len(rows) == 1
     assert any("busy" in m for m in logs)
+
+
+def test_stop_skips_the_api_filling_so_the_file_is_written_at_once(monkeypatch):
+    """Stop pressed after the searches: no API filling (it could take minutes) — straight to saving."""
+    from crawler import job as jobmod
+    from crawler.apiscraper import autofill
+    called = []
+    monkeypatch.setattr(autofill, "fill", lambda *a, **k: called.append(1))
+    j = jobmod.Job()
+    j.stop_flag.set()
+    assert j._api_fill([{"url": "https://x.com/a/status/1"}]) == [] and not called

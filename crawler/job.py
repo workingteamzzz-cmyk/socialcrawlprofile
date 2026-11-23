@@ -342,6 +342,7 @@ class Job:
 
     def _archive(self, kind: str, rows, tz=None) -> None:
         """Every result also goes to the reporting database (archive.py)."""
+        self.current = "Saving to the reporting database"
         try:
             from . import archive
             rows = list(rows)
@@ -354,8 +355,8 @@ class Job:
     def _api_fill(self, rows: list) -> list:
         """Medsos output: what the browser could not read is filled with the scraping API (autofill.py) —
         only when an API key is set and auto-fill is on; never stops the run's file from being written."""
-        if not rows:
-            return []
+        if not rows or self.stop_flag.is_set():
+            return []                                  # Stop pressed: no API filling, the file is written at once
         try:
             from .apiscraper import autofill
             self.current = "Filling empty data with the API"
@@ -370,6 +371,7 @@ class Job:
         """Last save of a run; returns the file names to offer for download.
         Nothing is written for a run that never got going (e.g. the browser could not open).
         If the files are locked (open in Excel), the results go to a *_copy file instead."""
+        self.current = "Saving the file"
         if not anything:
             return []
         if save(force=True):
@@ -628,6 +630,7 @@ class Job:
                     statuses.append({"platform_label": PLATFORM_LABEL[acc.platform], "handle": acc.handle, "label": acc.label,
                                      "url": acc.url, "status": "skipped", "count": 0, "note": ""})
             files = self._finish_files(save, [xlsx, csvp], any(st["status"] != "skipped" for st in statuses))
+            self.current = "Closing the browser"
             self._close(ctx, pw)
         b["files"] = files
         self._archive("medsos", links, tz)
@@ -887,6 +890,7 @@ class Job:
                     seen.setdefault(f"{c['url']}#{c.get('post_id', '')}", c)
                     b["links"].append(c)
             files = self._finish_files(save, [xlsx, csvp], bool(statuses))
+            self.current = "Closing the browser"
             self._close(ctx, pw)
         b["files"] = files
         self._archive("medsos", seen.values(), tz)
@@ -1049,6 +1053,7 @@ class Job:
                     b["links"].append(c)
         finally:
             files = self._finish_files(save, [xlsx, csvp], bool(statuses))
+            self.current = "Closing the browser"
             self._close(ctx, pw)
         b["files"] = files + b.pop("extra_files", [])
         self._archive("medsos" if opt.target == "social" else "online", seen.values(), tz)

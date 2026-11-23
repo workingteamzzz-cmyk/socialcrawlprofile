@@ -166,7 +166,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True, **reader.articles(g("q")[:500], g("topic")[:100], g("start"), g("end"),
                                                                    g("sentiment"), g("sort", "newest"),
                                                                    int(g("page", "1") or 1), int(g("size", "24") or 24),
-                                                                   g("source", "all")[:10], quick=g("quick") == "1")})
+                                                                   g("source", "all")[:10], quick=g("quick") == "1",
+                                                                   media=g("media")[:6000])})
             except ValueError as e:
                 return self._json({"ok": False, "error": str(e)})
         if u.path in ("/api/search", "/api/stories", "/api/insights"):
@@ -358,6 +359,15 @@ class Handler(BaseHTTPRequestHandler):
                         bool(data.get("clear")))})
                 r = media_db.send_report()
                 return self._json({"ok": True, "file": r["file"], "access": r["access"], "tiers": r["tiers"]})
+            except ValueError as e:
+                return self._json({"ok": False, "error": str(e)})
+        elif u.path == "/api/articles/export":
+            from . import reader
+            g = lambda k, n=100: str(data.get(k) or "")[:n]  # noqa: E731
+            try:
+                return self._json({"ok": True, **reader.export(g("q", 500), g("topic"), g("start", 20), g("end", 20),
+                                                               g("sentiment", 10), g("sort", 10) or "newest",
+                                                               g("source", 10) or "all", g("media", 6000))})
             except ValueError as e:
                 return self._json({"ok": False, "error": str(e)})
         elif u.path in ("/api/vault/build", "/api/vault/cancel"):

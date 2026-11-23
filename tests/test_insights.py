@@ -38,9 +38,13 @@ def ins(tmp_path, monkeypatch):
 
 def test_query_syntax():
     from crawler.insights import fts_query
-    assert fts_query('banjir "bekasi timur" -promo') == '(banjir "bekasi timur") NOT promo'
+    assert fts_query('banjir "bekasi timur" -promo') == '( banjir AND "bekasi timur" ) NOT promo'
+    assert fts_query("pln OR pertamina NOT promo") == "( pln OR pertamina ) NOT promo"   # NOT takes from both
+    assert fts_query("covid-19 vaksin") == '"covid 19" AND vaksin'                       # a hyphen is not a NOT
+    assert fts_query("mbg and (sekolah or siswa) not keracunan") == \
+        "( mbg AND ( sekolah OR siswa ) ) NOT keracunan"
     assert fts_query("pln AND NOT iklan") == "pln NOT iklan"
-    assert fts_query("(padam OR byarpet) pln*") == "( padam OR byarpet ) pln*"
+    assert fts_query("(padam OR byarpet) pln*") == "( padam OR byarpet ) AND pln*"
     for bad in ("", "NOT banjir", "-promo"):
         with pytest.raises(ValueError):
             fts_query(bad)

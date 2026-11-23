@@ -194,7 +194,7 @@ def _period_sql(p: str, start: str, end: str) -> tuple[list[str], list]:
 
 def articles(q: str = "", topic: str = "", start: str = "", end: str = "", sentiment: str = "",
              sort: str = "newest", page: int = 1, size: int = 24, source: str = "all", scope: str = "",
-             only_key: str = "", last_hours: float = 0, received_since="", quick: bool = False) -> dict:
+             only_key: str = "", last_hours: float = 0, received_since="", quick: bool = False, media: str = "") -> dict:
     """start / end: published from / to (a date, or a date + time to the minute, WIB); last_hours: published in the
     last N hours (instead of start); received_since: what reached this server after that moment — fresh news and
     late arrivals alike, whatever their publication date (use the previous answer's server_time).
@@ -219,6 +219,12 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
     since = received_epoch(received_since)
     now = time.time()
     want_rep = source in ("all", "reports")
+    doms = []                                           # all media, or the ones listed (comma / space / line)
+    for m in re.split(r"[,;\s]+", (media or "").lower())[:300]:
+        m = re.sub(r"^(https?://)?(www\.|m\.)?", "", m.strip()).split("/")[0][:100]
+        if m and m not in doms:
+            doms.append(m)
+    doms += ["www." + m for m in doms]
     c = _conn(bool(expr) or want_rep and os.path.exists(os.path.join(_dir(), "search.db")))
     try:
         selects, csel, args = [], [], []          # csel: the same parts with only what the counts need
@@ -236,6 +242,9 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
             if only_key:
                 w.append("a.key = ?")
                 a.append(only_key)
+            if doms:                                        # one outlet
+                w.append(f"a.domain IN ({','.join('?' * len(doms))})")
+                a += doms
             join = ""
             if expr:
                 join = "JOIN s.docs d ON d.key = a.key"
@@ -256,6 +265,9 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
             if only_key:
                 w.append("r.skey = ?")
                 a.append(only_key)
+            if doms:
+                w.append(f"r.domain IN ({','.join('?' * len(doms))})")
+                a += doms
             join = ""
             if expr:
                 join = "JOIN s.rdocs rd ON rd.skey = r.skey"
@@ -311,7 +323,7 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
                     _IDX.pop(0)                             # not built (yet): the next one, or none
                     c.close()
                     return articles(q, topic, start, end, sentiment, sort, page, size, source, scope, only_key,
-                                    last_hours, received_since, quick=quick)
+                                    last_hours, received_since, quick=quick, media=media)
                 raise ValueError(f"The query could not be read: {e}")
         tiers = {}
         doms = sorted({r["domain"] for r in rows if r["domain"]})
@@ -400,6 +412,92 @@ def article(key: str) -> dict:
             "sentiment": (r["sentiment"] if "sentiment" in keys else "") or "neutral", "matched": r["matched"],
             "influencer": clean_names(r["influencer"]), "persons": clean_names(r["persons"]), "paragraphs": paras,
             "origin": "stream", "headline_only": not paras and (r["error"] or "").startswith("Headline only")}
+
+
+EXPORT_MAX = 5000
+_EXPORT_LOCK = __import__('threading').Lock()
+
+
+def export(q: str = "", topic: str = "", start: str = "", end: str = "", sentiment: str = "", sort: str = "newest",
+           source: str = "all", media: str = "") -> dict:
+    """The News Stream's current filter -> one Excel in the team's Online template (the articles in full: text,
+    author, people), newest first, at most EXPORT_MAX. Saved in Exports; returns its name."""
+    if not _EXPORT_LOCK.acquire(blocking=False):          # one at a time: the server stays light
+        raise ValueError("An Excel is being made right now — try again in a few seconds.")
+    try:
+        return _export(q, topic, start, end, sentiment, sort, source, media)
+    finally:
+        _EXPORT_LOCK.release()
+
+
+def _export(q, topic, start, end, sentiment, sort, source, media) -> dict:
+    import json
+    from . import online_clean as oc, templates
+    from .data_vault import _write_xlsx
+    from .paths import APP_DATA, OUTPUT_DIR
+    picked, total = [], 0
+    for page in range(1, EXPORT_MAX // 100 + 1):
+        got = articles(q, topic, start, end, sentiment, sort, page, 100, source, media=media)
+        total = got.get("matching") or total
+        picked += [(r["key"], r["origin"]) for r in got["rows"]]
+        if len(got["rows"]) < 100:
+            break
+    picked = picked[:EXPORT_MAX]
+    if not picked:
+        raise ValueError("No article matches this filter — nothing to put in the Excel.")
+    full: dict = {}
+    sk = [k for k, o in picked if o == "stream"]
+    c = _conn(False)
+    try:
+        for i in range(0, len(sk), 500):
+            part = sk[i:i + 500]
+            for r in c.execute(f"SELECT * FROM articles WHERE key IN ({','.join('?' * len(part))})", part):
+                text = zlib.decompress(r["content"]).decode("utf-8", "ignore") if r["content"] else ""
+                d, t = r["pub_date"] or "", r["pub_time"] or ""
+                full[r["key"]] = templates.online_row(
+                    {"url": r["url"], "title": r["title"], "author": r["author"], "text": text,
+                     "description": r["summary"], "image": r["image"], "influencer": r["influencer"],
+                     "person": r["persons"], "published": d, "sentiment": r["sentiment"] or "",
+                     "published_full": f"{d} {t}" if d and re.match(r"\d{2}:\d{2}$", t) else ""}, WIB)
+    finally:
+        c.close()
+    rk = [k for k, o in picked if o != "stream"]
+    if rk:
+        akeys: dict = {}
+        sc = sqlite3.connect(f"file:{os.path.join(_dir(), 'search.db')}?mode=ro", uri=True, timeout=30)
+        try:
+            for i in range(0, len(rk), 500):
+                part = rk[i:i + 500]
+                akeys.update(dict(sc.execute(f"SELECT skey, akey FROM rep WHERE skey IN ({','.join('?' * len(part))})",
+                                             part).fetchall()))
+        finally:
+            sc.close()
+        ac = sqlite3.connect(f"file:{os.path.join(APP_DATA, 'archive.db')}?mode=ro", uri=True, timeout=30)
+        try:
+            back = {v: k for k, v in akeys.items()}
+            ak = list(back)
+            for i in range(0, len(ak), 500):
+                part = ak[i:i + 500]
+                for key, row in ac.execute(f"SELECT key, row FROM items WHERE key IN ({','.join('?' * len(part))})",
+                                           part):
+                    data = json.loads(row or "{}")
+                    full[back[key]] = [data.get(col, "") for col in templates.ONLINE_COLUMNS]
+        finally:
+            ac.close()
+    seen: set = set()
+
+    def rows():
+        for k, _o in picked:
+            row = full.get(k)
+            if not row or row[3] in seen or oc.is_junk_page(row[2], row[3]):
+                continue
+            seen.add(row[3])
+            yield row
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    tag = (start or "all")[:10] + ("_" + end[:10] if end and end[:10] != (start or "")[:10] else "")
+    name = f"NewsStream_{tag}_{datetime.now(WIB):%H%M%S}.xlsx"
+    n = _write_xlsx(os.path.join(OUTPUT_DIR, name), templates.ONLINE_COLUMNS, rows())
+    return {"file": name, "rows": n, "matching": total, "capped": (total or 0) > EXPORT_MAX}
 
 
 POST_FIELDS = ("key", "platform", "username", "url", "date", "time", "text", "sentiment", "emotion", "likes", "replies",

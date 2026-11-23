@@ -20,7 +20,7 @@ import time
 from typing import Literal
 from urllib.parse import urlparse
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Body, Depends, FastAPI, HTTPException, Request
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.security import APIKeyHeader
@@ -1166,14 +1166,28 @@ def create_app(api_keys: dict | str | None = None, secure_cookie: bool = False, 
                      "sentiment; with sentiment counts. For a client's dashboard: send X-API-Key.")
     def articles_get(q: str = "", topic: str = "", start: str = "", end: str = "", sentiment: str = "",
                      sort: str = "newest", page: int = 1, size: int = 24, source: str = "all", last_hours: float = 0,
-                     received_since: str = "", quick: int = 0):
+                     received_since: str = "", quick: int = 0, media: str = ""):
         from . import reader
         try:
             return {"ok": True, **reader.articles(q[:500], topic[:100], start[:20], end[:20], sentiment, sort, page,
                                                   size, source[:10], last_hours=last_hours,
-                                                  received_since=received_since[:40], quick=bool(quick))}
+                                                  received_since=received_since[:40], quick=bool(quick),
+                                                  media=media[:6000])}
         except ValueError as e:
             return {"ok": False, "error": str(e)}
+
+    @app.post("/api/articles/export", tags=["client API"], dependencies=auth,
+              summary="The News Stream's filter as one Excel (the team's Online template, at most 5,000 articles)")
+    def articles_export(request: Request, body: dict = Body(default={})):
+        from . import reader
+        g = lambda k, n=100: str(body.get(k) or "")[:n]  # noqa: E731
+        try:
+            out = reader.export(g("q", 500), g("topic"), g("start", 20), g("end", 20), g("sentiment", 10),
+                                g("sort", 10) or "newest", g("source", 10) or "all", g("media", 6000))
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        log(request, "exported the News Stream", rows=out["rows"])
+        return {"ok": True, **out}
 
     @app.get("/api/articles/one", tags=["client API"], dependencies=auth, summary="One article in full")
     def article_get(key: str):

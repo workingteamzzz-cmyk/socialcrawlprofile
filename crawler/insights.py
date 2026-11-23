@@ -490,47 +490,71 @@ def purge_index(days: int) -> None:
 
 
 def fts_query(q: str) -> str:
-    """The app's query syntax -> FTS5: words, "phrases", OR, NOT / -word, ( ), prefix*. Raises ValueError."""
+    """The app's query syntax -> FTS5: words, "phrases", AND / OR / NOT (any case), -word, ( ), prefix*.
+    NOT takes away from everything before it in its brackets: `pln OR pertamina NOT promo` = (pln OR pertamina)
+    NOT promo. A hyphenated word (covid-19) is one phrase, not a NOT. Raises ValueError."""
     q = (q or "").strip()
     if not q:
         raise ValueError("Type what to search for.")
-    toks = re.findall(r'"[^"]*"|\(|\)|-?[\w*]+', q, flags=re.U)
-    out, pos, neg = [], [], []
-    depth = 0
-    for t in toks:
-        up = t.upper()
-        if t == "(":
-            depth += 1
-            out.append("(")
-        elif t == ")":
-            if depth:
-                depth -= 1
-                out.append(")")
-        elif up in ("AND", "OR"):
-            out.append(up)
-        elif up == "NOT":
-            out.append("NOT")
-        elif t.startswith("-") and len(t) > 1:
-            neg.append(_term(t[1:]))
-        elif t.startswith('"'):
-            phrase = re.sub(r'[^\w\s]', " ", t[1:-1], flags=re.U).strip()
-            if phrase:
-                out.append(f'"{phrase}"')
-                pos.append(phrase)
-        else:
-            term = _term(t)
-            if term:
-                out.append(term)
-                pos.append(term)
-    out += [")"] * depth
-    s = " ".join(out)
-    s = re.sub(r"\bAND\s+NOT\b", "NOT", s)
-    s = re.sub(r"^\s*(AND|OR)\s+|\s+(AND|OR|NOT)\s*$", "", s)
-    if re.match(r"^\s*NOT\b", s) or not pos:
+    toks = re.findall(r'"[^"]*"|\(|\)|(?:(?<=\s)|(?<=\()|^)-[\w*]+|[\w*]+(?:-[\w*]+)*', q, flags=re.U)
+    pos: list = []
+
+    def operand(t):
+        if t.startswith('"'):
+            phrase = re.sub(r"[^\w\s]", " ", t[1:-1], flags=re.U).strip()
+            phrase = " ".join(phrase.split())
+            return f'"{phrase}"' if phrase else ""
+        if "-" in t.strip("-"):                                   # covid-19, sukarno-hatta: one phrase
+            return f'"{" ".join(x for x in t.split("-") if x)}"'
+        return _term(t)
+
+    def level(i):
+        """One bracket level from token i -> (expression, next index)."""
+        expr, pending = "", ""
+        while i < len(toks):
+            t = toks[i]
+            up = t.upper()
+            if t == ")":
+                return expr, i + 1
+            if up in ("AND", "OR"):
+                pending = "OR" if up == "OR" else pending or "AND"
+                i += 1
+                continue
+            neg = False
+            if up == "NOT":
+                neg, i = True, i + 1
+                if i >= len(toks):
+                    break
+                t, up = toks[i], toks[i].upper()
+            elif t.startswith("-") and len(t) > 1:
+                neg, t = True, t[1:]
+            if t == "(":
+                sub, i = level(i + 1)
+                one = f"( {sub} )" if sub else ""
+            elif t == ")" or up in ("AND", "OR", "NOT"):
+                continue
+            else:
+                one, i = operand(t), i + 1
+                if one and not neg:
+                    pos.append(one)
+            if not one:
+                continue
+            if neg:
+                if expr:
+                    expr = f"( {expr} ) NOT {one}" if (" OR " in expr or " AND " in expr) else f"{expr} NOT {one}"
+            else:
+                expr = f"{expr} {pending or 'AND'} {one}" if expr else one
+            pending = ""
+        return expr, i
+
+    out, i = "", 0
+    while i < len(toks):                                        # a stray ")" at the top: skipped
+        part, i = level(i)
+        if part:
+            out = f"{out} AND {part}" if out else part
+    if not out or not pos:
         raise ValueError("Start with a word or a phrase (NOT / -word only after it).")
-    for n in neg:
-        s = f"({s}) NOT {n}"
-    return s
+    return out
 
 
 def _term(t: str) -> str:

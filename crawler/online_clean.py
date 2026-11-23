@@ -128,7 +128,8 @@ def _clean_fragment(p: str) -> str:
     p = re.sub(r"Scroll ke bawah untuk melanjutkan membaca\s*(Iklan)?\s*", " ", p)
     p = re.sub(r"info Atur ukuran teks artikel ini untuk mendapatkan pengalaman membaca terbaik\.?", " ", p)
     p = re.sub(r"COPYRIGHT\s*©[^.]*\.?", " ", p, flags=re.I)
-    p = re.sub(r"[^.!?]*\bdi Google News\b[^.]*\.?", " ", p)
+    if "Google News" in p:                     # from the sentence's start (the same match, without trying every
+        p = re.sub(r"(?:^|(?<=[.!?]))[^.!?]*\bdi Google News\b[^.]*\.?", " ", p)   # letter as a start: was slow)
     p = re.sub(r"\*+\)?\s*Ikuti berita terbaru[^.]*(jangan lupa Follow)?", " ", p)
     p = re.sub(r"ADVERTISEMENT|SCROLL TO CONTINUE WITH CONTENT", " ", p, flags=re.I)
     p = re.sub(r"\s+", " ", p).strip()

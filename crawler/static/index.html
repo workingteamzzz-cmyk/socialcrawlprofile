@@ -620,6 +620,8 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
 .rd-body h4{margin:2px 0 2px;font-size:13.5px;font-weight:600;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .rd-body small{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:12px}
 .rd-body small svg.i,.rd-dmeta svg.i{width:13px;height:13px;color:var(--faint)}
+.rd-dom{cursor:pointer}.rd-dom:hover{color:var(--accent);text-decoration:underline}
+.rd-ago{margin-left:auto;font-size:11px;color:var(--faint);white-space:nowrap}.rd-ago.fresh{color:#16a34a;font-weight:600}
 .rd-tier{margin-left:6px;padding:0 6px;border-radius:4px;background:var(--soft);font-size:11px}
 .rd-more{text-align:center;color:var(--faint);font-size:12.5px;padding:18px}
 .rd-new{all:unset;display:block;text-align:center;cursor:pointer;margin:0 0 12px;padding:8px;border-radius:8px;background:var(--accent-soft);color:var(--accent);font-weight:600;font-size:13px}
@@ -671,6 +673,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
   <symbol id="i-dl" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></symbol>
   <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
   <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></symbol>
   <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
   <symbol id="i-news" viewBox="0 0 24 24"><path d="M4 5h13v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M17 9h3v10a2 2 0 0 1-2 2M8 9h5M8 13h5M8 17h3"/></symbol>
@@ -1254,16 +1257,18 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
         <aside class="card rd-filters"><div class="card-bd" style="padding-top:16px">
           <div class="rd-topic"><div><small>Active topic</small><select id="rdTopic"><option value="">All articles</option></select></div>
             <div style="text-align:right"><small>Total news</small><b id="rdTotal">–</b></div></div>
-          <div style="display:grid;grid-template-columns:minmax(0,1fr);gap:0">
+          <div class="field"><label for="rdQ">Keyword</label><textarea id="rdQ" rows="3" placeholder='pln AND (padam OR gangguan) NOT promo'></textarea>
+            <small class="hint" title="NOT takes away from everything before it: pln OR pertamina NOT promo = (pln OR pertamina) NOT promo">AND · OR · NOT · "exact phrase" · ( ) · prefix* — Enter to filter</small></div>
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px">
             <div class="field"><label for="rdStart">Start date</label><input type="date" id="rdStart"></div>
             <div class="field"><label for="rdEnd">End date</label><input type="date" id="rdEnd"></div></div>
           <div class="field"><label for="rdSrc">Source</label><select id="rdSrc"><option value="all">All databases</option><option value="stream">Live stream only</option><option value="reports">News Search &amp; reports only</option></select></div>
           <div class="field"><label for="rdSent">Sentiment</label><select id="rdSent"><option value="">All</option><option value="positive">Positive</option><option value="negative">Negative</option><option value="neutral">Neutral</option></select></div>
-          <div class="field"><label for="rdSort">Sort</label><select id="rdSort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></div>
+          <div class="field"><label for="rdSort">Sort</label><select id="rdSort"><option value="newest">Newest first</option><option value="received">Just arrived first</option><option value="oldest">Oldest first</option></select></div>
+          <div class="field"><label for="rdMedia">Media</label><textarea id="rdMedia" rows="2" placeholder="Empty = all media. Or some: detik.com, kompas.com" autocomplete="off"></textarea>
+            <small class="hint">Separate with commas. Click an outlet's name on an article to see only it (click again: all).</small></div>
           <div class="field"><label>View</label><div class="seg rd-view" id="rdView"><button data-v="grid" class="on">Grid</button><button data-v="list">List</button></div></div>
-          <div class="field"><label for="rdQ">Keyword</label><textarea id="rdQ" rows="4" placeholder='pln AND (padam OR gangguan) NOT promo'></textarea>
-            <small class="hint">AND · OR · NOT · "exact phrase" · ( ) · prefix*</small></div>
-          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px"><button class="btn" id="rdReset">Reset</button><button class="btn primary" id="rdGo"><svg class="i"><use href="#i-search"/></svg>Filter</button></div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px"><button class="btn" id="rdExport" title="These articles as one Excel in the team's Online template (up to 5,000)"><svg class="i"><use href="#i-dl"/></svg>Excel</button><button class="btn" id="rdReset">Reset</button><button class="btn primary" id="rdGo"><svg class="i"><use href="#i-search"/></svg>Filter</button></div>
           <p class="hint" id="rdMsg" style="margin:10px 0 0"></p>
         </div></aside>
         <div class="rd-main">
@@ -3367,7 +3372,7 @@ const SENT = {positive: ['b-ok', 'Positive'], negative: ['b-bad', 'Negative'], n
 const TIERN = {active: 'Active', active2: 'Active 2', semi: 'Semi', rare: 'Rare', inactive: 'Inactive', dead: 'Down', new: 'New'};
 function rdParams(page){
   return new URLSearchParams({q: $('rdQ').value.trim(), topic: $('rdTopic').value, start: $('rdStart').value, end: $('rdEnd').value,
-    sentiment: $('rdSent').value, sort: $('rdSort').value, source: $('rdSrc').value, page, size: 24, quick: 1});
+    sentiment: $('rdSent').value, sort: $('rdSort').value, source: $('rdSrc').value, media: $('rdMedia').value.trim(), page, size: 24, quick: 1});
 }
 function rdTerms(){
   const q = $('rdQ').value + ' ' + ($('rdTopic').selectedOptions[0]?.dataset.kw || '');
@@ -3378,13 +3383,19 @@ function rdTerms(){
 }
 const rdHi = txt => { let h = esc(txt); for (const t of RD.terms){ const re = new RegExp('(' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi'); h = h.replace(re, '<mark>$1</mark>'); } return h; };
 const rdWhen = r => `${r.pub_date ? new Date(r.pub_date + 'T00:00:00').toLocaleDateString([], {day: '2-digit', month: 'short', year: 'numeric'}) : ''} ${esc(r.pub_time || (r.pub_date ? '00:00' : ''))}`.trim();
+function rdAgo(r){                                      // when it reached this server: shows how fresh the feed is
+  if (!r.fetched) return '';
+  const m = Math.max(0, Math.round((Date.now() / 1000 - r.fetched) / 60));
+  const t = m < 1 ? 'just in' : m < 60 ? `arrived ${m} min ago` : m < 1440 ? `arrived ${Math.round(m / 60)} h ago` : '';
+  return t ? `<span class="rd-ago${m < 30 ? ' fresh' : ''}" title="Reached this server ${esc(r.received_at || '')}">${t}</span>` : '';
+}
 function rdCard(r){
   return `<div class="rd-card${r.key === RD.key ? ' on' : ''}" data-k="${esc(r.key)}" tabindex="0">
     ${r.image ? `<img class="rd-thumb" src="${esc(r.image)}" alt="" loading="lazy" decoding="async" fetchpriority="low" referrerpolicy="no-referrer">` : '<div class="rd-thumb rd-noimg"><svg class="i"><use href="#i-file"/></svg></div>'}
     <div class="rd-body"><span class="badge ${SENT[r.sentiment][0]}">${SENT[r.sentiment][1]}</span>
       <h4>${esc(r.title || r.url)}</h4>
       <small><svg class="i"><use href="#i-cal"/></svg>${rdWhen(r)}${r.tier ? ` <span class="rd-tier">${TIERN[r.tier] || esc(r.tier)}</span>` : ''}</small>
-      <small><svg class="i"><use href="#i-building"/></svg>${esc(r.domain)}${r.origin === 'reports' ? ' <span class="rd-tier">News Search</span>' : ''}</small></div></div>`;
+      <small><svg class="i"><use href="#i-building"/></svg><span class="rd-dom" data-dom="${esc(r.domain)}" title="Only this outlet">${esc(r.domain)}</span>${r.origin === 'reports' ? ' <span class="rd-tier">News Search</span>' : ''}${rdAgo(r)}</small></div></div>`;
 }
 function rdShowTotals(d){
   [['Pos', 'positive'], ['Neg', 'negative'], ['Neu', 'neutral']].forEach(([id, v]) => $('rd' + id).closest('.rd-kpi').classList.toggle('on', $('rdSent').value === v));
@@ -3434,18 +3445,44 @@ async function rdOpen(key){
   const a = await api('/api/articles/one?key=' + encodeURIComponent(key));
   if (!a || a.ok === false){ box.innerHTML = `<div class="rd-empty"><b>${esc((a && a.error) || 'Not found')}</b></div>`; return; }
   box.innerHTML = `<div class="rd-dhead"><span class="badge ${SENT[a.sentiment][0]}">${SENT[a.sentiment][1]}</span>
+      <button class="iconbtn rd-copy" title="Copy for a report: headline, outlet, date and link"><svg class="i"><use href="#i-copy"/></svg></button>
       <a class="iconbtn" href="${esc(a.url)}" target="_blank" rel="noopener" title="Open the original"><svg class="i"><use href="#i-ext"/></svg></a>
       <button class="iconbtn rd-close" title="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
     <h2>${rdHi(a.title)}</h2>
-    <div class="rd-dmeta"><span><svg class="i"><use href="#i-building"/></svg>${esc(a.domain)}</span><span><svg class="i"><use href="#i-cal"/></svg>${esc(rdWhen({pub_date: a.date, pub_time: a.time}))}</span>${a.author ? `<span>${esc(a.author)}</span>` : ''}</div>
+    <div class="rd-dmeta"><span><svg class="i"><use href="#i-building"/></svg><span class="rd-dom" data-dom="${esc(a.domain)}" title="Only this outlet">${esc(a.domain)}</span></span><span><svg class="i"><use href="#i-cal"/></svg>${esc(rdWhen({pub_date: a.date, pub_time: a.time}))}</span>${a.author ? `<span>${esc(a.author)}</span>` : ''}</div>
     ${a.image ? `<img class="rd-dimg" src="${esc(a.image)}" alt="" decoding="async" referrerpolicy="no-referrer">` : ''}
     <div class="rd-text">${a.headline_only ? '<p class="hint">Headline only — the site refused this server; open the link for the full text (it is tried again later).</p>' : ''}${a.paragraphs.map(p => `<p>${rdHi(p)}</p>`).join('')}</div>
     ${a.persons || a.influencer ? `<div class="rd-people">${a.influencer ? `<small>Spokesperson</small><div>${esc(a.influencer)}</div>` : ''}${a.persons ? `<small>People</small><div>${esc(a.persons)}</div>` : ''}</div>` : ''}
     ${a.matched ? `<div style="margin-top:10px">${a.matched.split(', ').map(k => `<span class="badge b-ok">${esc(k)}</span>`).join(' ')}</div>` : ''}`;
   box.querySelector('.rd-dimg')?.addEventListener('error', e => e.target.remove());
+  box.querySelector('.rd-copy').onclick = async () => {
+    const txt = `${a.title}\n${a.domain} — ${rdWhen({pub_date: a.date, pub_time: a.time})} WIB\n${a.url}`;
+    try { await navigator.clipboard.writeText(txt); toast('Copied: headline, outlet, date and link'); }
+    catch (_) { prompt('Copy this:', txt); } };
   box.scrollTop = 0;
 }
-$('rdList').addEventListener('click', e => { const c = e.target.closest('.rd-card'); if (c) rdOpen(c.dataset.k); });
+function rdMediaPick(e){ const d = e.target.closest('.rd-dom'); if (!d) return false;
+  e.stopPropagation(); $('rdMedia').value = $('rdMedia').value.trim() === d.dataset.dom ? '' : d.dataset.dom; loadReader(true); return true; }
+$('rdList').addEventListener('click', e => { if (rdMediaPick(e)) return; const c = e.target.closest('.rd-card'); if (c) rdOpen(c.dataset.k); });
+$('rdDetail').addEventListener('click', e => rdMediaPick(e));
+$('rdMedia').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); loadReader(true); } });
+$('rdMedia').addEventListener('change', () => loadReader(true));
+document.addEventListener('keydown', e => {             // j / k or ↓ / ↑: the next / previous article
+  if (!$('p-reader').classList.contains('on') || /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) || e.ctrlKey || e.metaKey || e.altKey) return;
+  const step = e.key === 'j' || e.key === 'ArrowDown' ? 1 : e.key === 'k' || e.key === 'ArrowUp' ? -1 : 0;
+  if (!step || !RD.rows.length) return;
+  e.preventDefault();
+  const i = Math.max(0, Math.min(RD.rows.length - 1, RD.rows.findIndex(r => r.key === RD.key) + step));
+  rdOpen(RD.rows[i].key);
+  document.querySelector(`.rd-card[data-k="${CSS.escape(RD.rows[i].key)}"]`)?.scrollIntoView({block: 'nearest'});
+});
+$('rdExport').onclick = async () => {
+  const p = Object.fromEntries(rdParams(1)); $('rdMsg').textContent = 'Making the Excel…'; $('rdExport').disabled = true;
+  const r = await api('/api/articles/export', p); $('rdExport').disabled = false;
+  if (r && r.ok){ const dl = document.createElement('a'); dl.href = '/download/' + encodeURIComponent(r.file); dl.download = r.file;
+    document.body.append(dl); dl.click(); dl.remove(); }       // straight to the computer's Downloads
+  $('rdMsg').innerHTML = r && r.ok ? `Downloaded: <a href="/download/${encodeURIComponent(r.file)}">${esc(r.file)}</a> — ${fmt(r.rows)} articles${r.capped ? ` (the newest 5,000 of ${fmt(r.matching)}; narrow the filter for the rest)` : ''}`
+    : esc((r && r.error) || 'Not made'); };
 $('rdList').addEventListener('keydown', e => { const c = e.target.closest('.rd-card'); if (c && e.key === 'Enter') rdOpen(c.dataset.k); });
 $('rdDetail').addEventListener('click', e => { if (e.target.closest('.rd-close')) $('rdDetail').classList.remove('open'); });
 $('rdGo').onclick = () => loadReader(true);
@@ -3455,7 +3492,7 @@ $('rdGo').onclick = () => loadReader(true);
 $('rdQ').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); loadReader(true); } });
 ['rdTopic', 'rdSrc', 'rdSent', 'rdSort', 'rdStart', 'rdEnd'].forEach(id => $(id).addEventListener('change', () => loadReader(true)));
 $('rdReset').onclick = () => { const t = localDay(); $('rdStart').value = $('rdEnd').value = t; $('rdQ').value = '';
-  $('rdTopic').value = ''; $('rdSrc').value = 'all'; $('rdSent').value = ''; $('rdSort').value = 'newest'; loadReader(true); };
+  $('rdTopic').value = ''; $('rdMedia').value = ''; $('rdSrc').value = 'all'; $('rdSent').value = ''; $('rdSort').value = 'newest'; loadReader(true); };
 document.querySelectorAll('#rdView button').forEach(b => { b.classList.toggle('on', b.dataset.v === RD.view);
   b.onclick = () => { RD.view = b.dataset.v; ls.set('rd_view', RD.view); document.querySelectorAll('#rdView button').forEach(x => x.classList.toggle('on', x === b));
     $('rdList').classList.toggle('list', RD.view === 'list'); }; });
@@ -3468,9 +3505,9 @@ setInterval(async () => {                                // live: tell when new 
   const d = await api('/api/articles?' + rdParams(1));
   if (!d || !d.rows) return;
   const i = d.rows.findIndex(r => r.key === RD.first), n = i < 0 ? d.rows.length : i;
-  if (n > 0 && $('rdSort').value === 'newest' && RD.page === 1 && scrollY < 200 && !$('rdQ').matches(':focus')){
+  if (n > 0 && $('rdSort').value !== 'oldest' && RD.page === 1 && scrollY < 200 && !$('rdQ').matches(':focus')){
     loadReader(true, true); return; }                    // at the top: they simply appear (like a live feed)
-  if (n > 0 && $('rdSort').value === 'newest'){ $('rdNew').hidden = false; $('rdNew').textContent = `↑ ${n}${n === d.rows.length ? '+' : ''} new article(s) — show`; }
+  if (n > 0 && $('rdSort').value !== 'oldest'){ $('rdNew').hidden = false; $('rdNew').textContent = `↑ ${n}${n === d.rows.length ? '+' : ''} new article(s) — show`; }
 }, 20000);
 async function initReader(){
   if (!initReader.done){ initReader.done = true;

@@ -451,3 +451,24 @@ def test_the_same_article_under_another_link_is_shown_once(rd, tmp_path):
     titles = [r["title"].split(" - ")[0].replace(",", "") for r in rd.articles(size=50, start="2026-11-23")["rows"]]
     assert len(titles) == len(set(titles)) == 2
     s.stop()
+
+
+def test_one_outlet_and_the_filter_as_one_excel(rd, tmp_path, monkeypatch):
+    """The media filter keeps one outlet (www. or not); the export puts the filter's articles in the team's Online
+    template, in full, newest first."""
+    from openpyxl import load_workbook
+    from crawler import paths, templates
+    monkeypatch.setattr(paths, "OUTPUT_DIR", str(tmp_path / "out"))
+    got = rd.articles(start="2026-11-19", end="2026-11-20", media="www.b.id", size=50)
+    assert [r["domain"] for r in got["rows"]] == ["b.id"] and got["total"] == 1
+    some = rd.articles(start="2026-11-19", end="2026-11-20", media="b.id, https://www.c.id/x\nd.id", size=50)
+    assert sorted(r["domain"] for r in some["rows"]) == ["b.id", "c.id", "d.id"]           # several outlets
+    assert rd.articles(start="2026-11-19", end="2026-11-20", media="", size=50)["total"] == 5   # empty: all media
+    out = rd.export(q="pln", start="2026-11-19", end="2026-11-20")
+    assert out["rows"] == 4 and not out["capped"]
+    ws = load_workbook(tmp_path / "out" / out["file"], read_only=True).worksheets[0]
+    rows = list(ws.iter_rows(values_only=True))
+    assert list(rows[0]) == templates.ONLINE_COLUMNS and len(rows) == 5
+    assert any("Paragraf kedua" in str(c) for c in rows[1])          # the article's text, not only its headline
+    with pytest.raises(ValueError):
+        rd.export(q="tidakadasamasekali", start="2026-11-19")

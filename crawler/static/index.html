@@ -3427,6 +3427,7 @@ async function loadReader(reset = true, live = false){
   RD.loading = false;
   if (!d || d.ok === false){ $('rdMsg').textContent = (d && d.error) || 'Could not load'; if (reset) $('rdList').innerHTML = ''; return; }
   RD.rows = reset ? d.rows : RD.rows.concat(d.rows);
+  if (reset) $('rdMsg').innerHTML = d.query ? `Searching: <code>${esc(d.query.length > 300 ? d.query.slice(0, 300) + '…' : d.query)}</code>` : '';
   if (d.counting){                                      // the articles first; the totals follow in a moment
     RD.matching = d.more ? Infinity : RD.rows.length;
     if (reset) rdTotals();

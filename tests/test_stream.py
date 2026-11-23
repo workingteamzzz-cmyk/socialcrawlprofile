@@ -95,14 +95,14 @@ def test_quiet_and_dead_sources_are_checked_less_often(st, monkeypatch):
         st.check_source(st.q("SELECT * FROM sources")[0])
         ivs.append(st.q("SELECT interval FROM sources")[0]["interval"])
     src = st.q("SELECT * FROM sources")[0]
-    assert ivs[:2] == [3600, 3600] and src["fails"] == 3 and src["tier"] == "dead" and src["interval"] == 7 * 86400
+    assert ivs[:2] == [900, 900] and src["fails"] == 3 and src["tier"] == "dead" and src["interval"] == 7 * 86400
     st.x("INSERT INTO sources(id, kind, domain, url, next_check, interval) VALUES ('sm:q','sitemap','q.id','',0,600)")
     st.reschedule(st.q("SELECT * FROM sources WHERE id='sm:q'")[0], 0, False)    # first check, nothing recent
     q = st.q("SELECT tier, interval FROM sources WHERE id='sm:q'")[0]
     assert q["tier"] == "inactive" and q["interval"] == 3 * 86400
     st.reschedule(st.q("SELECT * FROM sources WHERE id='sm:q'")[0], 5, False)    # it publishes again: promoted
     q = st.q("SELECT tier, interval FROM sources WHERE id='sm:q'")[0]
-    assert q["tier"] == "semi" and q["interval"] == 4 * 3600
+    assert q["tier"] == "semi" and q["interval"] == 1 * 3600
 
 
 def test_tiers_from_the_last_seven_days(st):
@@ -910,3 +910,37 @@ def test_the_database_journal_is_emptied_and_cut_back(tmp_path, monkeypatch):
     assert not out["busy"] and out["left_gb"] < 0.001                    # emptied and cut back
     assert st.rq("SELECT COUNT(*) n FROM articles")[0]["n"] == 60000     # nothing lost
     st.stop()
+
+
+def test_links_with_the_teams_words_are_read_first_and_outlets_are_checked_often(tmp_path, monkeypatch):
+    """A new link whose headline or address holds a report topic's keyword (MBG, 'makan bergizi gratis') is read
+    before the other new links; the check intervals are the faster ones, and an old server's old defaults move to
+    them (a value the team set stays)."""
+    import json
+    from crawler import archive, paths, stream
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    stream._PRIO.clear()
+    archive.save_topic("Program", ["MBG", "makan bergizi gratis"])
+    assert stream.watched("Menu MBG di Sekolah Diperbaiki", "https://a.id/x")
+    assert stream.watched("", "https://b.id/berita/2026/11/23/program-makan-bergizi-gratis-diperluas")
+    assert not stream.watched("Harga cabai naik", "https://c.id/berita/mbga-cabai")   # a word, not a part of one
+    st = stream.Stream(str(tmp_path / "s"))
+    st.cfg = {**stream.settings(), "domain_gap": 0}
+    st.running = True
+    st.add_found([{"url": f"https://o{i}.id/berita/kabar-lain-{i}", "domain": f"o{i}.id", "hot": True}
+                  for i in range(5)], "sitemap")
+    st.add_found([{"url": "https://p.id/berita/kabar-mbg-hari-ini", "domain": "p.id", "hot": True}], "sitemap")
+    assert st.next_job()[1]["domain"] == "p.id"
+    st.running = False
+    cfg = stream.settings()
+    assert cfg["sitemap_minutes"] == 15 and cfg["semi_hours"] == 1 and st.interval("rss", "semi") == 1800
+    # an older server: its saved old defaults become the faster ones; a value the team chose stays
+    d = stream._dir()
+    os.makedirs(d, exist_ok=True)
+    for f in ("faster_v83.done",):
+        if os.path.exists(os.path.join(d, f)):
+            os.remove(os.path.join(d, f))
+    with open(os.path.join(d, "settings.json"), "w") as f:
+        json.dump({**stream.DEFAULTS, "sitemap_minutes": 60, "semi_hours": 4, "rss_minutes": 7}, f)
+    cfg = stream.settings()
+    assert cfg["sitemap_minutes"] == 15 and cfg["semi_hours"] == 1 and cfg["rss_minutes"] == 7

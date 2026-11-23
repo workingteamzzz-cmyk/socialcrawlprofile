@@ -29,10 +29,10 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 WIB = timezone(timedelta(hours=7))
-DEFAULTS = {"enabled": False, "threads": 8, "discovery_threads": 8, "rss_minutes": 10, "sitemap_minutes": 60,
+DEFAULTS = {"enabled": False, "threads": 8, "discovery_threads": 16, "rss_minutes": 5, "sitemap_minutes": 15,
             "catchup_days": 2, "catchup_hour": 1, "weekly_report": True, "report_weekday": 0, "report_hour": 7,
             "health_on_start": True, "health_weekday": 6, "health_hour": 2,
-            "top_n": 1000, "top2_n": 2000, "active2_hours": 2, "semi_hours": 4, "rare_hours": 24, "inactive_days": 3, "dead_days": 7,
+            "top_n": 1000, "top2_n": 2000, "active2_hours": 1, "semi_hours": 1, "rare_hours": 12, "inactive_days": 3, "dead_days": 7,
             "retention_days": 0, "max_age_hours": 48, "all_links": True, "old_per_check": 50, "old_per_day": 30000, "old_hours": "1-6", "late_days": 7, "min_date": "", "homepage": True, "domain_gap": 1.5, "rss": True, "sitemaps": True,
             "keywords": [], "robots": True, "exclude_domains": [],
             "fetch_googlebot": True, "fetch_cloudscraper": True,     # refused pages: see fetch_policy.py
@@ -108,6 +108,48 @@ def norm_key(url: str) -> str:
 
 
 # ---------- settings ----------
+FASTER_V83 = {"discovery_threads": (8, 16), "rss_minutes": (10, 5), "sitemap_minutes": (60, 15), "active2_hours": (2, 1),
+              "semi_hours": (4, 1), "rare_hours": (24, 12)}
+
+
+def priority_words():
+    """The words the team watches (every report topic's keywords and the stream's own) as one pattern: a link whose
+    headline or address holds one is read before the other new links. Read again every 5 minutes."""
+    now = time.time()
+    got = _PRIO.get("v")
+    if got is not None and now - _PRIO.get("t", 0) < 300:
+        return got
+    words = set()
+    try:
+        from . import archive
+        for t in archive.topics():
+            words |= {str(k).strip().lower() for k in t.get("keywords") or []}
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        words |= {str(k).strip().lower() for k in settings().get("keywords") or []}
+    except Exception:  # noqa: BLE001
+        pass
+    parts = []
+    for w in sorted(words, key=len, reverse=True):
+        toks = re.findall(r"\w+", w)
+        if toks and len("".join(toks)) >= 3:
+            parts.append(r"[\s_-]+".join(re.escape(t) for t in toks))
+    rx = re.compile(r"(?<![^\W_])(?:" + "|".join(parts[:2000]) + r")(?![^\W_])") if parts else False
+    _PRIO.update(t=now, v=rx)
+    return rx
+
+
+_PRIO: dict = {}
+
+
+def watched(title: str, url: str) -> bool:
+    rx = priority_words()
+    if not rx:
+        return False
+    return bool(rx.search(f"{title or ''} {re.sub(r'[/._?=&-]+', ' ', url or '')}".lower()))
+
+
 def settings() -> dict:
     try:
         with open(os.path.join(_dir(), "settings.json"), encoding="utf-8") as f:
@@ -128,6 +170,18 @@ def settings() -> dict:
         try:
             _write_settings({**DEFAULTS, **{k: v for k, v in got.items() if k in DEFAULTS}})
             open(mark, "w").close()
+        except OSError:
+            pass
+    mark83 = os.path.join(_dir(), "faster_v83.done")
+    if got and not os.path.exists(mark83):
+        # the old check intervals (an outlet's new article was found up to 1-4 hours late): the faster ones, where
+        # the old default was still set (a value the team chose stays)
+        for k, (was, now_) in FASTER_V83.items():
+            if got.get(k) == was:
+                got[k] = now_
+        try:
+            _write_settings({**DEFAULTS, **{k: v for k, v in got.items() if k in DEFAULTS}})
+            open(mark83, "w").close()
         except OSError:
             pass
     out = dict(DEFAULTS)
@@ -383,8 +437,8 @@ class Stream:
               "semi": c["semi_hours"] * 3600, "rare": c["rare_hours"] * 3600,
               "inactive": c["inactive_days"] * 86400, "dead": c["dead_days"] * 86400, "new": c["sitemap_minutes"] * 60}
         if kind == "rss":                                   # a feed is almost free to check (304): more often
-            return {"active": c["rss_minutes"] * 60, "active2": min(sm["active2"], 1800),
-                    "semi": min(sm["semi"], 3600)}.get(tier, sm[tier])
+            return {"active": c["rss_minutes"] * 60, "active2": min(sm["active2"], 900),
+                    "semi": min(sm["semi"], 1800)}.get(tier, sm[tier])
         return sm[tier]
 
     def tier_of(self, src) -> str:
@@ -618,6 +672,14 @@ class Stream:
         if self.is_hot(job):
             by, rr = self.by_domain_hot, self.rr_hot           # certainly new: read before everything else
             self.qn_hot += 1
+            if watched(job.get("title") or "", job["url"]):
+                front = True                                   # the team's words: first of the first
+                if dom in by:
+                    try:
+                        rr.remove(dom)
+                    except ValueError:
+                        pass
+                    rr.appendleft(dom)
         elif self.is_fresh(job):
             by, rr = self.by_domain, self.rr
         else:

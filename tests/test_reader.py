@@ -410,3 +410,44 @@ def test_news_stream_works_while_the_search_index_has_no_dup_column(rd, tmp_path
     db = insights._search_db()                                   # the next round adds the column after all
     assert "dup" in {c[1] for c in db.execute("PRAGMA table_info(rep)")}
     db.close()
+
+
+def test_the_same_article_under_another_link_is_shown_once(rd, tmp_path):
+    """A News Search link and the outlet's own link to one article (another path, /amp, a ' - Outlet' tail on the
+    headline): marked as the stream's, either order; and a row not marked yet is still shown once on the page."""
+    from datetime import timedelta, timezone
+    from crawler import archive, insights, stream
+    wib = timezone(timedelta(hours=7))
+    s = stream.Stream(str(tmp_path / "data" / "stream"))
+    title = "Salesforce dan Microsoft Luncurkan Copilotforce untuk Penjualan"
+    s.x("INSERT INTO articles(key, url, domain, title, status, discovered, fetched, pub_date, pub_time, sentiment) "
+        "VALUES (?, ?, 'majalahict.com', ?, 'success', 0, ?, '2026-11-23', '17:05', 'positive')",
+        (stream.norm_key("https://majalahict.com/salesforce-copilotforce/"), "https://majalahict.com/salesforce-copilotforce/",
+         title, time.time()))
+    insights.index_new()
+    archive.add_rows("online", [{"url": "https://www.majalahict.com/2026/11/salesforce-copilotforce?amp=1&from=gn",
+                                 "title": title + " - Majalah ICT", "published_full": "2026-11-23 17:05", "text": "x"},
+                                {"url": "https://coganews.co.id/berita/12345/pln-pulih", "title":
+                                 "Upayakan Layanan Listrik Masyarakat Segera Pulih Dirut PLN Turun Langsung",
+                                 "published_full": "2026-11-23 07:49", "text": "y"}], wib)
+    insights.index_reports()
+    db = insights._search_db()
+    marks = {r["domain"]: r["dup"] for r in db.execute("SELECT domain, dup FROM rep")}
+    assert marks == {"majalahict.com": 1, "coganews.co.id": 0}
+    # the stream reads the second one later, under the outlet's own link
+    s.x("INSERT INTO articles(key, url, domain, title, status, discovered, fetched, pub_date, pub_time, sentiment) "
+        "VALUES ('coganews.co.id/pln-pulih', 'https://coganews.co.id/pln-pulih', 'coganews.co.id', ?, 'success', 0, ?, "
+        "'2026-11-23', '07:49', 'positive')",
+        ("Upayakan Layanan Listrik Masyarakat Segera Pulih, Dirut PLN Turun Langsung", time.time() + 10))
+    insights.index_new()
+    assert db.execute("SELECT dup FROM rep WHERE domain='coganews.co.id'").fetchone()[0] == 1
+    # a different headline on the same outlet is not taken for it
+    assert insights.title_key("a.id", "PLN Padam Lagi di Bekasi Hari Ini") != insights.title_key(
+        "a.id", "PLN Padam Lagi di Bogor Hari Ini")
+    db.execute("UPDATE rep SET dup=0")                                    # as if never marked: the page still once
+    db.commit()
+    db.close()
+    rd.forget_counts()
+    titles = [r["title"].split(" - ")[0].replace(",", "") for r in rd.articles(size=50, start="2026-11-23")["rows"]]
+    assert len(titles) == len(set(titles)) == 2
+    s.stop()

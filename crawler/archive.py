@@ -51,6 +51,7 @@ def _db() -> sqlite3.Connection:
     os.makedirs(_dir(), exist_ok=True)
     c = sqlite3.connect(os.path.join(_dir(), "archive.db"), timeout=30)
     c.row_factory = sqlite3.Row
+    c.execute("PRAGMA journal_size_limit=268435456")       # an emptied journal shrinks to 256 MB
     c.executescript(SCHEMA)
     return c
 

@@ -932,3 +932,14 @@ All of them, with request examples, are in `/docs`.
 | `install-server.sh` | One-command setup on a fresh Ubuntu VPS |
 | `data/lists/` | Account lists; `Ditjen SDA.csv` is the bundled example |
 | `tests/` | Unit, end-to-end and stress tests with fake platform pages (`python -m pytest tests`, about 2 minutes) |
+
+### Making the stream's database small again (once)
+
+The journal (`stream.db-wal`) is now emptied every 5 minutes and cut back to 256 MB. To also give back the empty
+space left by deleted links (run once, the app stopped; the old file is kept until you remove it):
+
+    sudo docker compose stop collector
+    sudo docker compose run --rm --no-deps collector python -m crawler.compact
+    sudo docker compose up -d collector
+    # when the app runs fine:
+    sudo docker compose run --rm --no-deps collector python -m crawler.compact --remove-old

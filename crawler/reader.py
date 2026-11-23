@@ -69,6 +69,23 @@ def _count_beside(ck, u, args, with_search) -> dict | None:
 _DUP = {"t": 0.0, "v": False}
 
 
+def _one_per_article(rows) -> list:
+    """A report row that is the same article as a stream row on this page (same outlet and headline, another link —
+    not marked yet): shown once, from the stream."""
+    from .insights import title_key
+    have = {title_key(r["domain"], r["title"]) for r in rows if r["origin"] == "stream"}
+    have.discard("")
+    out, seen = [], set()
+    for r in rows:
+        tk = title_key(r["domain"], r["title"])
+        if r["origin"] != "stream" and tk and (tk in have or tk in seen):
+            continue
+        if r["origin"] != "stream" and tk:
+            seen.add(tk)
+        out.append(r)
+    return out
+
+
 def _rep_has_dup(c) -> bool:
     """The search index has the 'dup' mark column (added by the stream's background; checked once a minute)."""
     if time.time() - _DUP["t"] > 60 or not _DUP["v"]:
@@ -304,6 +321,7 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
                 doms)}
     finally:
         c.close()
+    rows = _one_per_article(rows)
     if counts is None:                                  # still being counted (dashboard): the rows, no totals yet
         out_rows = [{**dict(r), "tier": tiers.get(r["domain"], "")} for r in rows]
         for r in out_rows:

@@ -880,3 +880,33 @@ def test_every_stream_setting_is_saved_through_the_server(tmp_path, monkeypatch)
     saved = stream.settings()
     assert {k: saved.get(k) for k in want} == want
     stream.get().stop()
+
+
+def test_the_database_journal_is_emptied_and_cut_back(tmp_path, monkeypatch):
+    """The -wal journal grows with writes; checkpoint() writes it into the database and cuts it back (it once grew to
+    23 GB). A reader holding an old view makes it report busy quickly — never hang — and it succeeds later."""
+    import os as _o
+    import sqlite3 as _sq
+    from crawler import paths, stream
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    st = stream.Stream(str(tmp_path / "s"))
+    st._db.execute("PRAGMA wal_autocheckpoint=0")                   # like a journal that never got emptied
+    with st.lock:
+        for i in range(30):
+            st._db.executemany("INSERT INTO articles(key, url, domain, status, discovered) VALUES (?,?,?,?,?)",
+                               [(f"k{i}-{j}", f"https://a.id/b/{i}-{j}", "a.id", "new", 0) for j in range(2000)])
+            st._db.commit()
+    wal = st.db_path + "-wal"
+    assert _o.path.getsize(wal) > 2_000_000
+    reader = _sq.connect(st.db_path)
+    reader.execute("BEGIN")
+    reader.execute("SELECT COUNT(*) FROM articles").fetchone()           # holds an old view of the database
+    st.x("UPDATE articles SET status='failed' WHERE key LIKE 'k1-%'")
+    out = stream.checkpoint(st.db_path, timeout=0.5)
+    assert out["busy"]                                                   # busy: said, not waited for forever
+    reader.rollback()
+    reader.close()
+    out = stream.checkpoint(st.db_path)
+    assert not out["busy"] and out["left_gb"] < 0.001                    # emptied and cut back
+    assert st.rq("SELECT COUNT(*) n FROM articles")[0]["n"] == 60000     # nothing lost
+    st.stop()

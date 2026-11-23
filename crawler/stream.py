@@ -201,6 +201,7 @@ class Stream:
         try:
             self._db.execute("PRAGMA journal_mode=WAL")
             self._db.execute("PRAGMA synchronous=NORMAL")
+            self._db.execute(f"PRAGMA journal_size_limit={WAL_LIMIT}")   # an emptied journal shrinks to this
             self._db.executescript(SCHEMA)
             from .backfill import SCHEMA as ARCHIVE_SCHEMA
             self._db.executescript(ARCHIVE_SCHEMA)
@@ -1281,6 +1282,7 @@ class Stream:
         last_purge = last_tiers = 0.0
         last_retry = time.time()
         last_disk = 0.0
+        last_ckpt = 0.0
         last_intl = time.time() - 86400 + 900                # first decision 15 min after the start
         try:
             self.ensure_indexes()
@@ -1296,6 +1298,18 @@ class Stream:
                     step()
                 except Exception as e:  # noqa: BLE001  each step on its own: one failing never stops the others
                     self.last_error = f"{name}: {str(e)[:120]}"
+            if time.time() - last_ckpt > 300:          # the databases' journals emptied into them
+                last_ckpt = time.time()
+                try:
+                    from . import archive
+                    for p in (self.db_path, os.path.join(self.folder, "search.db"),
+                              os.path.join(archive._dir(), "archive.db")):
+                        out = checkpoint(p)
+                        if out.get("left_gb", 0) > 2:
+                            self.last_error = (f"{os.path.basename(p)}: its journal is {out['left_gb']:.1f} GB and "
+                                               "could not be emptied yet (busy) — tried again in 5 minutes")
+                except Exception as e:  # noqa: BLE001
+                    self.last_error = f"journal: {str(e)[:120]}"
             if time.time() - last_disk > 600:
                 last_disk = time.time()
                 try:
@@ -2083,6 +2097,27 @@ def take_commands(s: "Stream") -> list:
 
 
 LOOP_HUNG_AFTER = 1800    # the worker's main loop has not come round for 30 minutes (after it did once) = hung
+WAL_LIMIT = 256 * 1024 * 1024   # bytes: an emptied journal (-wal file) is cut back to this
+
+
+def checkpoint(path: str, timeout: float = 10.0) -> dict:
+    """The database's journal (the -wal file) written into the database and emptied (TRUNCATE). Readers of other
+    processes make it wait a moment at most (timeout); if still busy, the next call tries again. Without this a
+    journal kept growing (once to 23 GB): every read then looks through it, and the disk fills."""
+    wal = path + "-wal"
+    if not os.path.exists(path) or not os.path.exists(wal):
+        return {}
+    before = os.path.getsize(wal)
+    c = sqlite3.connect(path, timeout=timeout)
+    try:
+        c.execute(f"PRAGMA journal_size_limit={WAL_LIMIT}")
+        busy, frames, done = c.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+    finally:
+        c.close()
+    after = os.path.getsize(wal) if os.path.exists(wal) else 0
+    return {"busy": bool(busy), "before_gb": before / 1e9, "left_gb": after / 1e9, "frames": frames, "done": done}
+
+
 HUNG_AFTER = 300          # the worker writes its live state every 2 s: 5 minutes without it = hung
 STALL_AFTER = 1200        # stream on, links waiting, nothing read for 20 minutes = stalled
 

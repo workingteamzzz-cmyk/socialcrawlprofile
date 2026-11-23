@@ -93,6 +93,7 @@ def _search_db() -> sqlite3.Connection:
     c = sqlite3.connect(os.path.join(_dir(), "search.db"), timeout=30, check_same_thread=False)
     c.row_factory = sqlite3.Row
     c.execute("PRAGMA journal_mode=WAL")
+    c.execute("PRAGMA journal_size_limit=268435456")       # an emptied journal shrinks to 256 MB
     c.execute("CREATE VIRTUAL TABLE IF NOT EXISTS docs USING fts5(key UNINDEXED, url UNINDEXED, domain UNINDEXED, "
               "pub_date UNINDEXED, pub_time UNINDEXED, matched UNINDEXED, fetched UNINDEXED, title, summary, "
               "tokenize='unicode61 remove_diacritics 2')")
@@ -156,6 +157,10 @@ def index_new(limit: int = 5000) -> int:
             db.execute(f"DELETE FROM docs WHERE key IN ({','.join('?' * len(part))})", part)
         for i in range(0, len(keys), 500):                  # the same link in the reports: shown once, from here
             part = keys[i:i + 500]
+            db.execute(f"UPDATE rep SET dup=1 WHERE skey IN ({','.join('?' * len(part))})", part)
+        same = _reports_with_title(db, [(x["domain"], x["title"]) for x in rows])   # the same article, another link
+        for i in range(0, len(same), 500):
+            part = same[i:i + 500]
             db.execute(f"UPDATE rep SET dup=1 WHERE skey IN ({','.join('?' * len(part))})", part)
         db.executemany("INSERT INTO docs(key, url, domain, pub_date, pub_time, matched, fetched, title, summary) "
                        "VALUES (?,?,?,?,?,?,?,?,?)",
@@ -232,6 +237,8 @@ def index_reports(limit: int = 5000) -> int:
                         x["last_seen"] or ""))
         keys = [o[0] for o in out]
         dups = _in_stream(keys)
+        if dups is not None:
+            dups |= _stream_has_title(db, [(o[0], o[3], o[4]) for o in out if o[0] not in dups])
         for i in range(0, len(keys), 500):
             part = keys[i:i + 500]
             db.execute(f"DELETE FROM rdocs WHERE skey IN ({','.join('?' * len(part))})", part)
@@ -242,7 +249,9 @@ def index_reports(limit: int = 5000) -> int:
                        "pub_date=excluded.pub_date, pub_time=excluded.pub_time, image=excluded.image, "
                        "summary=excluded.summary, sentiment=excluded.sentiment, keywords=excluded.keywords, "
                        "seen=excluded.seen", [(*o, now) for o in out])  # 'added' stays the first arrival
-        db.executemany("UPDATE rep SET dup=? WHERE skey=?", [(1 if o[0] in dups else 0, o[0]) for o in out])
+        # the stream could not be asked (busy): left unmarked, the background marks them a moment later
+        db.executemany("UPDATE rep SET dup=? WHERE skey=?",
+                       [((1 if o[0] in dups else 0) if dups is not None else None, o[0]) for o in out])
         db.executemany("INSERT INTO rdocs(skey, title, summary) VALUES (?,?,?)", [(o[0], o[4], o[8]) for o in out])
         db.execute("INSERT INTO meta(k, v) VALUES ('rep_cursor', ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
                    (json.dumps([rows[-1]["last_seen"] or "", rows[-1]["key"]]),))
@@ -253,8 +262,9 @@ def index_reports(limit: int = 5000) -> int:
         src.close()
 
 
-def _in_stream(keys: list[str]) -> set:
-    """Which of these links the live stream has read (sorted lookups in batches — never one by one per page view)."""
+def _in_stream(keys: list[str]) -> set | None:
+    """Which of these links the live stream has read (sorted lookups in batches — never one by one per page view).
+    None: the stream could not be asked (busy) — not 'none of them'."""
     src = _stream_ro()
     if src is None or not keys:
         return set()
@@ -266,10 +276,59 @@ def _in_stream(keys: list[str]) -> set:
             got |= {r[0] for r in src.execute(f"SELECT key FROM articles WHERE key IN ({','.join('?' * len(part))}) "
                                               "AND status='success'", part)}
     except sqlite3.Error:
-        pass
+        return None
     finally:
         src.close()
     return got
+
+
+def title_key(domain: str, title: str) -> str:
+    """The same article under two links (a search result's link and the outlet's own, /amp, ?page=all…): the
+    outlet plus the headline's words (the ' - Outlet' tail a search adds is left out)."""
+    t = re.sub(r"\s+[-|–—]\s+[^-|–—]{2,40}$", "", (title or "").strip())
+    t = " ".join(re.findall(r"\w+", t.lower()))[:90]
+    d = re.sub(r"^(www\.|m\.|amp\.)", "", (domain or "").lower())
+    return f"{d}|{t}" if len(t) >= 20 and d else ""
+
+
+def _fts_phrase(title: str) -> str:
+    w = re.findall(r"\w+", re.sub(r"\s+[-|–—]\s+[^-|–—]{2,40}$", "", title or "").lower())[:8]
+    return '"' + " ".join(w) + '"' if len(w) >= 3 else ""
+
+
+def _stream_has_title(db, items) -> set:
+    """(skey, domain, title) report rows whose outlet + headline the stream has stored -> their skeys (the search
+    index's docs, by its words — a few lookups, never a scan)."""
+    got = set()
+    for skey, dom, title in items:
+        tk, ph = title_key(dom, title), _fts_phrase(title)
+        if not tk or not ph:
+            continue
+        try:
+            for r in db.execute("SELECT domain, title FROM docs WHERE docs MATCH ? LIMIT 20", (f"title : {ph}",)):
+                if title_key(r[0], r[1]) == tk:
+                    got.add(skey)
+                    break
+        except sqlite3.Error:
+            continue
+    return got
+
+
+def _reports_with_title(db, items) -> list:
+    """Stream articles just stored (domain, title) -> the report rows of the same outlet and headline (their skeys)."""
+    out = []
+    for dom, title in items:
+        tk, ph = title_key(dom, title), _fts_phrase(title)
+        if not tk or not ph:
+            continue
+        try:
+            for r in db.execute("SELECT r.skey, r.domain, r.title FROM rdocs d JOIN rep r ON r.skey = d.skey "
+                                "WHERE rdocs MATCH ? LIMIT 20", (f"title : {ph}",)):
+                if title_key(r[1], r[2]) == tk:
+                    out.append(r[0])
+        except sqlite3.Error:
+            continue
+    return out
 
 
 def mark_duplicates(batch: int = 20000) -> int:
@@ -284,16 +343,25 @@ def mark_duplicates(batch: int = 20000) -> int:
             db.execute("CREATE INDEX IF NOT EXISTS rep_cov ON rep(pub_date, pub_time, dup, sentiment)")
             db.execute("DROP INDEX IF EXISTS rep_pubt")
             db.commit()
+        if not db.execute("SELECT 1 FROM meta WHERE k='dup_by_title'").fetchone():
+            # once: the rows marked 'not in the stream' are looked at again, now by outlet + headline too
+            db.execute("UPDATE rep SET dup=NULL WHERE dup=0")
+            db.execute("INSERT OR REPLACE INTO meta(k, v) VALUES ('dup_by_title', '1')")
+            db.commit()
         if not db.execute("SELECT 1 FROM rep WHERE dup IS NULL LIMIT 1").fetchone():
             _STATE.pop("stream_keys", None)
             return 0
         keys = _STATE.get("stream_keys")
         if keys is None:                       # every link the stream has stored, once (sequential read)
             keys = _STATE["stream_keys"] = {r[0] for r in db.execute("SELECT key FROM docs")}
-        rows = [r[0] for r in db.execute("SELECT skey FROM rep WHERE dup IS NULL LIMIT ?", (batch,))]
+        got = db.execute("SELECT skey, domain, title FROM rep WHERE dup IS NULL LIMIT ?", (batch,)).fetchall()
+        rows = [r[0] for r in got]
         # the search index may miss a stored article (read out of order by parallel readers): the rest are asked of
         # the stream itself, sorted, in batches — only the rows not found above
         more = _in_stream([k for k in rows if k not in keys])
+        if more is None:
+            return 0                                   # the stream is busy: again next round
+        more |= _stream_has_title(db, [tuple(r) for r in got if r[0] not in keys and r[0] not in more])
         db.executemany("UPDATE rep SET dup=? WHERE skey=?", [(1 if k in keys or k in more else 0, k) for k in rows])
         db.commit()
         return len(rows)
@@ -698,7 +766,7 @@ def _loop() -> None:
             while index_social() >= 5000 and not _STATE["stop"].is_set():
                 pass
             for _ in range(2):                                # older report rows: their 'dup' mark, a little per
-                if not mark_duplicates() or _STATE["stop"].is_set():   # round (15 s apart) — never a long burden
+                if not mark_duplicates(5000) or _STATE["stop"].is_set():   # round (15 s apart) — never a long burden
                     break
             if time.time() - last_prune > 3600:
                 last_prune = time.time()

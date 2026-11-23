@@ -32,6 +32,17 @@ def main() -> None:
     d = stream._dir()
     print("  ".join(f"{f} {os.path.getsize(os.path.join(d, f)) / 1e9:.2f} GB" for f in
                     ("stream.db", "stream.db-wal", "search.db", "search.db-wal") if os.path.exists(os.path.join(d, f))))
+    from .paths import APP_DATA
+    sizes = []
+    for root, _dirs, files in os.walk(APP_DATA):
+        for f in files:
+            try:
+                sizes.append((os.path.getsize(os.path.join(root, f)), os.path.relpath(os.path.join(root, f), APP_DATA)))
+            except OSError:
+                pass
+    st = os.statvfs(APP_DATA)
+    print(f"disk: {st.f_bavail * st.f_frsize / 1e9:.1f} GB free; app data {sum(x[0] for x in sizes) / 1e9:.1f} GB — "
+          "largest: " + ", ".join(f"{n} {b / 1e9:.2f} GB" for b, n in sorted(sizes, reverse=True)[:8]))
     cfg = stream.settings()
     print({k: cfg.get(k) for k in ("reader_processes", "threads", "discovery_threads", "sitemap_minutes")})
     day = datetime.now(stream.WIB).strftime("%Y-%m-%d")

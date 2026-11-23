@@ -123,6 +123,9 @@ echo "     Server: ${cpus} CPU, $(( mem_mb / 1024 )) GB RAM → the app may use 
 if [ "${SKIP_START:-0}" != 1 ]; then
   bold "3/4  Building and starting the app (the first time takes 5-15 minutes)..."
   docker compose up -d --build
+  # every update builds a new image: the old one and the build cache stay on the disk (GBs) unless cleared
+  docker image prune -f >/dev/null 2>&1 || true
+  docker builder prune -f >/dev/null 2>&1 || true
   bold "4/4  Waiting for the HTTPS certificate and the app..."
   ok=0
   for _ in $(seq 1 60); do

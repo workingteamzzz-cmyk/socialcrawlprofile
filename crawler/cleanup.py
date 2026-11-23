@@ -168,9 +168,8 @@ def _delete(start: str, end: str, parts: dict) -> None:
                 import sqlite3
                 c = sqlite3.connect(sp, timeout=60)
                 try:
-                    for i in range(0, len(keys), 500):
-                        part = keys[i:i + 500]
-                        c.execute(f"DELETE FROM docs WHERE key IN ({','.join('?' * len(part))})", part)
+                    from .insights import _fts_drop
+                    _fts_drop(c, "docs", keys)                 # by the key table: never a read of the whole index
                     c.commit()
                 except sqlite3.Error:
                     pass

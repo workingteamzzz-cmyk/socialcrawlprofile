@@ -196,7 +196,8 @@ def _period_sql(p: str, start: str, end: str) -> tuple[list[str], list]:
 
 def articles(q: str = "", topic: str = "", start: str = "", end: str = "", sentiment: str = "",
              sort: str = "newest", page: int = 1, size: int = 24, source: str = "all", scope: str = "",
-             only_key: str = "", last_hours: float = 0, received_since="", quick: bool = False, media: str = "") -> dict:
+             only_key: str = "", last_hours: float = 0, received_since="", quick: bool = False, media: str = "",
+             _cap: int = 100) -> dict:
     """start / end: published from / to (a date, or a date + time to the minute, WIB); last_hours: published in the
     last N hours (instead of start); received_since: what reached this server after that moment — fresh news and
     late arrivals alike, whatever their publication date (use the previous answer's server_time).
@@ -291,7 +292,7 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
             args += a
         counts: dict = {}
         rows: list = []
-        size, page = max(1, min(int(size or 24), 100)), max(1, min(int(page or 1), 100000))
+        size, page = max(1, min(int(size or 24), _cap)), max(1, min(int(page or 1), 100000))
         if selects:
             u = " UNION ALL ".join(selects)
             cu = " UNION ALL ".join(csel)                   # the counts read the index only (sentiment is in it)
@@ -327,12 +328,12 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
                     _DIDX_OFF[0] = time.time() + 600      # being built after an update: the plain way meanwhile
                     c.close()
                     return articles(q, topic, start, end, sentiment, sort, page, size, source, scope, only_key,
-                                    last_hours, received_since, quick=quick, media=media)
+                                    last_hours, received_since, quick=quick, media=media, _cap=_cap)
                 if "no such index" in str(e) and _IDX:
                     _IDX.pop(0)                             # not built (yet): the next one, or none
                     c.close()
                     return articles(q, topic, start, end, sentiment, sort, page, size, source, scope, only_key,
-                                    last_hours, received_since, quick=quick, media=media)
+                                    last_hours, received_since, quick=quick, media=media, _cap=_cap)
                 raise ValueError(f"The query could not be read: {e}")
         tiers = {}
         doms = sorted({r["domain"] for r in rows if r["domain"]})
@@ -445,14 +446,9 @@ def _export(q, topic, start, end, sentiment, sort, source, media) -> dict:
     from . import online_clean as oc, templates
     from .data_vault import _write_xlsx
     from .paths import APP_DATA, OUTPUT_DIR
-    picked, total = [], 0
-    for page in range(1, EXPORT_MAX // 100 + 1):
-        got = articles(q, topic, start, end, sentiment, sort, page, 100, source, media=media)
-        total = got.get("matching") or total
-        picked += [(r["key"], r["origin"]) for r in got["rows"]]
-        if len(got["rows"]) < 100:
-            break
-    picked = picked[:EXPORT_MAX]
+    got = articles(q, topic, start, end, sentiment, sort, 1, EXPORT_MAX, source, media=media, _cap=EXPORT_MAX)
+    total = got.get("matching") or 0                  # one read of the filter, not one per hundred
+    picked = [(r["key"], r["origin"]) for r in got["rows"]][:EXPORT_MAX]
     if not picked:
         raise ValueError("No article matches this filter — nothing to put in the Excel.")
     full: dict = {}

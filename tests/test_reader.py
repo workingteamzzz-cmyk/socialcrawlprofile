@@ -490,3 +490,56 @@ def test_one_story_at_two_addresses_of_an_outlet_shows_once_and_the_outlet_filte
     got = rd.articles(start="2026-11-01", end="2026-11-23", media="kompas.com", size=50)
     assert len(got["rows"]) == 1 and got["total"] == 2               # the page shows it once
     s.stop()
+
+
+def test_headline_checks_stop_at_their_time_budget_and_the_rest_wait(rd, tmp_path, monkeypatch):
+    """Past the time budget the headline look-ups stop; those rows stay unmarked and are done on a later round —
+    new articles are never held up behind them."""
+    from crawler import insights
+    db = insights._search_db()
+    items = [(f"k{i}", "a.id", f"Judul berita yang cukup panjang nomor {i} hari ini") for i in range(50)]
+    left: set = set()
+    insights._stream_has_title(db, items, left, budget=0.0)
+    assert len(left) == 49                                   # the first is always looked at: progress each round
+    db.close()
+
+
+def test_a_reread_article_replaces_its_search_entry_by_the_key_table(rd, tmp_path):
+    """The search index finds a link's row through its key table (never reading the whole index); on a server from
+    before the table, it is filled once from what is there — a re-read article still has one entry."""
+    from crawler import insights, stream
+    db = insights._search_db()
+    db.execute("DROP TABLE IF EXISTS dockey")                     # as on an older server
+    db.execute("DELETE FROM meta WHERE k LIKE 'dockey%'")
+    db.commit()
+    db.close()
+    s = stream.Stream(str(tmp_path / "data" / "stream"))
+    s.x("UPDATE articles SET fetched = ?, title = 'YBM PLN Berbagi Kebahagiaan dengan Santri (diperbarui)' "
+        "WHERE domain = 'a.id'", (time.time() + 100,))
+    insights.index_new()
+    db = insights._search_db()
+    rows = db.execute("SELECT key, title FROM docs WHERE key LIKE 'a.id/%'").fetchall()
+    assert len(rows) == 1 and "diperbarui" in rows[0][1]
+    assert db.execute("SELECT COUNT(*) FROM dockey").fetchone()[0] == db.execute("SELECT COUNT(*) FROM docs").fetchone()[0]
+    db.close()
+    insights._STATE.pop("count", None)
+    assert insights.status()["indexed"] == 5
+    s.stop()
+
+
+def test_the_excel_takes_more_than_one_page_in_one_read(rd, tmp_path, monkeypatch):
+    """Hundreds of matching articles: all in the Excel (one read of the filter), also while the newest-first index is
+    not built yet."""
+    from crawler import paths, reader, stream
+    monkeypatch.setattr(paths, "OUTPUT_DIR", str(tmp_path / "out"))
+    monkeypatch.setattr(reader, "_IDX", [" INDEXED BY not_built_yet"])
+    s = stream.Stream(str(tmp_path / "data" / "stream"))
+    with s.lock:
+        s._db.executemany("INSERT INTO articles(key, url, domain, title, status, discovered, fetched, pub_date, pub_time, "
+                          "content, sentiment) VALUES (?,?,?,?,'success',0,?,'2026-11-18','09:00',?,'neutral')",
+                          [(f"m{i}.id/b/{i}", f"https://m{i}.id/berita/{i}", f"m{i}.id", f"Kabar daerah nomor {i} hari ini",
+                            time.time(), zlib.compress(b"Isi.")) for i in range(150)])
+        s._db.commit()
+    out = rd.export(start="2026-11-18", end="2026-11-18")
+    assert out["rows"] == 150
+    s.stop()

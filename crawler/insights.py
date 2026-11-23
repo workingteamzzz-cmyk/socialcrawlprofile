@@ -129,6 +129,55 @@ def _stream_ro() -> sqlite3.Connection | None:
 
 OVERLAP_S = 300
 
+# The full-text tables can only be searched by their words: deleting "the row of this link" made SQLite read the whole
+# table (millions of rows, gigabytes) — several times a minute. A small key -> row table finds it at once.
+FTS_MAPS = {"docs": ("key", "dockey"), "rdocs": ("skey", "rdockey"), "mdocs": ("mkey", "mdockey")}
+
+
+def _fts_map(db, fts: str) -> str:
+    """The key -> row table of a full-text table; filled once from what is there (in chunks, resumable)."""
+    col, m = FTS_MAPS[fts]
+    db.execute(f"CREATE TABLE IF NOT EXISTS {m}(k TEXT PRIMARY KEY, rid INTEGER) WITHOUT ROWID")
+    if db.execute("SELECT 1 FROM meta WHERE k=?", (m + "_built",)).fetchone():
+        return m
+    r = db.execute("SELECT v FROM meta WHERE k=?", (m + "_at",)).fetchone()
+    last = int(r[0]) if r else 0
+    while True:
+        rows = db.execute(f"SELECT rowid, {col} FROM {fts} WHERE rowid > ? ORDER BY rowid LIMIT 50000",
+                          (last,)).fetchall()
+        if not rows:
+            break
+        db.executemany(f"INSERT OR REPLACE INTO {m}(k, rid) VALUES (?, ?)", [(x[1], x[0]) for x in rows])
+        last = rows[-1][0]
+        db.execute("INSERT OR REPLACE INTO meta(k, v) VALUES (?, ?)", (m + "_at", str(last)))
+        db.commit()
+    db.execute("INSERT OR REPLACE INTO meta(k, v) VALUES (?, '1')", (m + "_built",))
+    db.commit()
+    return m
+
+
+def _fts_drop(db, fts: str, keys) -> None:
+    """The full-text rows of these keys removed — found by the key table, never by reading the whole table."""
+    m = _fts_map(db, fts)
+    keys = list(keys)
+    for i in range(0, len(keys), 500):
+        part = keys[i:i + 500]
+        q = ",".join("?" * len(part))
+        rids = [r[0] for r in db.execute(f"SELECT rid FROM {m} WHERE k IN ({q})", part)]
+        if rids:
+            db.execute(f"DELETE FROM {fts} WHERE rowid IN ({','.join('?' * len(rids))})", rids)
+        db.execute(f"DELETE FROM {m} WHERE k IN ({q})", part)
+
+
+def _fts_add(db, fts: str, cols: tuple, rows: list) -> None:
+    """Rows into a full-text table (the key first in cols) and their keys into its key table."""
+    m = _fts_map(db, fts)
+    sql = f"INSERT INTO {fts}({', '.join(cols)}) VALUES ({','.join('?' * len(cols))})"
+    pairs = []
+    for r in rows:
+        pairs.append((r[0], db.execute(sql, r).lastrowid))
+    db.executemany(f"INSERT OR REPLACE INTO {m}(k, rid) VALUES (?, ?)", pairs)
+
 
 def index_new(limit: int = 5000) -> int:
     """Articles the stream read since the last call -> the search index. Returns how many were added."""
@@ -152,9 +201,7 @@ def index_new(limit: int = 5000) -> int:
         if not rows:
             return 0
         keys = [x["key"] for x in rows]
-        for i in range(0, len(keys), 500):                  # a re-read article replaces its old entry
-            part = keys[i:i + 500]
-            db.execute(f"DELETE FROM docs WHERE key IN ({','.join('?' * len(part))})", part)
+        _fts_drop(db, "docs", keys)                         # a re-read article replaces its old entry
         for i in range(0, len(keys), 500):                  # the same link in the reports: shown once, from here
             part = keys[i:i + 500]
             db.execute(f"UPDATE rep SET dup=1 WHERE skey IN ({','.join('?' * len(part))})", part)
@@ -162,10 +209,9 @@ def index_new(limit: int = 5000) -> int:
         for i in range(0, len(same), 500):
             part = same[i:i + 500]
             db.execute(f"UPDATE rep SET dup=1 WHERE skey IN ({','.join('?' * len(part))})", part)
-        db.executemany("INSERT INTO docs(key, url, domain, pub_date, pub_time, matched, fetched, title, summary) "
-                       "VALUES (?,?,?,?,?,?,?,?,?)",
-                       [(x["key"], x["url"], x["domain"], x["pub_date"], x["pub_time"], x["matched"], x["fetched"],
-                         x["title"] or "", x["summary"] or "") for x in rows])
+        _fts_add(db, "docs", ("key", "url", "domain", "pub_date", "pub_time", "matched", "fetched", "title", "summary"),
+                 [(x["key"], x["url"], x["domain"], x["pub_date"], x["pub_time"], x["matched"], x["fetched"],
+                   x["title"] or "", x["summary"] or "") for x in rows])
         if new:
             db.execute("INSERT INTO meta(k, v) VALUES ('last_fetched', ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
                        (str(new[-1]["fetched"]),))
@@ -237,11 +283,10 @@ def index_reports(limit: int = 5000) -> int:
                         x["last_seen"] or ""))
         keys = [o[0] for o in out]
         dups = _in_stream(keys)
+        later: set = set()                                # not looked at in time: marked by the background later
         if dups is not None:
-            dups |= _stream_has_title(db, [(o[0], o[3], o[4]) for o in out if o[0] not in dups])
-        for i in range(0, len(keys), 500):
-            part = keys[i:i + 500]
-            db.execute(f"DELETE FROM rdocs WHERE skey IN ({','.join('?' * len(part))})", part)
+            dups |= _stream_has_title(db, [(o[0], o[3], o[4]) for o in out if o[0] not in dups], later)
+        _fts_drop(db, "rdocs", keys)
         now = time.time()
         db.executemany("INSERT INTO rep(skey, akey, url, domain, title, pub_date, pub_time, image, summary, sentiment, "
                        "keywords, seen, added) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(skey) DO UPDATE SET "
@@ -251,8 +296,9 @@ def index_reports(limit: int = 5000) -> int:
                        "seen=excluded.seen", [(*o, now) for o in out])  # 'added' stays the first arrival
         # the stream could not be asked (busy): left unmarked, the background marks them a moment later
         db.executemany("UPDATE rep SET dup=? WHERE skey=?",
-                       [((1 if o[0] in dups else 0) if dups is not None else None, o[0]) for o in out])
-        db.executemany("INSERT INTO rdocs(skey, title, summary) VALUES (?,?,?)", [(o[0], o[4], o[8]) for o in out])
+                       [((1 if o[0] in dups else 0) if dups is not None and o[0] not in later else None, o[0])
+                        for o in out])
+        _fts_add(db, "rdocs", ("skey", "title", "summary"), [(o[0], o[4], o[8]) for o in out])
         db.execute("INSERT INTO meta(k, v) VALUES ('rep_cursor', ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
                    (json.dumps([rows[-1]["last_seen"] or "", rows[-1]["key"]]),))
         db.commit()
@@ -296,11 +342,20 @@ def _fts_phrase(title: str) -> str:
     return '"' + " ".join(w) + '"' if len(w) >= 3 else ""
 
 
-def _stream_has_title(db, items) -> set:
+TITLE_BUDGET_S = 3.0          # headline look-ups per round at most this long: new articles are never held up
+
+
+def _stream_has_title(db, items, left: set | None = None, budget: float = TITLE_BUDGET_S) -> set:
     """(skey, domain, title) report rows whose outlet + headline the stream has stored -> their skeys (the search
-    index's docs, by its words — a few lookups, never a scan)."""
+    index's docs, by its words — a few lookups, never a scan). Past the time budget the rest are not looked at; their
+    skeys go to `left` (checked on a later round)."""
     got = set()
-    for skey, dom, title in items:
+    end = time.time() + budget
+    for n, (skey, dom, title) in enumerate(items):
+        if n and time.time() > end:
+            if left is not None:
+                left.update(x[0] for x in items[n:])
+            break
         tk, ph = title_key(dom, title), _fts_phrase(title)
         if not tk or not ph:
             continue
@@ -314,10 +369,14 @@ def _stream_has_title(db, items) -> set:
     return got
 
 
-def _reports_with_title(db, items) -> list:
-    """Stream articles just stored (domain, title) -> the report rows of the same outlet and headline (their skeys)."""
+def _reports_with_title(db, items, budget: float = TITLE_BUDGET_S) -> list:
+    """Stream articles just stored (domain, title) -> the report rows of the same outlet and headline (their skeys).
+    Within the time budget (the News Stream page shows such a pair once anyway)."""
     out = []
-    for dom, title in items:
+    end = time.time() + budget
+    for n, (dom, title) in enumerate(items):
+        if n and time.time() > end:
+            break
         tk, ph = title_key(dom, title), _fts_phrase(title)
         if not tk or not ph:
             continue
@@ -355,9 +414,10 @@ def mark_duplicates(batch: int = 20000) -> int:
         more = _in_stream(rows)
         if more is None:
             return 0                                   # the stream is busy: again next round
-        more |= _stream_has_title(db, [tuple(r) for r in got if r[0] not in more])
-        keys: set = set()
-        db.executemany("UPDATE rep SET dup=? WHERE skey=?", [(1 if k in keys or k in more else 0, k) for k in rows])
+        later: set = set()
+        more |= _stream_has_title(db, [tuple(r) for r in got if r[0] not in more], later)
+        rows = [k for k in rows if k not in later]          # not looked at in time: the next round
+        db.executemany("UPDATE rep SET dup=? WHERE skey=?", [(1 if k in more else 0, k) for k in rows])
         db.commit()
         return len(rows)
     finally:
@@ -409,9 +469,7 @@ def index_social(limit: int = 5000) -> int:
                         (x["keywords"] or "").strip("|").replace("|", ", "), x["last_seen"] or "", x["key"]))
         now = time.time()
         keys = [o[0] for o in out]
-        for i in range(0, len(keys), 500):
-            part = keys[i:i + 500]
-            db.execute(f"DELETE FROM mdocs WHERE mkey IN ({','.join('?' * len(part))})", part)
+        _fts_drop(db, "mdocs", keys)
         db.executemany("INSERT INTO med(mkey, platform, username, url, pub_date, pub_time, text, sentiment, emotion, "
                        "likes, replies, shares, views, followers, sub_type, keywords, seen, added) VALUES "
                        "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(mkey) DO UPDATE SET platform=excluded.platform, "
@@ -421,7 +479,7 @@ def index_social(limit: int = 5000) -> int:
                        "shares=excluded.shares, views=excluded.views, followers=excluded.followers, "
                        "sub_type=excluded.sub_type, keywords=excluded.keywords, seen=excluded.seen",
                        [(*o[:17], now) for o in out])
-        db.executemany("INSERT INTO mdocs(mkey, text, username) VALUES (?,?,?)", [(o[0], o[6], o[2]) for o in out])
+        _fts_add(db, "mdocs", ("mkey", "text", "username"), [(o[0], o[6], o[2]) for o in out])
         db.executemany("INSERT OR REPLACE INTO meta(k, v) VALUES (?, ?)", [("medkey:" + o[0], o[17]) for o in out])
         db.execute("INSERT INTO meta(k, v) VALUES ('med_cursor', ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
                    (json.dumps([rows[-1]["last_seen"] or "", rows[-1]["key"]]),))
@@ -445,8 +503,9 @@ def prune_reports() -> int:
     try:
         if not os.path.exists(p):
             n = db.execute("DELETE FROM rep").rowcount + db.execute("DELETE FROM med").rowcount
-            db.execute("DELETE FROM rdocs")
-            db.execute("DELETE FROM mdocs")
+            for t in ("rdocs", "mdocs", "rdockey", "mdockey"):
+                db.execute(f"DELETE FROM {t}") if db.execute(
+                    "SELECT 1 FROM sqlite_master WHERE name=?", (t,)).fetchone() else None
             db.execute("DELETE FROM meta WHERE k LIKE 'medkey:%'")
         else:
             db.execute("ATTACH DATABASE ? AS a", (p,))
@@ -459,7 +518,9 @@ def prune_reports() -> int:
                 part = junk[i:i + 500]
                 n += db.execute(f"DELETE FROM rep WHERE skey IN ({','.join('?' * len(part))})", part).rowcount
             if n:
-                db.execute("DELETE FROM rdocs WHERE skey NOT IN (SELECT skey FROM rep)")
+                m = _fts_map(db, "rdocs")
+                db.execute(f"DELETE FROM rdocs WHERE rowid IN (SELECT rid FROM {m} WHERE k NOT IN (SELECT skey FROM rep))")
+                db.execute(f"DELETE FROM {m} WHERE k NOT IN (SELECT skey FROM rep)")
             gone = [r[0] for r in db.execute(                 # social posts deleted from the reporting database
                 "SELECT substr(k, 8) FROM meta WHERE k LIKE 'medkey:%' AND NOT EXISTS (SELECT 1 FROM a.items i "
                 "WHERE i.kind='medsos' AND i.key = meta.v)").fetchall()]
@@ -467,7 +528,7 @@ def prune_reports() -> int:
                 part = gone[i:i + 500]
                 q = ','.join('?' * len(part))
                 n += db.execute(f"DELETE FROM med WHERE mkey IN ({q})", part).rowcount
-                db.execute(f"DELETE FROM mdocs WHERE mkey IN ({q})", part)
+                _fts_drop(db, "mdocs", part)
                 db.execute(f"DELETE FROM meta WHERE k IN ({q})", ["medkey:" + k for k in part])
         db.commit()
         return n
@@ -479,6 +540,8 @@ def purge_index(days: int) -> None:
     db = _search_db()
     try:
         db.execute("DELETE FROM docs WHERE CAST(fetched AS REAL) < ?", (time.time() - days * 86400,))
+        m = _fts_map(db, "docs")
+        db.execute(f"DELETE FROM {m} WHERE rid NOT IN (SELECT rowid FROM docs)")
         db.commit()
     finally:
         db.close()
@@ -717,6 +780,11 @@ def stories(hours: int = 6, limit: int = 20) -> dict:
 def spikes(now: float | None = None) -> list[dict]:
     """Keywords whose last hour is far above their usual hour (the 24 hours before)."""
     cfg = settings()
+    ck = (_dir(), cfg.get("spike_min"), cfg.get("spike_factor"))
+    cached = _STATE.get("spikes")
+    if now is None and cached and cached[2] == ck and time.time() - cached[0] < 120:
+        return cached[1]                           # a day's articles read at most every 2 minutes
+    live = now is None
     now = now or time.time()
     src = _stream_ro()
     if src is None:
@@ -737,7 +805,10 @@ def spikes(now: float | None = None) -> list[dict]:
         if n >= cfg["spike_min"] and n >= cfg["spike_factor"] * max(usual, 0.5):
             out.append({"keyword": k, "last_hour": n, "usual": round(usual, 1),
                         "factor": round(n / max(usual, 0.5), 1)})
-    return sorted(out, key=lambda x: -x["factor"])
+    out = sorted(out, key=lambda x: -x["factor"])
+    if live:
+        _STATE["spikes"] = (time.time(), out, ck)
+    return out
 
 
 def alert_spikes() -> list[dict]:
@@ -824,7 +895,9 @@ def status() -> dict:
     if time.time() - n[0] > 120:
         try:
             db = _search_db()
-            n = (time.time(), db.execute("SELECT COUNT(*) n FROM docs").fetchone()["n"])
+            built = db.execute("SELECT 1 FROM meta WHERE k='dockey_built'").fetchone()
+            # the key table is small: counting it never reads the articles' text
+            n = (time.time(), db.execute(f"SELECT COUNT(*) n FROM {'dockey' if built else 'docs'}").fetchone()["n"])
             db.close()
             _STATE["count"] = n
         except sqlite3.Error:

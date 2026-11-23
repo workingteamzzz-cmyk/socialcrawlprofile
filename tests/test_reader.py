@@ -472,3 +472,21 @@ def test_one_outlet_and_the_filter_as_one_excel(rd, tmp_path, monkeypatch):
     assert any("Paragraf kedua" in str(c) for c in rows[1])          # the article's text, not only its headline
     with pytest.raises(ValueError):
         rd.export(q="tidakadasamasekali", start="2026-11-19")
+
+
+def test_one_story_at_two_addresses_of_an_outlet_shows_once_and_the_outlet_filter_uses_its_index(rd, tmp_path):
+    from crawler import reader, stream
+    s = stream.Stream(str(tmp_path / "data" / "stream"))
+    t = "Hutama Karya Gelar Bengtaba Fest 2026, Optimalkan Rest Area"
+    for i, u in enumerate(("https://www.kompas.com/read/2026/11/23/1", "https://money.kompas.com/read/2026/11/23/1")):
+        s.x("INSERT INTO articles(key, url, domain, title, status, discovered, fetched, pub_date, pub_time, sentiment) "
+            "VALUES (?, ?, 'kompas.com', ?, 'success', 0, ?, '2026-11-23', '15:32', 'positive')",
+            (stream.norm_key(u), u, t, time.time() + i))
+    rows = rd.articles(start="2026-11-23", end="2026-11-23", media="kompas.com", size=50)["rows"]
+    assert len(rows) == 1                                           # without the index (not built yet): still works
+    s.ensure_indexes()
+    reader._DIDX_OFF[0] = 0.0
+    rd.forget_counts()
+    got = rd.articles(start="2026-11-01", end="2026-11-23", media="kompas.com", size=50)
+    assert len(got["rows"]) == 1 and got["total"] == 2               # the page shows it once
+    s.stop()

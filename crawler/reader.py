@@ -70,17 +70,17 @@ _DUP = {"t": 0.0, "v": False}
 
 
 def _one_per_article(rows) -> list:
-    """A report row that is the same article as a stream row on this page (same outlet and headline, another link —
-    not marked yet): shown once, from the stream."""
+    """The same article twice on this page (same outlet and headline under another link: a report row not marked
+    yet, or an outlet that publishes one story at two addresses): shown once — from the stream when it has it."""
     from .insights import title_key
     have = {title_key(r["domain"], r["title"]) for r in rows if r["origin"] == "stream"}
     have.discard("")
     out, seen = [], set()
     for r in rows:
         tk = title_key(r["domain"], r["title"])
-        if r["origin"] != "stream" and tk and (tk in have or tk in seen):
+        if tk and (tk in seen or (r["origin"] != "stream" and tk in have)):
             continue
-        if r["origin"] != "stream" and tk:
+        if tk:
             seen.add(tk)
         out.append(r)
     return out
@@ -106,6 +106,8 @@ def forget_counts() -> None:
 # the stored-articles index, best first: a_succ_cov also holds the sentiment (counts read only the index);
 # a_succ_pub is the older one; dropped from the list when the database does not have it (yet)
 _IDX = [" INDEXED BY a_succ_cov", " INDEXED BY a_succ_pub"]
+_DIDX = [" INDEXED BY a_dom_cov"]                 # filtered by outlet(s): built by the stream after an update
+_DIDX_OFF = [0.0]                                 # not built yet: asked again after this moment
 _LAST: dict = {}              # (filter) -> the last totals counted, however old (shown while counting again)
 _BUSY: set = set()            # filters being counted in the background
 _COUNTS: dict = {}            # (filter) -> (time, sentiment counts): the totals of a filter, kept for a minute
@@ -251,6 +253,8 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
                 w.append("d.docs MATCH ?")
                 a.append(expr)
             idx = _IDX[0] if use_idx and _IDX else ""
+            if doms and not expr and not only_key:
+                idx = _DIDX[0] if time.time() > _DIDX_OFF[0] else ""   # one outlet's rows only, not the whole collection
             selects.append("SELECT a.key, a.url, a.domain, a.title, a.pub_date, a.pub_time, a.image, a.summary, "
                            "COALESCE(NULLIF(a.sentiment,''),'neutral') sentiment, a.matched, a.fetched, 'stream' origin "
                            f"FROM articles a{idx} {join} WHERE {' AND '.join(w)}")
@@ -319,6 +323,11 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
                 rows = c.execute(f"SELECT * FROM ({u}){sw} ORDER BY {by} LIMIT ? OFFSET ?",
                                  (*sargs, size, (page - 1) * size)).fetchall()
             except sqlite3.OperationalError as e:
+                if "no such index" in str(e) and "a_dom_cov" in str(e) and time.time() > _DIDX_OFF[0]:
+                    _DIDX_OFF[0] = time.time() + 600      # being built after an update: the plain way meanwhile
+                    c.close()
+                    return articles(q, topic, start, end, sentiment, sort, page, size, source, scope, only_key,
+                                    last_hours, received_since, quick=quick, media=media)
                 if "no such index" in str(e) and _IDX:
                     _IDX.pop(0)                             # not built (yet): the next one, or none
                     c.close()
@@ -432,6 +441,7 @@ def export(q: str = "", topic: str = "", start: str = "", end: str = "", sentime
 
 def _export(q, topic, start, end, sentiment, sort, source, media) -> dict:
     import json
+    from .insights import title_key
     from . import online_clean as oc, templates
     from .data_vault import _write_xlsx
     from .paths import APP_DATA, OUTPUT_DIR
@@ -491,7 +501,10 @@ def _export(q, topic, start, end, sentiment, sort, source, media) -> dict:
             row = full.get(k)
             if not row or row[3] in seen or oc.is_junk_page(row[2], row[3]):
                 continue
-            seen.add(row[3])
+            tk = title_key(row[5] or re.sub(r"^https?://(www\.)?", "", row[3]).split("/")[0], row[2])
+            if tk and tk in seen:
+                continue                               # the same story at another address of the outlet
+            seen.update({row[3], tk} - {""})
             yield row
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     tag = (start or "all")[:10] + ("_" + end[:10] if end and end[:10] != (start or "")[:10] else "")

@@ -1323,7 +1323,7 @@ class Stream:
             with self.lock:
                 self._db.execute("DROP INDEX IF EXISTS a_disc")
                 self._db.commit()
-        if {"a_disc_ds", "a_fail_err", "a_new_fd", "a_succ_cov"} <= have and "a_succ_pub" not in have:
+        if {"a_disc_ds", "a_fail_err", "a_new_fd", "a_succ_cov", "a_dom_cov"} <= have and "a_succ_pub" not in have:
             return
         self.meta("maintenance", f"building indexes since {datetime.now(WIB):%H:%M} (once after an update)")
         with self.lock:
@@ -1336,6 +1336,9 @@ class Stream:
             self._db.execute("CREATE INDEX IF NOT EXISTS a_succ_cov ON articles(pub_date, pub_time, fetched, sentiment) "
                              "WHERE status='success'")
             self._db.execute("DROP INDEX IF EXISTS a_succ_pub")      # the older one: replaced by a_succ_cov
+            # News Stream filtered by outlet(s): that outlet's articles and their counts, from the index alone
+            self._db.execute("CREATE INDEX IF NOT EXISTS a_dom_cov ON articles(domain, pub_date, pub_time, fetched, "
+                             "sentiment) WHERE status='success'")
             self._db.commit()
         self.meta("maintenance", "")
 

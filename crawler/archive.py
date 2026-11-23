@@ -193,11 +193,26 @@ def known_urls(urls: list[str]) -> set:
     if not want:
         return set()
     got: set = set()
+    keys = list(want)
+    p = os.path.join(_dir(), "archive.db")
+    if os.path.exists(p):                     # a plain read: never waits for the lock or a writer in another process
+        try:
+            c = sqlite3.connect(f"file:{p}?mode=ro", uri=True, timeout=10)
+            try:
+                if c.execute("SELECT 1 FROM urls WHERE u='~filled'").fetchone():
+                    for i in range(0, len(keys), 500):
+                        part = keys[i:i + 500]
+                        got |= {r[0] for r in c.execute(f"SELECT u FROM urls WHERE u IN ({','.join('?' * len(part))})",
+                                                        part)}
+                    return {want[k] for k in got}
+            finally:
+                c.close()
+        except sqlite3.Error:
+            pass
     with _LOCK:
         c = _db()
         try:
             _fill_urls(c)
-            keys = list(want)
             for i in range(0, len(keys), 500):
                 part = keys[i:i + 500]
                 got |= {r[0] for r in c.execute(f"SELECT u FROM urls WHERE u IN ({','.join('?' * len(part))})", part)}

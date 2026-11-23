@@ -3412,7 +3412,9 @@ async function rdTotals(tries = 0){
     if (rdParams(1).toString() !== want) return;          // the filter changed meanwhile: its own count runs
     const d = await api('/api/articles?' + want);
     if (!d || d.ok === false) return;
-    if (d.counting){ if (tries < 40) rdTotals(tries + 1); return; }
+    if (d.counting){ if (tries < 40) rdTotals(tries + 1);
+      else { $('rdTotal').textContent = '–'; for (const id of ['Pos', 'Neg', 'Neu']) $('rd' + id).textContent = '–'; }
+      return; }
     RD.matching = d.matching; rdShowTotals(d);
     $('rdMore').textContent = RD.rows.length < RD.matching ? 'Loading more…' : (RD.rows.length ? `All ${fmt(RD.matching)} shown` : '');
   }, tries ? 3000 : 1500);

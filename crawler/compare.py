@@ -64,7 +64,7 @@ def compare(text) -> dict:
     reg = media_db.registry()
     access = {}
     try:
-        st = media_db.stats(wait=5)
+        st = media_db.stats(wait=2)
         access = {d: media_db.access(x or None) for d, x in st.items()}
     except Exception:  # noqa: BLE001
         pass

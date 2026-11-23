@@ -144,3 +144,20 @@ def test_api_scraper_can_be_scheduled(tmp_path, monkeypatch):
     assert cfg["time_from"] == f"{day} 00:00" and cfg["time_to"].endswith("23:55") and cfg["delta"] is True
     sch._check_finished()
     assert sch.items[0]["last_result"] == "1 file(s) — Data TikTok_pln.xlsx"
+
+
+def test_known_links_are_read_without_waiting_for_a_writer(arch):
+    """Compare / known-link checks read the database directly: a long write elsewhere does not hold them up."""
+    import time as _t
+    from datetime import timedelta, timezone
+    from crawler import archive
+    archive.add_rows("online", [{"url": "https://a.id/berita/satu", "title": "Satu", "published_full": "2026-11-20 10:00",
+                                 "text": "x"}], timezone(timedelta(hours=7)))
+    assert archive.known_urls(["https://a.id/berita/satu"]) == {"https://a.id/berita/satu"}   # fills the table once
+    archive._LOCK.acquire()
+    try:
+        t = _t.time()
+        got = archive.known_urls(["https://a.id/berita/satu", "https://b.id/berita/dua"])
+        assert got == {"https://a.id/berita/satu"} and _t.time() - t < 2
+    finally:
+        archive._LOCK.release()

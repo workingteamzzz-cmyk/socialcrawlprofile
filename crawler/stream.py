@@ -29,7 +29,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 WIB = timezone(timedelta(hours=7))
-DEFAULTS = {"enabled": False, "threads": 8, "discovery_threads": 16, "rss_minutes": 5, "sitemap_minutes": 15,
+DEFAULTS = {"enabled": False, "threads": 8, "discovery_threads": 8, "rss_minutes": 5, "sitemap_minutes": 15,
             "catchup_days": 2, "catchup_hour": 1, "weekly_report": True, "report_weekday": 0, "report_hour": 7,
             "health_on_start": True, "health_weekday": 6, "health_hour": 2,
             "top_n": 1000, "top2_n": 2000, "active2_hours": 1, "semi_hours": 1, "rare_hours": 12, "inactive_days": 3, "dead_days": 7,
@@ -108,7 +108,7 @@ def norm_key(url: str) -> str:
 
 
 # ---------- settings ----------
-FASTER_V83 = {"discovery_threads": (8, 16), "rss_minutes": (10, 5), "sitemap_minutes": (60, 15), "active2_hours": (2, 1),
+FASTER_V83 = {"rss_minutes": (10, 5), "sitemap_minutes": (60, 15), "active2_hours": (2, 1),
               "semi_hours": (4, 1), "rare_hours": (24, 12)}
 
 
@@ -182,6 +182,15 @@ def settings() -> dict:
         try:
             _write_settings({**DEFAULTS, **{k: v for k, v in got.items() if k in DEFAULTS}})
             open(mark83, "w").close()
+        except OSError:
+            pass
+    mark86 = os.path.join(_dir(), "threads_v86.done")
+    if got and not os.path.exists(mark86):
+        if got.get("discovery_threads") == 16:              # v83's 16 parallel sitemap readers: memory on a small
+            got["discovery_threads"] = 8                      # server; 8 keep up with the faster checks
+        try:
+            _write_settings({**DEFAULTS, **{k: v for k, v in got.items() if k in DEFAULTS}})
+            open(mark86, "w").close()
         except OSError:
             pass
     out = dict(DEFAULTS)
@@ -900,7 +909,9 @@ class Stream:
 
     def backlog_open(self, now: float | None = None) -> bool:
         """Older links are read only in the night hours (old_hours, WIB) — by day every reader is on fresh news.
-        Media-archive jobs (asked for by hand) are read at any time."""
+        Media-archive jobs (asked for by hand) are read at any time. Never while memory is nearly full."""
+        if mem_tight():
+            return False
         span = str(self.cfg.get("old_hours", "1-6") or "")
         m = re.fullmatch(r"(\d{1,2})-(\d{1,2})", span)
         if not m:
@@ -1976,6 +1987,49 @@ def _shard_of(domain, n) -> int:
     processes)."""
     import zlib as _z
     return _z.crc32((domain or "").encode()) % max(1, int(n or 1))
+
+
+_MEM = {"t": 0.0, "v": None, "tight": False}
+_CGROUP = "/sys/fs/cgroup"
+
+
+def mem_used() -> float | None:
+    """Share of the container's memory limit in real use (programs, not the file cache the system can drop), from
+    the cgroup; None when unknown (no limit, not Linux). Read at most every 10 s."""
+    now = time.time()
+    if now - _MEM["t"] < 10:
+        return _MEM["v"]
+    v = None
+    try:
+        base = _CGROUP
+        if os.path.exists(f"{base}/memory.max"):                      # cgroup v2
+            lim, cur, stat = f"{base}/memory.max", f"{base}/memory.current", f"{base}/memory.stat"
+            cache_key = "inactive_file"
+        else:                                                          # cgroup v1
+            lim, cur, stat = (f"{base}/memory/memory.limit_in_bytes", f"{base}/memory/memory.usage_in_bytes",
+                              f"{base}/memory/memory.stat")
+            cache_key = "total_inactive_file"
+        limit = open(lim).read().strip()
+        if limit.isdigit() and int(limit) < 1 << 60:
+            used = int(open(cur).read().strip())
+            for line in open(stat):
+                k, _, n = line.partition(" ")
+                if k == cache_key:
+                    used -= int(n)
+            v = max(0.0, used / int(limit))
+    except (OSError, ValueError):
+        v = None
+    _MEM.update(t=now, v=v)
+    if v is not None:                                                  # tight above 85 %, eased below 70 %
+        _MEM["tight"] = v > 0.85 or (_MEM["tight"] and v > 0.70)
+    return v
+
+
+def mem_tight() -> bool:
+    """Memory nearly full: the background extras wait (older links, re-checks), so the dashboard and fresh news keep
+    their speed — by itself, nothing to set."""
+    mem_used()
+    return bool(_MEM["tight"])
 
 
 def reader_processes(cfg: dict | None = None) -> int:

@@ -944,3 +944,30 @@ def test_links_with_the_teams_words_are_read_first_and_outlets_are_checked_often
         json.dump({**stream.DEFAULTS, "sitemap_minutes": 60, "semi_hours": 4, "rss_minutes": 7}, f)
     cfg = stream.settings()
     assert cfg["sitemap_minutes"] == 15 and cfg["semi_hours"] == 1 and cfg["rss_minutes"] == 7
+
+
+def test_memory_nearly_full_rests_the_background_extras(tmp_path, monkeypatch):
+    """Real use (the file cache left out) above 85 % of the container's limit: no older links and no re-checks until
+    it is under 70 % again."""
+    from crawler import paths, stream
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    cg = tmp_path / "cg"
+    cg.mkdir()
+    monkeypatch.setattr(stream, "_CGROUP", str(cg))
+
+    def use(cur, inactive):
+        (cg / "memory.max").write_text(str(1000))
+        (cg / "memory.current").write_text(str(cur))
+        (cg / "memory.stat").write_text(f"anon 1\ninactive_file {inactive}\n")
+        stream._MEM["t"] = 0.0
+    st = stream.Stream(str(tmp_path / "s"))
+    st.cfg = {**stream.settings(), "old_hours": "0-24"}
+    use(950, 400)                                   # 95 % but most of it is cache: 55 % in real use
+    assert stream.mem_used() == 0.55 and not stream.mem_tight() and st.backlog_open()
+    use(900, 10)
+    assert stream.mem_tight() and not st.backlog_open()
+    use(780, 10)                                    # 77 %: still resting (eases below 70 %)
+    assert stream.mem_tight()
+    use(600, 10)
+    assert not stream.mem_tight() and st.backlog_open()
+    stream._MEM.update(t=0.0, v=None, tight=False)

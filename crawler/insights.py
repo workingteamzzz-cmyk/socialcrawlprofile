@@ -333,9 +333,8 @@ def _reports_with_title(db, items) -> list:
 
 def mark_duplicates(batch: int = 20000) -> int:
     """Once (in the stream's background): the report rows indexed before the 'dup' mark get it, and the index the
-    News Stream reads them by is built. The stream's links come from the search index (docs: every stored article),
-    read once in order — never looked up one by one in the stream's large database. Returns how many rows were
-    marked this call (0 = all done)."""
+    News Stream reads them by is built. Each batch is asked of the stream by its own key (and by outlet + headline):
+    little memory, whatever the size of the collection. Returns how many rows were marked this call (0 = all done)."""
     db = _search_db()
     try:
         have = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='index'")}
@@ -349,19 +348,15 @@ def mark_duplicates(batch: int = 20000) -> int:
             db.execute("INSERT OR REPLACE INTO meta(k, v) VALUES ('dup_by_title', '1')")
             db.commit()
         if not db.execute("SELECT 1 FROM rep WHERE dup IS NULL LIMIT 1").fetchone():
-            _STATE.pop("stream_keys", None)
             return 0
-        keys = _STATE.get("stream_keys")
-        if keys is None:                       # every link the stream has stored, once (sequential read)
-            keys = _STATE["stream_keys"] = {r[0] for r in db.execute("SELECT key FROM docs")}
         got = db.execute("SELECT skey, domain, title FROM rep WHERE dup IS NULL LIMIT ?", (batch,)).fetchall()
         rows = [r[0] for r in got]
-        # the search index may miss a stored article (read out of order by parallel readers): the rest are asked of
-        # the stream itself, sorted, in batches — only the rows not found above
-        more = _in_stream([k for k in rows if k not in keys])
+        # asked of the stream by its own key, sorted, in batches (never every stored link held in memory)
+        more = _in_stream(rows)
         if more is None:
             return 0                                   # the stream is busy: again next round
-        more |= _stream_has_title(db, [tuple(r) for r in got if r[0] not in keys and r[0] not in more])
+        more |= _stream_has_title(db, [tuple(r) for r in got if r[0] not in more])
+        keys: set = set()
         db.executemany("UPDATE rep SET dup=? WHERE skey=?", [(1 if k in keys or k in more else 0, k) for k in rows])
         db.commit()
         return len(rows)
@@ -789,7 +784,8 @@ def _loop() -> None:
                 pass
             while index_social() >= 5000 and not _STATE["stop"].is_set():
                 pass
-            for _ in range(2):                                # older report rows: their 'dup' mark, a little per
+            from .stream import mem_tight
+            for _ in range(0 if mem_tight() else 2):         # older report rows: their 'dup' mark, a little per
                 if not mark_duplicates(5000) or _STATE["stop"].is_set():   # round (15 s apart) — never a long burden
                     break
             if time.time() - last_prune > 3600:

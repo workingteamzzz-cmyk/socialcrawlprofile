@@ -605,6 +605,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
 .rd-face{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;flex:none}
 .rd-face svg.i{width:22px;height:22px}
 .rd-face.pos{background:var(--ok-soft);color:var(--ok)}.rd-face.neg{background:var(--bad-soft);color:var(--bad)}.rd-face.neu{background:var(--soft);color:var(--muted)}
+.tp-tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.tp-pick{height:32px;padding:0 8px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);font:inherit;font-size:13px;max-width:180px}
 .rd-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:6px}
 .rd-actions .btn{padding-left:4px;padding-right:4px;justify-content:center;min-width:0;gap:5px}
 .rd-grid.rd-busy{opacity:.45;pointer-events:none;transition:opacity .15s}
@@ -905,7 +906,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
       <div class="pagehead"><div><h1>Keyword Search</h1><p>Collect the posts each platform shows for your keywords, limited to the period — with the <b>Browser</b> (free, no API) or the <b>API</b> (credits, the client's Medsos format).</p></div></div>
       <div class="collect">
         <div style="display:flex;flex-direction:column;gap:16px">
-          <div class="card"><div class="card-hd"><h3>Keywords</h3><div class="tools"><button class="btn sm" id="kwClear">Clear</button></div></div>
+          <div class="card"><div class="card-hd"><h3>Keywords</h3><div class="tools tp-tools"><select class="tp-pick" data-for="kw" title="Fill the keywords from a report topic" aria-label="Use a topic"><option value="">Use a topic…</option></select><button class="btn sm need-op" data-tpsave="kw" title="Keep these keywords as a report topic">Save as topic</button><button class="btn sm" id="kwClear">Clear</button></div></div>
             <div class="card-bd">
               <div class="kwbox" id="kwBox"><input id="kwInput" placeholder="Type a keyword and press Enter — e.g. listrik, #listrik, PLN" autocomplete="off" aria-label="Add keyword"></div>
               <p class="hint" style="margin-top:8px">Each keyword is searched separately. Paste several lines or comma-separated words at once. <code>#hashtag</code> works on Instagram, X, TikTok and Threads.</p>
@@ -1047,7 +1048,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
                 <label class="switch"><input type="checkbox" id="nbForce"><span></span></label></div>
               <p class="hint" style="margin:8px 0 0">Results: News Links page, an Online Excel file in Exports, and the reporting database — so they show in News Stream and Reports too.</p>
             </div></div>
-          <div class="card"><div class="card-hd"><h3>Keywords</h3><div class="tools"><button class="btn sm" id="nwClear">Clear</button></div></div>
+          <div class="card"><div class="card-hd"><h3>Keywords</h3><div class="tools tp-tools"><select class="tp-pick" data-for="nw" title="Fill the keywords from a report topic" aria-label="Use a topic"><option value="">Use a topic…</option></select><button class="btn sm need-op" data-tpsave="nw" title="Keep these keywords as a report topic">Save as topic</button><button class="btn sm" id="nwClear">Clear</button></div></div>
             <div class="card-bd">
               <div class="kwbox" id="nwBox"><input id="nwInput" placeholder="Type a keyword and press Enter — e.g. pemadaman listrik, banjir Jakarta" autocomplete="off" aria-label="Add news keyword"></div>
               <p class="hint" style="margin-top:8px">Each keyword is a separate Google search. Google operators work too, e.g. <code>"tarif listrik" OR TDL</code>.</p>
@@ -3646,9 +3647,30 @@ $('clRestore').onclick = async () => {
 
 /* ---------- reports ---------- */
 let TOPICS = [];
+function fillTopicPickers(){                              // Keyword Search / News Search: a topic fills the keywords
+  document.querySelectorAll('.tp-pick').forEach(sel => {
+    sel.innerHTML = `<option value="">${TOPICS.length ? 'Use a topic…' : 'No topics yet'}</option>` +
+      TOPICS.map(t => `<option value="${esc(t.id)}">${esc(t.name)} (${t.keywords.length})</option>`).join(''); });
+}
+async function loadTopicPickers(){ const d = await api('/api/report/topics'); if (d && d.topics){ TOPICS = d.topics; fillTopicPickers(); } }
+document.querySelectorAll('.tp-pick').forEach(sel => sel.addEventListener('change', () => {
+  const t = TOPICS.find(x => x.id === sel.value); sel.value = ''; if (!t) return;
+  if (sel.dataset.for === 'kw'){ keywords = []; kwAdd(t.keywords.join('\n')); }
+  else { NW.items = []; NW.add(t.keywords.join('\n')); }
+  toast(`Topic ${t.name}: ${t.keywords.length} keyword(s)`); }));
+document.querySelectorAll('[data-tpsave]').forEach(b => b.onclick = async () => {
+  const items = b.dataset.tpsave === 'kw' ? keywords : NW.items;
+  if (!items.length) return toast('Add some keywords first', true);
+  const name = (prompt('Name of the topic (e.g. PLN):') || '').trim(); if (!name) return;
+  const old = TOPICS.find(t => t.name.toLowerCase() === name.toLowerCase());
+  if (old && !confirm(`Topic ${old.name} exists — replace its keywords with these ${items.length}?`)) return;
+  const r = await api('/api/report/topics', {id: old ? old.id : null, name, keywords: items.join('\n')});
+  if (!r || !r.ok) return toast((r && r.error) || 'Could not save', true);
+  toast(`Topic ${r.topic.name} saved — also in Reports, News Stream and the priority words`); loadTopicPickers(); });
+loadTopicPickers();
 async function loadReport(){
   const d = await api('/api/report/topics');
-  TOPICS = d.topics || [];
+  TOPICS = d.topics || []; fillTopicPickers();
   const cur = $('rpTopic').value;
   $('rpTopic').innerHTML = TOPICS.map(t => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('') + '<option value="">Custom keywords…</option>';
   if (cur !== '' && TOPICS.some(t => t.id === cur)) $('rpTopic').value = cur;

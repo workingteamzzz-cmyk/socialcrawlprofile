@@ -161,3 +161,27 @@ def test_known_links_are_read_without_waiting_for_a_writer(arch):
         assert got == {"https://a.id/berita/satu"} and _t.time() - t < 2
     finally:
         archive._LOCK.release()
+
+
+def test_a_run_ends_at_once_while_its_rows_go_to_the_reporting_database_behind(arch, monkeypatch):
+    """Saving to the reporting database never holds up the end of a run (or Stop): it goes in the background,
+    in chunks, in order; the next 'only new' run waits for it first."""
+    import time as _t
+    from datetime import timedelta, timezone
+    from crawler import job as jobmod
+    calls = []
+    real = arch.add_rows
+
+    def slow(kind, rows, tz, keyword_of=None):
+        _t.sleep(0.5)
+        calls.append(len(rows))
+        return real(kind, rows, tz, keyword_of)
+    monkeypatch.setattr(arch, "add_rows", slow)
+    j = jobmod.Job()
+    rows = [{"url": f"https://a.id/berita/{i}", "title": f"Judul {i}", "published_full": "2026-11-20 10:00",
+             "text": "x"} for i in range(450)]
+    t = _t.time()
+    j._archive("online", rows, timezone(timedelta(hours=7)))
+    assert _t.time() - t < 0.3                                     # the run is not held up
+    assert jobmod.archive_flush(30) and calls == [200, 200, 50]    # in chunks, then done
+    assert len(arch.known_urls([r["url"] for r in rows])) == 450

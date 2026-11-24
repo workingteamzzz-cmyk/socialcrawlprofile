@@ -6,6 +6,7 @@ Results of the last profile run and the last keyword run are kept side by side."
 from __future__ import annotations
 
 import os
+import queue
 import random
 import re
 import threading
@@ -174,6 +175,8 @@ class Job:
 
         def wrap():
             try:
+                if self._new_only or self._smart:      # "only new" / "skip known" read the database: the last
+                    archive_flush(120)                 # run's rows must be in it first
                 target(*args)
             except Exception as e:  # noqa: BLE001
                 first = str(e).splitlines()[0] if str(e) else e.__class__.__name__
@@ -341,16 +344,17 @@ class Job:
         return [r for r in rows if r.get("_fresh") or id(r) in keep] if live else rest
 
     def _archive(self, kind: str, rows, tz=None) -> None:
-        """Every result also goes to the reporting database (archive.py)."""
-        self.current = "Saving to the reporting database"
-        try:
-            from . import archive
-            rows = list(rows)
-            if rows:
-                n = archive.add_rows(kind, rows, tz or timezone(timedelta(hours=7)))
-                self.log(f"🗄 Reporting database: {n} new, {len(rows) - n} updated")
-        except Exception as e:  # noqa: BLE001
-            self.log(f"⚠ Reporting database not updated: {str(e)[:120]}")
+        """Every result also goes to the reporting database (archive.py) — in the background, one run after the
+        other: the run ends (and Stop finishes) at once even when that database is busy elsewhere for a while."""
+        rows = list(rows)
+        if not rows:
+            return
+        tz = tz or timezone(timedelta(hours=7))
+        log = self.log
+        _ARCHIVE_Q.put((kind, rows, tz, log))
+        _archive_writer()
+        log(f"🗄 Reporting database: {len(rows)} row(s) being saved in the background (Reports / News Stream in a "
+            "moment)")
 
     def _api_fill(self, rows: list) -> list:
         """Medsos output: what the browser could not read is filled with the scraping API (autofill.py) —
@@ -1356,6 +1360,49 @@ class Job:
         still = len(left) - ok
         self.log(f"   second pass: {ok}/{len(left)} decoded" + (f"; {still} stay as news.google.com links (they still "
                                                                   "open the article)" if still else ""))
+
+
+_ARCHIVE_Q: queue.Queue = queue.Queue()
+_ARCHIVE_T: dict = {}
+
+
+def _archive_writer() -> None:
+    """One background writer for the runs' results: in chunks of 200 rows (the database is never held long), in
+    the order the runs ended."""
+    t = _ARCHIVE_T.get("t")
+    if t is not None and t.is_alive():
+        return
+
+    def run():
+        from . import archive
+        while True:
+            try:
+                kind, rows, tz, log = _ARCHIVE_Q.get(timeout=60)
+            except queue.Empty:
+                return
+            new = 0
+            try:
+                for i in range(0, len(rows), 200):
+                    new += archive.add_rows(kind, rows[i:i + 200], tz)
+                log(f"🗄 Reporting database: {new} new, {len(rows) - new} updated")
+            except Exception as e:  # noqa: BLE001
+                log(f"⚠ Reporting database not updated: {str(e)[:120]}")
+            finally:
+                _ARCHIVE_Q.task_done()
+    _ARCHIVE_T["t"] = threading.Thread(target=run, daemon=True, name="archive-writer")
+    _ARCHIVE_T["t"].start()
+
+
+def archive_pending() -> int:
+    return _ARCHIVE_Q.unfinished_tasks
+
+
+def archive_flush(timeout: float = 120) -> bool:
+    """Waits (up to timeout) until the runs' results are all in the reporting database."""
+    end = time.time() + timeout
+    while _ARCHIVE_Q.unfinished_tasks and time.time() < end:
+        time.sleep(0.25)
+    return not _ARCHIVE_Q.unfinished_tasks
 
 
 JOB = Job()

@@ -611,7 +611,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
 .rd-grid.rd-busy{opacity:.45;pointer-events:none;transition:opacity .15s}
 .rd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px}
 .rd-filters input[type=date]{min-width:0;width:100%;padding-left:8px;padding-right:6px;font-size:13px}
-.rd-new[hidden],.card[hidden],.btn[hidden],.tag[hidden],#kApiOpts[hidden],#nwRight[hidden],#cmpOut[hidden]{display:none}
+#exPager[hidden],.rd-new[hidden],.card[hidden],.btn[hidden],.tag[hidden],#kApiOpts[hidden],#nwRight[hidden],#cmpOut[hidden]{display:none}
 .rd-grid.list{grid-template-columns:minmax(0,1fr)}
 .rd-card{display:flex;gap:14px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;cursor:pointer;box-shadow:var(--shadow);transition:border-color .12s,box-shadow .12s}
 .rd-card:hover{box-shadow:0 4px 14px rgba(16,24,40,.08)}
@@ -1391,7 +1391,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
         <div class="card"><div class="card-hd"><h3>Results</h3><span class="hd-note" id="exCount"></span></div>
           <div class="card-bd" id="exMedia" style="padding-bottom:0"></div>
           <div class="tbl-wrap"><table class="tbl dtbl"><tbody id="exBody"><tr><td class="empty-s">Type a search above — every article the stream read is searched in a moment.</td></tr></tbody></table></div>
-          <div class="card-bd" style="display:flex;gap:8px;align-items:center;padding-top:12px"><span class="hint" id="exPage"></span><button class="btn sm" id="exPrev" style="margin-left:auto">Previous</button><button class="btn sm" id="exNext">Next</button></div></div>
+          <div class="card-bd" id="exPager" hidden style="display:flex;gap:8px;align-items:center;padding-top:12px"><span class="hint" id="exPage"></span><button class="btn sm" id="exPrev" style="margin-left:auto">Previous</button><button class="btn sm" id="exNext">Next</button></div></div>
         <div style="display:grid;gap:16px;align-content:start">
           <div class="card"><div class="card-hd"><h3>Top stories</h3><select class="select" id="exHours" style="margin-left:auto;max-width:130px;height:32px;padding-top:0;padding-bottom:0"><option value="3">Last 3 h</option><option value="6" selected>Last 6 h</option><option value="12">Last 12 h</option><option value="24">Last 24 h</option></select></div>
             <div class="card-bd" id="exStories"></div></div>
@@ -3161,7 +3161,7 @@ async function loadStream(){
   const fm = d.fetch_methods || {total: 0, methods: {}}, fmt1 = m => { const x = (fm.methods || {})[m]; return x ? `${fmt(x.n)} · ${x.pct}%` : '0'; };
   $('lsFmGb').textContent = fmt1('googlebot'); $('lsFmCs').textContent = fmt1('cloudscraper');
   $('lsFmAll').textContent = fm.total ? `Last 7 days: ${fmt(fm.total)} articles read — normal ${fmt1('normal')}, AMP ${fmt1('amp')}, Googlebot ${fmt1('googlebot')}, cloudscraper ${fmt1('cloudscraper')}, headline only (site refused) ${fmt1('headline')}.` : 'Counted from now on (per method, per day).';
-  $('lsStPill').classList.toggle('run', d.running); $('lsStState').textContent = d.running ? 'Running' : 'Stopped';
+  $('lsStPill').classList.toggle('run', d.running); $('lsStPill').classList.toggle('off', !d.running); $('lsStState').textContent = d.running ? 'Running' : 'Stopped';
   $('lsStToggle').textContent = d.running ? 'Stop stream' : 'Start stream'; $('lsStToggle').classList.toggle('primary', !d.running);
   $('navStream').textContent = d.running ? '●' : '';
   $('lsStRet').textContent = cfg.retention_days ? cfg.retention_days + ' days' : 'for good';
@@ -3255,7 +3255,7 @@ async function loadMedia(){
   $('mdK1').textContent = fmt(c.total); $('mdK1s').textContent = `${fmt(t.new || 0)} not checked yet`;
   $('mdK2').textContent = fmt((t.active || 0) + (t.semi || 0)); $('mdK2s').textContent = `${fmt(t.active || 0)} active · ${fmt(t.semi || 0)} semi · ${fmt(t.rare || 0)} rare`;
   $('mdK3').textContent = fmt(a.ok || 0); $('mdK3s').textContent = `${fmt(a.partial || 0)} partly`;
-  $('mdK4').textContent = fmt((a.blocked || 0) + (a.paywall || 0) + (a.robots || 0)); $('mdK4s').textContent = `${fmt(a.blocked || 0)} blocked · ${fmt(a.paywall || 0)} paywall? · ${fmt(a.robots || 0)} robots.txt · ${fmt(a.unreachable || 0)} down`;
+  $('mdK4').textContent = fmt((a.blocked || 0) + (a.paywall || 0) + (a.robots || 0) + (a.unreachable || 0));   // the parts below add up to it $('mdK4s').textContent = `${fmt(a.blocked || 0)} blocked · ${fmt(a.paywall || 0)} paywall? · ${fmt(a.robots || 0)} robots.txt · ${fmt(a.unreachable || 0)} down`;
   const admin = ROLE === 'admin';
   $('mdBody').innerHTML = d.rows.length ? d.rows.map((r, i) => `<tr>
     <td><b>${esc(r.domain)}</b>${r.country === 'intl' ? ' <span class="badge b-neu" title="International (non-Indonesian) outlet">INTL</span>' : ''}${r.name ? `<small>${esc(r.name)}</small>` : ''}${r.subscribed ? ' <span class="badge b-ok" title="Read with the paid login">login</span>' : ''}</td>
@@ -3323,6 +3323,7 @@ async function exSearch(){
     : `<tr><td class="empty-s">Nothing found for “${esc(q)}”.</td></tr>`;
   const from = (d.page - 1) * d.size; $('exPage').textContent = d.total ? `${fmt(from + 1)}–${fmt(Math.min(d.total, from + d.size))} of ${fmt(d.total)}` : '';
   $('exPrev').disabled = d.page <= 1; $('exNext').disabled = from + d.size >= d.total;
+  $('exPager').hidden = !d.total;                        // no results: no Previous / Next
 }
 async function exStories(){
   const d = await api('/api/stories?hours=' + $('exHours').value);
@@ -3787,7 +3788,7 @@ const rel = t => { if (!t) return ''; const m = Math.round((t * 1000 - Date.now(
   return m <= 0 ? 'due now' : m < 60 ? `in ${m} min` : m < 1440 ? `in ${Math.floor(m / 60)} h ${m % 60 ? (m % 60) + ' min' : ''}` : `in ${Math.round(m / 1440)} day(s)`; };
 let schList = [];
 function schSpark(s){                                     // new results per run: the schedule's recent rhythm
-  const h = (s.history || []).slice(-12); if (h.length < 2) return '';
+  const h = (s.history || []).slice(-12); if (h.length < 2 || !h.some(x => x.new)) return '';   // nothing new yet: no empty bars
   const W = 120, H = 26, max = Math.max(1, ...h.map(x => x.new || 0));
   const bw = W / h.length;
   return `<div title="New results per run (last ${h.length} runs)" style="margin-top:6px"><svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-label="New results per run">${h.map((x, i) => {

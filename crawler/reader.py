@@ -253,6 +253,11 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
                 join = "JOIN s.docs d ON d.key = a.key"
                 w.append("d.docs MATCH ?")
                 a.append(expr)
+                # the dates checked in the search index itself: of every article ever matching the words, only
+                # those of the period are looked up in the large articles table (not hundreds of thousands)
+                dw, da = _period_sql("d", start, end)
+                w += dw
+                a += da
             idx = _IDX[0] if use_idx and _IDX else ""
             if doms and not expr and not only_key:
                 idx = _DIDX[0] if time.time() > _DIDX_OFF[0] else ""   # one outlet's rows only, not the whole collection

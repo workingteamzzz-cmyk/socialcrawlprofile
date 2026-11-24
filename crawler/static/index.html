@@ -605,6 +605,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
 .rd-face{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;flex:none}
 .rd-face svg.i{width:22px;height:22px}
 .rd-face.pos{background:var(--ok-soft);color:var(--ok)}.rd-face.neg{background:var(--bad-soft);color:var(--bad)}.rd-face.neu{background:var(--soft);color:var(--muted)}
+.rd-grid.rd-busy{opacity:.45;pointer-events:none;transition:opacity .15s}
 .rd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px}
 .rd-filters input[type=date]{min-width:0;width:100%;padding-left:8px;padding-right:6px;font-size:13px}
 .rd-new[hidden],.card[hidden],.btn[hidden],.tag[hidden],#kApiOpts[hidden],#nwRight[hidden],#cmpOut[hidden]{display:none}
@@ -3420,11 +3421,14 @@ async function rdTotals(tries = 0){
   }, tries ? 3000 : 1500);
 }
 async function loadReader(reset = true, live = false){
-  if (RD.loading) return; RD.loading = true;
+  // a new filter always wins: an answer still on its way for an older one is dropped (it used to block the new one)
+  if ((!reset || live) && RD.loading) return;
+  const my = RD.seq = (RD.seq || 0) + 1; RD.loading = true;
   if (reset){ RD.page = 1; RD.terms = rdTerms(); }
-  $('rdMsg').textContent = '';
+  if (reset && !live){ $('rdList').classList.add('rd-busy'); $('rdMsg').innerHTML = '<span class="spin"></span> Loading…'; }
   const d = await api('/api/articles?' + rdParams(RD.page));
-  RD.loading = false;
+  if (my !== RD.seq) return;                          // a newer filter was asked for meanwhile
+  RD.loading = false; $('rdList').classList.remove('rd-busy');
   if (!d || d.ok === false){ $('rdMsg').textContent = (d && d.error) || 'Could not load'; if (reset) $('rdList').innerHTML = ''; return; }
   RD.rows = reset ? d.rows : RD.rows.concat(d.rows);
   if (reset) $('rdMsg').innerHTML = d.query ? `Searching: <code>${esc(d.query.length > 300 ? d.query.slice(0, 300) + '…' : d.query)}</code>` : '';

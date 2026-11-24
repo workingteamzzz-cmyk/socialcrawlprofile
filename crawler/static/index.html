@@ -3194,7 +3194,7 @@ async function loadStream(){
       return `<div class="sub-hd">Late articles (last ${cfg.catchup_days} days, daily ${String(cfg.catchup_hour).padStart(2, '0')}:00)</div><p class="hint" style="margin:4px 0 6px">${st}</p>` +
         (d.running && !c.running ? '<button class="btn sm need-admin" id="lsCatchup">Run the sweep now</button>' : ''); })() +
     '<div style="height:14px"></div>' + row('rss', 'RSS feeds') + '<div style="height:14px"></div>' + row('sitemap', 'Outlet sitemaps') +
-    `<div class="hs-foot" style="margin-top:14px"><span>Readers busy</span><b>${d.readers_busy} / ${cfg.threads}</b></div><div class="hs-foot"><span>Stream database</span><b>${d.db_mb >= 1000 ? (d.db_mb / 1000).toFixed(1) + ' GB' : fmt(d.db_mb) + ' MB'}</b></div>` +
+    `<div class="hs-foot" style="margin-top:14px"><span>Readers busy</span><b>${d.readers_busy} / ${cfg.threads * (d.processes || 1)}</b></div><div class="hs-foot"><span>Stream database</span><b>${d.db_mb >= 1000 ? (d.db_mb / 1000).toFixed(1) + ' GB' : fmt(d.db_mb) + ' MB'}</b></div>` +
     (d.disk && d.disk.total ? `<div class="hs-foot" style="flex-wrap:wrap"><span>Disk free</span><b>${gb(d.disk.free)} of ${gb(d.disk.total)}</b><div class="me-bar" style="flex-basis:100%;background:var(--soft);margin-top:6px"><span style="width:${d.disk.used_pct}%;background:${d.disk.used_pct >= 92 ? 'var(--bad)' : d.disk.used_pct >= 80 ? '#e0a100' : 'var(--ok)'}"></span></div></div>` : '') +
     (d.last_error ? `<p class="hint" style="margin-top:10px">Last problem: ${esc(d.last_error)}</p>` : '');
   if ($('lsHealth')) $('lsHealth').onclick = async () => { const r = await api('/api/stream', {health_now: true});

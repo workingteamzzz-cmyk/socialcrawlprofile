@@ -1358,7 +1358,7 @@ class Stream:
         last_purge = last_tiers = 0.0
         last_retry = time.time()
         last_disk = 0.0
-        last_ckpt = 0.0
+        last_ckpt, ckpt_every = 0.0, 300
         last_intl = time.time() - 86400 + 900                # first decision 15 min after the start
         try:
             self.ensure_indexes()
@@ -1374,16 +1374,23 @@ class Stream:
                     step()
                 except Exception as e:  # noqa: BLE001  each step on its own: one failing never stops the others
                     self.last_error = f"{name}: {str(e)[:120]}"
-            if time.time() - last_ckpt > 300:          # the databases' journals emptied into them
+            if time.time() - last_ckpt > ckpt_every:   # the databases' journals emptied into them
                 last_ckpt = time.time()
                 try:
                     from . import archive
+                    left = 0.0
                     for p in (self.db_path, os.path.join(self.folder, "search.db"),
                               os.path.join(archive._dir(), "archive.db")):
-                        out = checkpoint(p)
-                        if out.get("left_gb", 0) > 2:
-                            self.last_error = (f"{os.path.basename(p)}: its journal is {out['left_gb']:.1f} GB and "
-                                               "could not be emptied yet (busy) — tried again in 5 minutes")
+                        out = checkpoint(p, timeout=3)
+                        left = max(left, out.get("left_gb", 0) if out.get("busy") else 0)
+                    # a long read elsewhere (a big count, an export) keeps the journal: tried again every minute
+                    # until it is empty, then every 5; only a journal that keeps growing is shown as a problem
+                    ckpt_every = 60 if left > 0.3 else 300
+                    if left > 4:
+                        self.last_error = (f"the database journal is {left:.1f} GB and could not be emptied yet "
+                                           "(a long read is using it) — tried again every minute")
+                    elif (self.last_error or "").startswith(("the database journal", "stream.db: its journal")):
+                        self.last_error = ""
                 except Exception as e:  # noqa: BLE001
                     self.last_error = f"journal: {str(e)[:120]}"
             if time.time() - last_disk > 600:

@@ -4041,7 +4041,7 @@ async function poll(){
     $('stTitle').textContent = running ? (s.kind === 'login' ? 'Login mode' : s.kind === 'decode' ? 'Fixing Google News links' : s.kind === 'apiscrape' ? 'API scraper' : isKw ? 'Keyword search' : isNews ? 'News search' : 'Collecting') : 'Ready';
     $('tbStat').textContent = $('stTitle').textContent;
     $('stSub').textContent = running ? (s.kind === 'login' ? 'Close the browser when done'
-      : `${s.done}/${s.total} ${isKw ? 'searches' : isNews ? 'keywords' : 'accounts'} · ${fmt((mp[s.kind] || {}).count || 0)} links`) : 'No job running';
+      : `${s.done}/${s.total} ${s.unit || (isKw ? 'searches' : isNews ? 'keywords' : 'accounts')} · ${fmt((mp[s.kind] || {}).count || 0)} links`) : 'No job running';
     const progFor = (pref, mine, unit, count) => {
       const show = mine && (running || s.total > 0);
       $(pref + 'rog').classList.toggle('show', show);
@@ -4052,7 +4052,7 @@ async function poll(){
     };
     progFor('p', isProf, 'accounts', (mp.profiles || {}).count || 0);
     progFor('kP', isKw, 'searches', (mp.keywords || {}).count || 0);
-    progFor('nP', isNews, 'keywords', (mp.news || {}).count || 0);
+    progFor('nP', isNews, s.unit || 'keywords', (mp.news || {}).count || 0);
     const dl = files => (files || []).map(f => `<a class="btn" href="/download/${encodeURIComponent(f)}">${icon('i-dl')}${f.startsWith('news_links_review_') ? 'Review file' : f.endsWith('.csv') ? 'CSV' : 'Excel'}</a>`).join('');
     $('downloads').innerHTML = dl((mp.profiles || {}).files); $('kwDownloads').innerHTML = dl((mp.keywords || {}).files);
     $('nwDownloads').innerHTML = dl((mp.news || {}).files);

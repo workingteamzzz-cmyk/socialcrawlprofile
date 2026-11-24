@@ -127,7 +127,7 @@ class Job:
     def state(self, since: int = 0) -> dict:
         with self.lock:
             return {"kind": self.kind, "running": self.running, "stopping": self.running and self.stop_flag.is_set(),
-                    "done": self.done, "total": self.total,
+                    "done": self.done, "total": self.total, "unit": getattr(self, "unit", ""),
                     "current": self.current, "error": self.error, "job_id": self.job_id,
                     "logs": self.logs[max(0, since - (self.log_total - len(self.logs))):] if since < self.log_total else [],
                     "log_count": self.log_total, "captcha": _captcha_info(),
@@ -167,6 +167,7 @@ class Job:
             self._t0, self._t0s = time.time(), time.strftime("%Y-%m-%d %H:%M:%S")
             self.run_stats, self._reused, self._credits, self._api_new = {}, 0, None, None
             self.logs, self.log_total, self.done, self.total, self.current, self.error = [], 0, 0, 0, "", ""
+            self.unit = ""                                 # what done / total count, when not the mode's usual
             self.__dict__.pop("_save_warned", None)
             self._last_save = 0
             if kind in MODES:
@@ -1189,7 +1190,7 @@ class Job:
         b["period"] = None                          # pasted links: no period
         b["meta"] = {"keywords": [news_multi.BULK_LABEL], "detail": "full", "cap": 0, "template": "online",
                      "bulk": len(links)}
-        self.total = len(links)
+        self.total, self.unit = len(links), "links"
         os.makedirs(OUTPUT_DIR, exist_ok=True)
         base = self._out_base(f"bulk_links_{today:%Y%m%d_%H%M%S}", "online", today.replace(tzinfo=None), tz)
         xlsx, csvp = (os.path.join(OUTPUT_DIR, base + ext) for ext in (".xlsx", ".csv"))

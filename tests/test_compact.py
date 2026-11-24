@@ -54,3 +54,19 @@ def test_compact_refuses_while_the_database_is_in_use(folder):
         busy.rollback()
         busy.close()
     assert not os.path.exists(db + ".before-compact") and not os.path.exists(os.path.join(folder, "stream.compact.db"))
+
+
+def test_only_the_journals_emptied(folder):
+    from crawler import compact
+    db = os.path.join(folder, "stream.db")
+    c = sqlite3.connect(db)
+    c.execute("PRAGMA wal_autocheckpoint=0")
+    c.executemany("INSERT INTO articles VALUES (?,?)", [(f"n{i}", "y" * 500) for i in range(3000)])
+    c.commit()
+    assert os.path.getsize(db + "-wal") > 1_000_000
+    c.close()
+    compact.journals(folder)
+    assert not os.path.exists(db + "-wal") or os.path.getsize(db + "-wal") == 0
+    c = sqlite3.connect(db)
+    assert c.execute("SELECT COUNT(*) FROM articles").fetchone()[0] == 13000
+    c.close()

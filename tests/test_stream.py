@@ -1003,3 +1003,18 @@ def test_the_journal_is_emptied_while_other_processes_keep_reading(tmp_path):
             t.join()
     w.close()
     assert not out["busy"] and out["left_gb"] == 0
+
+
+def test_a_read_of_the_stream_database_never_runs_too_long(tmp_path, monkeypatch):
+    """A read longer than READ_MAX_S is stopped (it would keep the journal from being emptied); the next read on
+    the same connection works."""
+    import sqlite3
+    from crawler import paths, stream
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    st = stream.Stream(str(tmp_path / "s"))
+    slow = "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 50000000) SELECT COUNT(*) FROM n"
+    t = time.time()
+    with pytest.raises(sqlite3.OperationalError, match="interrupt"):
+        st.rq(slow, max_s=0.3)
+    assert time.time() - t < 5
+    assert st.rq("SELECT 1 n")[0]["n"] == 1

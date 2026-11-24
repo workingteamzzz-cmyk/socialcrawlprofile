@@ -126,6 +126,7 @@ _LAST: dict = {}              # (filter) -> the last totals counted, however old
 _BUSY: set = set()            # filters being counted in the background
 _COUNTS: dict = {}            # (filter) -> (time, sentiment counts): the totals of a filter, kept for a minute
 COUNT_TTL = 60
+READ_MAX_S = 90
 
 
 def _conn(with_search: bool) -> sqlite3.Connection:
@@ -134,6 +135,8 @@ def _conn(with_search: bool) -> sqlite3.Connection:
         raise ValueError("The live stream has no articles yet — start it under Live Stream.")
     c = sqlite3.connect(f"file:{p}?mode=ro", uri=True, timeout=30)
     c.row_factory = sqlite3.Row
+    end = time.time() + READ_MAX_S                  # a page / total never reads longer (journal kept small)
+    c.set_progress_handler(lambda: 1 if time.time() > end else 0, 20000)
     if with_search:
         sp = os.path.join(_dir(), "search.db")
         if not os.path.exists(sp):
@@ -353,6 +356,9 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
                     c.close()
                     return articles(q, topic, start, end, sentiment, sort, page, size, source, scope, only_key,
                                     last_hours, received_since, quick=quick, media=media, _cap=_cap)
+                if "interrupt" in str(e):
+                    raise ValueError("This filter takes too long to read — narrow the dates, or add a keyword or a "
+                                     "media.")
                 raise ValueError(f"The query could not be read: {e}")
         tiers = {}
         doms = sorted({r["domain"] for r in rows if r["domain"]})

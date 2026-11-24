@@ -54,7 +54,7 @@ def _compute() -> dict:
     def m(key):
         return months.setdefault(key, {"month": key, "articles": 0, "online_rows": 0, "medsos_rows": 0, "bytes": 0})
     for r in s.rq("SELECT substr(pub_date, 1, 7) mo, COUNT(*) n FROM articles WHERE status='success' AND pub_date > '' "
-                  "GROUP BY mo"):
+                  "GROUP BY mo", max_s=300):
         if re.fullmatch(r"\d{4}-\d{2}", r["mo"] or ""):
             m(r["mo"])["articles"] += r["n"]
     undated = s.rq("SELECT COUNT(*) n FROM articles WHERE status='success' AND pub_date = ''")[0]["n"]

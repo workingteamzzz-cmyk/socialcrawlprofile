@@ -336,9 +336,12 @@ class Stream:
         with self.lock:
             return self._db.execute(sql, args).fetchall()
 
-    def rq(self, sql: str, args=()):
-        """A read on this thread's own read-only connection: big reads never hold up the readers (WAL)."""
-        c = getattr(self._local, "c", None)
+    def rq(self, sql: str, args=(), max_s: float | None = None):
+        """A read on this thread's own read-only connection: big reads never hold up the readers (WAL). A read
+        longer than max_s (READ_MAX_S) is stopped (sqlite3.OperationalError 'interrupted'): a read that long keeps
+        the journal from being emptied, and it grew to 15 GB."""
+        loc = self._local
+        c = getattr(loc, "c", None)
         if c is None:
             c = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True, timeout=30, check_same_thread=False)
             c.row_factory = sqlite3.Row
@@ -346,8 +349,13 @@ class Stream:
                 c.create_function("shard", 2, _shard_of, deterministic=True)
             except sqlite3.Error:
                 pass
-            self._local.c = c
-        return c.execute(sql, args).fetchall()
+            c.set_progress_handler(lambda: 1 if time.time() > getattr(loc, "deadline", 1e18) else 0, 20000)
+            loc.c = c
+        loc.deadline = time.time() + (max_s or READ_MAX_S)
+        try:
+            return c.execute(sql, args).fetchall()
+        finally:
+            loc.deadline = 1e18
 
     def x(self, sql: str, args=()):
         with self.lock:
@@ -2249,6 +2257,7 @@ def take_commands(s: "Stream") -> list:
 
 LOOP_HUNG_AFTER = 1800    # the worker's main loop has not come round for 30 minutes (after it did once) = hung
 WAL_LIMIT = 256 * 1024 * 1024   # bytes: an emptied journal (-wal file) is cut back to this
+READ_MAX_S = 120                # a read of the stream's database never runs longer (see Stream.rq)
 
 
 def checkpoint(path: str, timeout: float = 10.0) -> dict:

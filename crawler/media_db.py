@@ -311,6 +311,8 @@ def _compute() -> dict | None:
     if os.path.exists(path):
         c = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=30)
         c.row_factory = sqlite3.Row
+        end = time.time() + 120                     # longer: given up (a long read keeps the journal full)
+        c.set_progress_handler(lambda: 1 if time.time() > end else 0, 20000)
         try:
             d7 = (datetime.now(WIB) - timedelta(days=6)).strftime("%Y-%m-%d")
             since = time.time() - 7 * 86400

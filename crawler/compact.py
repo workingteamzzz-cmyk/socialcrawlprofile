@@ -116,10 +116,26 @@ def remove_old(folder: str) -> None:
         print("Nothing to remove.")
 
 
+def journals(folder: str) -> None:
+    """Only the journals emptied into their databases (no compact copy) — minutes, with the app stopped:
+        sudo docker compose stop collector
+        sudo docker compose run --rm --no-deps collector python -m crawler.compact --journal
+        sudo docker compose up -d collector"""
+    from . import archive
+    t = time.time()
+    for p in (os.path.join(folder, "stream.db"), os.path.join(folder, "search.db"),
+              os.path.join(archive._dir(), "archive.db")):
+        print(f"{os.path.basename(p)}: journal {_gb(p + '-wal')} — emptying…")
+        empty_journal(p)
+    print(f"Done in {time.time() - t:.0f} s. Start the app again:  sudo docker compose up -d collector")
+
+
 def main(argv: list[str]) -> None:
     from .stream import _dir
     if "--remove-old" in argv:
         remove_old(_dir())
+    elif "--journal" in argv:
+        journals(_dir())
     else:
         compact(_dir())
 

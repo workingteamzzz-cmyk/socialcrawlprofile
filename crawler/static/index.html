@@ -605,6 +605,8 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
 .rd-face{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;flex:none}
 .rd-face svg.i{width:22px;height:22px}
 .rd-face.pos{background:var(--ok-soft);color:var(--ok)}.rd-face.neg{background:var(--bad-soft);color:var(--bad)}.rd-face.neu{background:var(--soft);color:var(--muted)}
+.rd-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:6px}
+.rd-actions .btn{padding-left:4px;padding-right:4px;justify-content:center;min-width:0;gap:5px}
 .rd-grid.rd-busy{opacity:.45;pointer-events:none;transition:opacity .15s}
 .rd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px}
 .rd-filters input[type=date]{min-width:0;width:100%;padding-left:8px;padding-right:6px;font-size:13px}
@@ -1252,7 +1254,7 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
 
     <!-- NEWS STREAM (reader) -->
     <section class="page" id="p-reader">
-      <div class="pagehead"><div><h1>News Stream</h1><p>Every article on the server — the live stream and every News Search / Keyword / scheduled run — filtered as you set; new ones show up by themselves.</p></div>
+      <div class="pagehead"><div><h1>News Stream</h1><p>Every article on the server, live: filter, read, copy, download.</p></div>
         <div class="actions"><span class="pill run" id="rdLive"><i></i>Live</span></div></div>
       <div class="rd-wrap">
         <aside class="card rd-filters"><div class="card-bd" style="padding-top:16px">
@@ -1267,9 +1269,8 @@ input[type=file]::file-selector-button:hover{background:var(--hover)}
           <div class="field"><label for="rdSent">Sentiment</label><select id="rdSent"><option value="">All</option><option value="positive">Positive</option><option value="negative">Negative</option><option value="neutral">Neutral</option></select></div>
           <div class="field"><label for="rdSort">Sort</label><select id="rdSort"><option value="newest">Newest first</option><option value="received">Just arrived first</option><option value="oldest">Oldest first</option></select></div>
           <div class="field"><label for="rdMedia">Media</label><textarea id="rdMedia" rows="2" placeholder="Empty = all media. Or some: detik.com, kompas.com" autocomplete="off"></textarea>
-            <small class="hint">Separate with commas. Click an outlet's name on an article to see only it (click again: all).</small></div>
-          <div class="field"><label>View</label><div class="seg rd-view" id="rdView"><button data-v="grid" class="on">Grid</button><button data-v="list">List</button></div></div>
-          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px"><button class="btn" id="rdExport" title="These articles as one Excel in the team's Online template (up to 5,000)"><svg class="i"><use href="#i-dl"/></svg>Excel</button><button class="btn" id="rdReset">Reset</button><button class="btn primary" id="rdGo"><svg class="i"><use href="#i-search"/></svg>Filter</button></div>
+            <small class="hint">Separate with commas · click an outlet's name to see only it</small></div>
+          <div class="rd-actions"><button class="btn" id="rdExport" title="These articles as one Excel in the team's Online template (up to 5,000)"><svg class="i"><use href="#i-dl"/></svg>Excel</button><button class="btn" id="rdReset">Reset</button><button class="btn primary" id="rdGo"><svg class="i"><use href="#i-search"/></svg>Filter</button></div>
           <p class="hint" id="rdMsg" style="margin:10px 0 0"></p>
         </div></aside>
         <div class="rd-main">
@@ -3368,7 +3369,7 @@ $('exSpSave').onclick = async () => { const r = await api('/api/insights', {spik
 setInterval(() => { if (document.visibilityState === 'visible' && $('p-explore').classList.contains('on')){ exStories(); exStatus(); } }, 60000);
 
 /* ---------- news stream reader ---------- */
-let RD = {page: 1, rows: [], key: null, matching: 0, loading: false, terms: [], view: ls.get('rd_view', 'grid')};
+let RD = {page: 1, rows: [], key: null, matching: 0, loading: false, terms: []};
 const SENT = {positive: ['b-ok', 'Positive'], negative: ['b-bad', 'Negative'], neutral: ['b-neu', 'Neutral']};
 const TIERN = {active: 'Active', active2: 'Active 2', semi: 'Semi', rare: 'Rare', inactive: 'Inactive', dead: 'Down', new: 'New'};
 function rdParams(page){
@@ -3500,10 +3501,6 @@ $('rdQ').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey
 ['rdTopic', 'rdSrc', 'rdSent', 'rdSort', 'rdStart', 'rdEnd'].forEach(id => $(id).addEventListener('change', () => loadReader(true)));
 $('rdReset').onclick = () => { const t = localDay(); $('rdStart').value = $('rdEnd').value = t; $('rdQ').value = '';
   $('rdTopic').value = ''; $('rdMedia').value = ''; $('rdSrc').value = 'all'; $('rdSent').value = ''; $('rdSort').value = 'newest'; loadReader(true); };
-document.querySelectorAll('#rdView button').forEach(b => { b.classList.toggle('on', b.dataset.v === RD.view);
-  b.onclick = () => { RD.view = b.dataset.v; ls.set('rd_view', RD.view); document.querySelectorAll('#rdView button').forEach(x => x.classList.toggle('on', x === b));
-    $('rdList').classList.toggle('list', RD.view === 'list'); }; });
-$('rdList').classList.toggle('list', RD.view === 'list');
 new IntersectionObserver(es => { if (es[0].isIntersecting && RD.rows.length && RD.rows.length < RD.matching && !RD.loading){ RD.page++; loadReader(false); } })
   .observe($('rdMore'));
 $('rdNew').onclick = () => { window.scrollTo({top: 0, behavior: 'smooth'}); loadReader(true); };

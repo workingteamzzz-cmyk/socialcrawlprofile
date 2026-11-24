@@ -545,6 +545,21 @@ class Stream:
                           (it.get("time") or "")[:5], now), old, bool(d) and d >= late_cut))
         if not rows:
             return 0
+        # links known already (most of a sitemap) left out first, on the read connection and in batches — the
+        # write lock (which the readers need to save articles) is then held only for the really new ones
+        keys = list({r[0][0] for r in rows})
+        known: set = set()
+        try:
+            for i in range(0, len(keys), 500):
+                part = keys[i:i + 500]
+                q = ",".join("?" * len(part))
+                known |= {x[0] for x in self.rq(f"SELECT key FROM articles WHERE key IN ({q})", part)}
+                known |= {x[0] for x in self.rq(f"SELECT key FROM seen WHERE key IN ({q})", part)}
+        except sqlite3.Error:
+            known = set()                                  # the plain way below still decides
+        rows = [r for r in rows if r[0][0] not in known]
+        if not rows:
+            return 0
         fresh, n_new_fresh = [], 0
         with self.lock:
             taken = self._old_taken(day)                   # read and updated under the lock: threads never lose counts

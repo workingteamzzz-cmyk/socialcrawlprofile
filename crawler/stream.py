@@ -1373,7 +1373,7 @@ class Stream:
         last_purge = last_tiers = 0.0
         last_retry = time.time()
         last_disk = 0.0
-        last_ckpt, ckpt_every = 0.0, 300
+        last_ckpt, ckpt_every, big_since = 0.0, 300, 0.0
         last_intl = time.time() - 86400 + 900                # first decision 15 min after the start
         try:
             self.ensure_indexes()
@@ -1393,19 +1393,29 @@ class Stream:
                 last_ckpt = time.time()
                 try:
                     from . import archive
-                    left = 0.0
+                    left, worst = 0.0, ""
                     for p in (self.db_path, os.path.join(self.folder, "search.db"),
                               os.path.join(archive._dir(), "archive.db")):
                         out = checkpoint(p, timeout=3)
-                        left = max(left, out.get("left_gb", 0) if out.get("busy") else 0)
+                        if out.get("busy") and out.get("left_gb", 0) > left:
+                            left, worst = out["left_gb"], os.path.basename(p)
                     # a long read elsewhere (a big count, an export) keeps the journal: tried again every minute
                     # until it is empty, then every 5; only a journal that keeps growing is shown as a problem
                     ckpt_every = 60 if left > 0.3 else 300
                     if left > 4:
-                        self.last_error = (f"the database journal is {left:.1f} GB and could not be emptied yet "
+                        big_since = big_since or time.time()
+                        self.last_error = (f"the {worst} journal is {left:.1f} GB and could not be emptied yet "
                                            "(a long read is using it) — tried again every minute")
-                    elif (self.last_error or "").startswith(("the database journal", "stream.db: its journal")):
-                        self.last_error = ""
+                        if time.time() - big_since > 3600 and _IN_WORKER:
+                            # an hour without success: a connection of this engine may hold an old read — the
+                            # engine restarts (its connections close; the supervisor starts it again at once)
+                            getattr(self, "_log", print)(f"⚠ {worst}: journal {left:.1f} GB for an hour — restarting the engine to free it")
+                            os._exit(75)
+                    else:
+                        big_since = 0.0
+                        if (self.last_error or "").startswith(("the database journal", "stream.db: its journal",
+                                                               "the stream.db", "the search.db", "the archive.db")):
+                            self.last_error = ""
                 except Exception as e:  # noqa: BLE001
                     self.last_error = f"journal: {str(e)[:120]}"
             if time.time() - last_disk > 600:
@@ -2252,13 +2262,11 @@ def checkpoint(path: str, timeout: float = 10.0) -> dict:
     c = sqlite3.connect(path, timeout=timeout)
     try:
         c.execute(f"PRAGMA journal_size_limit={WAL_LIMIT}")
-        # first what can be copied without waiting for anyone; the journal is cut (TRUNCATE, which makes writers
-        # wait a moment) only once all of it is in the database — never while a long read still needs it
-        busy, frames, done = c.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
-        if not busy and frames == done:
-            busy, frames, done = c.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
-        else:
-            busy = 1
+        # first what can be copied without waiting for anyone, then the cut (TRUNCATE): it waits up to `timeout`
+        # for the reads running now to end — on a server read without pause there is never a moment with no
+        # reader at all, so waiting a little is what lets the journal be emptied
+        c.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+        busy, frames, done = c.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
     finally:
         c.close()
     after = os.path.getsize(wal) if os.path.exists(wal) else 0
@@ -2337,7 +2345,9 @@ def start_worker(log=print) -> None:
                     _WORKER["exits"] = [x for x in _WORKER["exits"] if x[0] > time.time() - 86400][-50:] + \
                         [(time.time(), p.returncode)]
                     log(f"stream worker stopped (exit {p.returncode}) — starting it again")
-                    if p.returncode not in ("hung", "stalled"):
+                    if p.returncode == 75:                   # its own planned restart (journal freed): no alarm
+                        pass
+                    elif p.returncode not in ("hung", "stalled"):
                         _alert(f"⚠️ Live Stream stopped (exit {p.returncode}"
                                f"{', out of memory' if p.returncode == -9 else ''}) — restarted automatically.")
                 _WORKER["proc"] = subprocess.Popen(          # stdin stays open: the worker ends when we do

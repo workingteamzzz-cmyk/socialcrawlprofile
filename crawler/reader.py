@@ -40,16 +40,30 @@ def _count_now(c, ck, u, args) -> dict:
     return counts
 
 
+COUNT_MAX_S = 20          # a dashboard total counted longer than this is given up (a long read keeps the database's
+_GAVE_UP: dict = {}       # journal from being emptied); not tried again for 10 minutes — the page shows "–"
+COUNT_STEPS = 20000       # how often (SQLite steps) the time is looked at
+
+
 def _count_beside(ck, u, args, with_search) -> dict | None:
     import threading
-    if ck not in _BUSY:
+    if ck not in _BUSY and time.time() - _GAVE_UP.get(ck, 0) > 600:
         _BUSY.add(ck)
 
         def run():
             try:
                 c2 = _conn(with_search)
+                end = time.time() + COUNT_MAX_S
+                c2.set_progress_handler(lambda: 1 if time.time() > end else 0, COUNT_STEPS)
                 try:
                     _count_now(c2, ck, u, args)
+                except sqlite3.OperationalError as e:
+                    if "interrupt" in str(e):
+                        _GAVE_UP[ck] = time.time()
+                        if len(_GAVE_UP) > 200:
+                            _GAVE_UP.clear()
+                    else:
+                        raise
                 finally:
                     c2.close()
             except Exception:  # noqa: BLE001

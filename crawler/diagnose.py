@@ -30,8 +30,10 @@ def main() -> None:
           f"{' — nearly full: background extras resting' if stream.mem_tight() else ''}; "
           f"load {tuple(round(x, 1) for x in os.getloadavg())} on {os.cpu_count()} CPUs")
     d = stream._dir()
-    print("  ".join(f"{f} {os.path.getsize(os.path.join(d, f)) / 1e9:.2f} GB" for f in
-                    ("stream.db", "stream.db-wal", "search.db", "search.db-wal") if os.path.exists(os.path.join(d, f))))
+    from .paths import APP_DATA as _AD
+    files = [os.path.join(d, f) for f in ("stream.db", "stream.db-wal", "search.db", "search.db-wal")] + \
+        [os.path.join(_AD, f) for f in ("archive.db", "archive.db-wal")]
+    print("  ".join(f"{os.path.basename(f)} {os.path.getsize(f) / 1e9:.2f} GB" for f in files if os.path.exists(f)))
     from .paths import APP_DATA
     sizes = []
     for root, _dirs, files in os.walk(APP_DATA):

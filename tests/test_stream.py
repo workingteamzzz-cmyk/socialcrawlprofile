@@ -971,3 +971,35 @@ def test_memory_nearly_full_rests_the_background_extras(tmp_path, monkeypatch):
     use(600, 10)
     assert not stream.mem_tight() and st.backlog_open()
     stream._MEM.update(t=0.0, v=None, tight=False)
+
+
+def test_the_journal_is_emptied_while_other_processes_keep_reading(tmp_path):
+    """A server read without pause (several reader processes): there is never a moment with no reader, yet the
+    journal is emptied — the cut waits a moment for the reads running now."""
+    import sqlite3
+    import threading
+    from crawler import stream
+    p = str(tmp_path / "t.db")
+    w = sqlite3.connect(p)
+    w.execute("PRAGMA journal_mode=WAL")
+    w.execute("CREATE TABLE t(x)")
+    w.executemany("INSERT INTO t VALUES (?)", [("y" * 500,) for _ in range(20000)])
+    w.commit()
+    stop = threading.Event()
+
+    def reader():
+        r = sqlite3.connect(p)
+        while not stop.is_set():
+            r.execute("SELECT COUNT(*) FROM t").fetchone()       # short reads, one after another
+        r.close()
+    ts = [threading.Thread(target=reader) for _ in range(3)]
+    for t in ts:
+        t.start()
+    try:
+        out = stream.checkpoint(p, timeout=3)
+    finally:
+        stop.set()
+        for t in ts:
+            t.join()
+    w.close()
+    assert not out["busy"] and out["left_gb"] == 0

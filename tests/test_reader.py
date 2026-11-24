@@ -569,3 +569,20 @@ def test_the_key_table_removes_an_older_double_entry(rd):
     db.commit()
     assert db.execute("SELECT COUNT(*) FROM docs WHERE key='a.id/0'").fetchone()[0] == 1
     db.close()
+
+
+def test_a_dashboard_total_that_counts_too_long_is_given_up(rd, monkeypatch):
+    """A total counted longer than COUNT_MAX_S is stopped (a long read keeps the database's journal from being
+    emptied) and not tried again for a while; the articles still come at once."""
+    from crawler import reader
+    monkeypatch.setattr(reader, "COUNT_MAX_S", -1.0)
+    monkeypatch.setattr(reader, "COUNT_STEPS", 1)
+    reader.forget_counts()
+    reader._GAVE_UP.clear()
+    r = rd.articles(start="2026-11-19", end="2026-11-20", quick=True)
+    assert r["rows"] and r["total"] is None
+    deadline = time.time() + 5
+    while reader._BUSY and time.time() < deadline:
+        time.sleep(0.05)
+    assert reader._GAVE_UP                                          # given up, remembered for 10 minutes
+    reader._GAVE_UP.clear()

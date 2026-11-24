@@ -348,6 +348,7 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
                 doms)}
     finally:
         c.close()
+    more = len(rows) >= size                            # before the doubles leave: whether another page exists
     rows = _one_per_article(rows)
     if counts is None:                                  # still being counted (dashboard): the rows, no totals yet
         out_rows = [{**dict(r), "tier": tiers.get(r["domain"], "")} for r in rows]
@@ -358,7 +359,7 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
                 if r.get("fetched") else ""
         return {"total": None, "matching": None, "page": page, "size": size, "query": expr, "source": source,
                 "server_time": datetime.fromtimestamp(now, WIB).isoformat(timespec="milliseconds"), "pages": None,
-                "sentiment": None, "counting": True, "more": len(out_rows) >= size, "rows": out_rows}
+                "sentiment": None, "counting": True, "more": more, "rows": out_rows}
     counts = {k: n for k, n in counts.items() if k in SENTIMENTS} | {
         "neutral": sum(n for k, n in counts.items() if k not in ("positive", "negative"))}
     out_rows = [{**dict(r), "tier": tiers.get(r["domain"], "")} for r in rows]
@@ -374,7 +375,7 @@ def articles(q: str = "", topic: str = "", start: str = "", end: str = "", senti
             "pages": (shown + size - 1) // size,
             "sentiment": {k: {"n": counts.get(k, 0), "pct": round(counts.get(k, 0) * 100 / total, 1) if total else 0}
                           for k in SENTIMENTS},
-            "rows": out_rows}
+            "more": more, "rows": out_rows}
 
 
 def _report_article(key: str) -> dict:
@@ -502,7 +503,7 @@ def _export(q, topic, start, end, sentiment, sort, source, media) -> dict:
             row = full.get(k)
             if not row or row[3] in seen or oc.is_junk_page(row[2], row[3]):
                 continue
-            tk = title_key(row[5] or re.sub(r"^https?://(www\.)?", "", row[3]).split("/")[0], row[2])
+            tk = title_key(re.sub(r"^https?://(www\.)?", "", str(row[3] or "")).split("/")[0], row[2])   # the site
             if tk and tk in seen:
                 continue                               # the same story at another address of the outlet
             seen.update({row[3], tk} - {""})

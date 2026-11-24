@@ -3418,7 +3418,7 @@ async function rdTotals(tries = 0){
       else { $('rdTotal').textContent = '–'; for (const id of ['Pos', 'Neg', 'Neu']) $('rd' + id).textContent = '–'; }
       return; }
     RD.matching = d.matching; rdShowTotals(d);
-    $('rdMore').textContent = RD.rows.length < RD.matching ? 'Loading more…' : (RD.rows.length ? `All ${fmt(RD.matching)} shown` : '');
+    $('rdMore').textContent = RD.rows.length < RD.matching && RD.more !== false ? 'Loading more…' : (RD.rows.length ? `All ${fmt(RD.rows.length)} shown` : '');
   }, tries ? 3000 : 1500);
 }
 async function loadReader(reset = true, live = false){
@@ -3432,6 +3432,7 @@ async function loadReader(reset = true, live = false){
   RD.loading = false; $('rdList').classList.remove('rd-busy');
   if (!d || d.ok === false){ $('rdMsg').textContent = (d && d.error) || 'Could not load'; if (reset) $('rdList').innerHTML = ''; return; }
   RD.rows = reset ? d.rows : RD.rows.concat(d.rows);
+  RD.more = d.more;                                     // the server's own word: another page or not
   if (reset) $('rdMsg').innerHTML = d.query ? `Searching: <code>${esc(d.query.length > 300 ? d.query.slice(0, 300) + '…' : d.query)}</code>` : '';
   if (d.counting){                                      // the articles first; the totals follow in a moment
     RD.matching = d.more ? Infinity : RD.rows.length;
@@ -3441,7 +3442,7 @@ async function loadReader(reset = true, live = false){
   if (reset) $('rdList').innerHTML = html || `<div class="rd-none"><svg class="i"><use href="#i-search"/></svg><b>No article matches</b><small>Widen the dates or the keyword — or start the Live Stream so articles come in.</small></div>`;
   else $('rdList').insertAdjacentHTML('beforeend', html);
   $('rdList').querySelectorAll('img.rd-thumb').forEach(img => img.onerror = () => { const p = document.createElement('div'); p.className = 'rd-thumb rd-noimg'; p.innerHTML = '<svg class="i"><use href="#i-file"/></svg>'; img.replaceWith(p); });
-  $('rdMore').textContent = RD.rows.length < RD.matching ? 'Loading more…' : (RD.rows.length ? `All ${fmt(RD.matching)} shown` : '');
+  $('rdMore').textContent = RD.rows.length < RD.matching && RD.more !== false ? 'Loading more…' : (RD.rows.length ? `All ${fmt(RD.rows.length)} shown` : '');
   RD.first = RD.rows[0] && RD.rows[0].key; $('rdNew').hidden = true;
   if (live) document.querySelectorAll('.rd-card').forEach(c => c.classList.toggle('on', c.dataset.k === RD.key));
   if (reset && !live && RD.rows.length && innerWidth > 1300)  // the new filter's words highlighted in the open article too
@@ -3501,7 +3502,7 @@ $('rdQ').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey
 ['rdTopic', 'rdSrc', 'rdSent', 'rdSort', 'rdStart', 'rdEnd'].forEach(id => $(id).addEventListener('change', () => loadReader(true)));
 $('rdReset').onclick = () => { const t = localDay(); $('rdStart').value = $('rdEnd').value = t; $('rdQ').value = '';
   $('rdTopic').value = ''; $('rdMedia').value = ''; $('rdSrc').value = 'all'; $('rdSent').value = ''; $('rdSort').value = 'newest'; loadReader(true); };
-new IntersectionObserver(es => { if (es[0].isIntersecting && RD.rows.length && RD.rows.length < RD.matching && !RD.loading){ RD.page++; loadReader(false); } })
+new IntersectionObserver(es => { if (es[0].isIntersecting && RD.rows.length && RD.rows.length < RD.matching && RD.more !== false && !RD.loading){ RD.page++; loadReader(false); } })
   .observe($('rdMore'));
 $('rdNew').onclick = () => { window.scrollTo({top: 0, behavior: 'smooth'}); loadReader(true); };
 setInterval(async () => {                                // live: tell when new articles match the filter

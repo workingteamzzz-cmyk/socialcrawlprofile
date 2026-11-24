@@ -147,7 +147,18 @@ def _fts_map(db, fts: str) -> str:
                           (last,)).fetchall()
         if not rows:
             break
-        db.executemany(f"INSERT OR REPLACE INTO {m}(k, rid) VALUES (?, ?)", [(x[1], x[0]) for x in rows])
+        newest: dict = {}
+        for rid, k in rows:                          # one key twice (an old double entry): the older row goes
+            if k in newest:
+                db.execute(f"DELETE FROM {fts} WHERE rowid = ?", (newest[k],))
+            newest[k] = rid
+        ks = list(newest)
+        for i in range(0, len(ks), 500):
+            part = ks[i:i + 500]
+            for k, rid in db.execute(f"SELECT k, rid FROM {m} WHERE k IN ({','.join('?' * len(part))})", part).fetchall():
+                if rid != newest[k]:
+                    db.execute(f"DELETE FROM {fts} WHERE rowid = ?", (rid,))
+        db.executemany(f"INSERT OR REPLACE INTO {m}(k, rid) VALUES (?, ?)", list(newest.items()))
         last = rows[-1][0]
         db.execute("INSERT OR REPLACE INTO meta(k, v) VALUES (?, ?)", (m + "_at", str(last)))
         db.commit()
@@ -331,9 +342,15 @@ def _in_stream(keys: list[str]) -> set | None:
 def title_key(domain: str, title: str) -> str:
     """The same article under two links (a search result's link and the outlet's own, /amp, ?page=all…): the
     outlet plus the headline's words (the ' - Outlet' tail a search adds is left out)."""
-    t = re.sub(r"\s+[-|–—]\s+[^-|–—]{2,40}$", "", (title or "").strip())
-    t = " ".join(re.findall(r"\w+", t.lower()))[:90]
+    t = (title or "").strip()
     d = re.sub(r"^(www\.|m\.|amp\.)", "", (domain or "").lower())
+    m = re.search(r"\s+[-|–—]\s+([^-|–—]{2,40})$", t)
+    if m:                                     # the tail is cut only when it names the outlet ('… - Kompas.com'):
+        tail = re.sub(r"[^a-z0-9]", "", m[1].lower())     # '… - Bekasi' / '… - Depok' stay two articles
+        label = re.sub(r"[^a-z0-9]", "", d.split(".")[0])
+        if tail and label and (tail in re.sub(r"[^a-z0-9]", "", d) or label in tail):
+            t = t[:m.start()]
+    t = " ".join(re.findall(r"\w+", t.lower()))
     return f"{d}|{t}" if len(t) >= 20 and d else ""
 
 

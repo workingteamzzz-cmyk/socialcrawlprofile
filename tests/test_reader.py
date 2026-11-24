@@ -543,3 +543,29 @@ def test_the_excel_takes_more_than_one_page_in_one_read(rd, tmp_path, monkeypatc
     out = rd.export(start="2026-11-18", end="2026-11-18")
     assert out["rows"] == 150
     s.stop()
+
+
+def test_two_articles_of_one_outlet_are_not_taken_for_one(rd):
+    """Only a tail naming the outlet is left out of the headline match; '… - Bekasi' and '… - Depok' stay two."""
+    from crawler.insights import title_key
+    assert title_key("kompas.com", "Jadwal Pemadaman Listrik Hari Ini - Bekasi") != \
+        title_key("kompas.com", "Jadwal Pemadaman Listrik Hari Ini - Depok")
+    assert title_key("majalahict.com", "Salesforce dan Microsoft Luncurkan Copilotforce - Majalah ICT") == \
+        title_key("majalahict.com", "Salesforce dan Microsoft Luncurkan Copilotforce")
+    assert title_key("kompas.com", "Banjir Bandang Terjang Wilayah Selatan - Kompas.com") == \
+        title_key("www.kompas.com", "Banjir Bandang Terjang Wilayah Selatan")
+    long = "Jadwal pemadaman listrik PLN hari ini Selasa 24 November 2026 di wilayah Jawa Barat, cek daftar lokasinya:"
+    assert title_key("a.id", long + " Bandung") != title_key("a.id", long + " Bogor")
+
+
+def test_the_key_table_removes_an_older_double_entry(rd):
+    from crawler import insights
+    db = insights._search_db()
+    db.execute("INSERT INTO docs(key, title, summary) VALUES ('a.id/0', 'lama dobel', '')")   # an old double
+    db.execute("DROP TABLE IF EXISTS dockey")
+    db.execute("DELETE FROM meta WHERE k LIKE 'dockey%'")
+    db.commit()
+    insights._fts_map(db, "docs")
+    db.commit()
+    assert db.execute("SELECT COUNT(*) FROM docs WHERE key='a.id/0'").fetchone()[0] == 1
+    db.close()

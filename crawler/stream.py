@@ -698,7 +698,7 @@ class Stream:
             self.qn_hot += 1
             if watched(job.get("title") or "", job["url"]):
                 front = True                                   # the team's words: first of the first
-                if dom in by:
+                if dom in by and not (rr and rr[0] == dom):
                     try:
                         rr.remove(dom)
                     except ValueError:
@@ -2252,7 +2252,13 @@ def checkpoint(path: str, timeout: float = 10.0) -> dict:
     c = sqlite3.connect(path, timeout=timeout)
     try:
         c.execute(f"PRAGMA journal_size_limit={WAL_LIMIT}")
-        busy, frames, done = c.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        # first what can be copied without waiting for anyone; the journal is cut (TRUNCATE, which makes writers
+        # wait a moment) only once all of it is in the database — never while a long read still needs it
+        busy, frames, done = c.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+        if not busy and frames == done:
+            busy, frames, done = c.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        else:
+            busy = 1
     finally:
         c.close()
     after = os.path.getsize(wal) if os.path.exists(wal) else 0

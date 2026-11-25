@@ -1364,7 +1364,8 @@ class Stream:
             with self.lock:
                 self._db.execute("DROP INDEX IF EXISTS a_disc")
                 self._db.commit()
-        if {"a_disc_ds", "a_fail_err", "a_new_fd", "a_succ_cov", "a_dom_cov"} <= have and "a_succ_pub" not in have:
+        if {"a_disc_ds", "a_fail_err", "a_new_fd", "a_succ_cov", "a_dom_cov", "a_backfill"} <= have and \
+                "a_succ_pub" not in have:
             return
         self.meta("maintenance", f"building indexes since {datetime.now(WIB):%H:%M} (once after an update)")
         with self.lock:
@@ -1380,6 +1381,10 @@ class Stream:
             # News Stream filtered by outlet(s): that outlet's articles and their counts, from the index alone
             self._db.execute("CREATE INDEX IF NOT EXISTS a_dom_cov ON articles(domain, pub_date, pub_time, fetched, "
                              "sentiment) WHERE status='success'")
+            # media-archive jobs: their articles counted / listed without reading the whole queue (small: only
+            # the archive jobs' rows are in it)
+            self._db.execute("CREATE INDEX IF NOT EXISTS a_backfill ON articles(source, status, key) "
+                             "WHERE source LIKE 'backfill:%'")
             self._db.commit()
         self.meta("maintenance", "")
 
@@ -1486,10 +1491,22 @@ class Stream:
         from . import feeds
         feeds.sender_loop(self)
 
-    def fill_sentiment(self, n: int = 300) -> int:
-        """Articles read before sentiment was kept get theirs, a few hundred at a time."""
-        rows = self.rq("SELECT key, title, summary FROM articles WHERE status='success' AND "
-                       "(sentiment IS NULL OR sentiment='') LIMIT ?", (n,))
+    def fill_sentiment(self, n: int = 300, span: int = 20000) -> int:
+        """Articles read before sentiment was kept get theirs: a slice of the table at a time (by row number — a
+        quick read), and never again once the whole table was gone through. It used to look through every stored
+        article each round for the few without one: a read of minutes, again and again, which kept the journal
+        from ever being emptied. New articles get their sentiment when they are read."""
+        if self.meta("sentiment_done") == "1":
+            return 0
+        at = int(self.meta("sentiment_at") or 0)
+        top = self.rq("SELECT MAX(rowid) m FROM articles")[0]["m"] or 0
+        if at >= top:
+            self.meta("sentiment_done", "1")
+            return 0
+        rows = self.rq("SELECT key, title, summary FROM articles WHERE rowid > ? AND rowid <= ? AND status='success' "
+                       "AND (sentiment IS NULL OR sentiment='') LIMIT ?", (at, at + span, n))
+        if len(rows) < n:
+            self.meta("sentiment_at", str(at + span))          # this slice is done: the next one next round
         if not rows:
             return 0
         from .templates import analyze

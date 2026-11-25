@@ -67,7 +67,7 @@ def cancel(stream, jid: str) -> bool:
     ensure(stream)
     n = stream.x("UPDATE backfill SET status='cancelled', updated=? WHERE id=? AND status NOT IN ('done','cancelled')",
                  (time.time(), jid))
-    stream.x("DELETE FROM articles WHERE source=? AND status='new'", (source_of(jid),))
+    stream.x("DELETE FROM articles WHERE source=? AND status='new' AND source LIKE 'backfill:%'", (source_of(jid),))
     return bool(n)
 
 
@@ -75,7 +75,7 @@ def delete(stream, jid: str) -> bool:
     """Forget the job and its articles (the Excel files already made stay in Exports)."""
     ensure(stream)
     cancel(stream, jid)
-    stream.x("DELETE FROM articles WHERE source=?", (source_of(jid),))
+    stream.x("DELETE FROM articles WHERE source=? AND source LIKE 'backfill:%'", (source_of(jid),))
     stream.x("DELETE FROM backfill_maps WHERE job=?", (jid,))
     return bool(stream.x("DELETE FROM backfill WHERE id=?", (jid,)))
 
@@ -87,7 +87,7 @@ def job(stream, jid: str) -> dict:
         raise ValueError("Unknown archive job.")
     j = dict(r[0])
     counts = {x["status"]: x["n"] for x in stream.rq("SELECT status, COUNT(*) n FROM articles WHERE source=? "
-                                                       "GROUP BY status", (source_of(jid),))}
+                                                       "AND source LIKE 'backfill:%' GROUP BY status", (source_of(jid),))}
     j["read"], j["waiting"] = counts.get("success", 0), counts.get("new", 0)
     j["not_read"] = sum(v for k, v in counts.items() if k not in ("success", "new"))
     return j
@@ -187,7 +187,7 @@ def step(stream, ev=None, budget_s: float = 20.0) -> int:
         _discover(stream, j)
         return 0
     if j["status"] == "reading":
-        left = stream.rq("SELECT COUNT(*) n FROM articles WHERE source=? AND status='new'", (src,))[0]["n"]
+        left = stream.rq("SELECT COUNT(*) n FROM articles WHERE source=? AND status='new' AND source LIKE 'backfill:%'", (src,))[0]["n"]
         if not left:
             stream.x("UPDATE backfill SET status='done', updated=? WHERE id=?", (time.time(), jid))
             stream.gap_override.pop(j["domain"], None)
@@ -279,7 +279,7 @@ def export(stream, jid: str, out_dir: str) -> str:
     ws.append(head)
     wib, last, seen, n = timezone(timedelta(hours=7)), "", set(), 0
     while True:
-        rows = stream.rq("SELECT * FROM articles WHERE source=? AND status='success' AND key > ? ORDER BY key LIMIT 500",
+        rows = stream.rq("SELECT * FROM articles WHERE source=? AND status='success' AND key > ? AND source LIKE 'backfill:%' ORDER BY key LIMIT 500",
                          (source_of(jid), last))
         if not rows:
             break

@@ -1036,3 +1036,22 @@ def test_a_long_count_cut_at_the_limit_is_not_started_again_at_once(tmp_path, mo
     assert st.retry_failed() == 0                                   # a cut read: nothing retried, no error
     monkeypatch.setattr(stream, "_restart_allowed", stream._restart_allowed)
     assert stream._restart_allowed(str(tmp_path)) and not stream._restart_allowed(str(tmp_path))
+
+
+def test_old_articles_get_their_sentiment_slice_by_slice_and_then_never_again(tmp_path, monkeypatch):
+    """The sentiment of articles stored before it was kept: filled a slice of the table at a time, then marked done —
+    no look through every stored article each round (that read kept the journal from being emptied)."""
+    from crawler import paths, stream
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    st = stream.Stream(str(tmp_path / "s"))
+    with st.lock:
+        st._db.executemany("INSERT INTO articles(key, url, domain, title, status, discovered, sentiment) "
+                           "VALUES (?,?,?,?,?,0,?)", [(f"k{i}", f"https://a.id/{i}", "a.id", "PLN padam lagi", "success",
+                                                       "" if i % 3 == 0 else "neutral") for i in range(50)])
+        st._db.commit()
+    n = 0
+    for _ in range(10):
+        n += st.fill_sentiment(n=5, span=10)
+    assert n == 17 and st.meta("sentiment_done") == "1"
+    assert not st.rq("SELECT 1 FROM articles WHERE sentiment='' OR sentiment IS NULL")
+    assert st.fill_sentiment() == 0

@@ -15,3 +15,5 @@ def _own_safety_state(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(safety, "_path", lambda: str(d / "safety.json"))
     monkeypatch.setattr(news, "_block_path", lambda: str(d / "google_block.json"))
     yield
+    from crawler import job                # a test's rows still being saved in the background: done before the
+    job.archive_flush(120)                 # next test (they would share the processor with it)

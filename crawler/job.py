@@ -1392,7 +1392,11 @@ def _archive_writer() -> None:
                 new = 0
                 try:
                     for i in range(0, len(rows), 200):
+                        t0 = time.time()
                         new += archive.add_rows(kind, rows[i:i + 200], tz)
+                        # as long a pause as the chunk took: a search running now keeps at least half the
+                        # processor (the two used to fight over it and a big run slowed down many times)
+                        time.sleep(min(1.0, time.time() - t0))
                     log(f"🗄 Reporting database: {new} new, {len(rows) - new} updated")
                 except Exception as e:  # noqa: BLE001
                     log(f"⚠ Reporting database not updated: {str(e)[:120]}")

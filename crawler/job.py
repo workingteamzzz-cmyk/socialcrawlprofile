@@ -351,7 +351,8 @@ class Job:
         if not rows:
             return
         tz = tz or timezone(timedelta(hours=7))
-        log = self.log
+        label = f"{self.kind} run of {getattr(self, '_t0s', '')[11:16]}"
+        log = lambda m: self.log(m.replace("🗄 Reporting database:", f"🗄 Reporting database ({label}):", 1))  # noqa: E731
         _ARCHIVE_Q.put((kind, rows, tz, log))
         _archive_writer()
         log(f"🗄 Reporting database: {len(rows)} row(s) being saved in the background (Reports / News Stream in a "

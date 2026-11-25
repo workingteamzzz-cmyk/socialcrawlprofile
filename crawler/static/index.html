@@ -3255,7 +3255,7 @@ async function loadMedia(){
   $('mdK1').textContent = fmt(c.total); $('mdK1s').textContent = `${fmt(t.new || 0)} not checked yet`;
   $('mdK2').textContent = fmt((t.active || 0) + (t.semi || 0)); $('mdK2s').textContent = `${fmt(t.active || 0)} active · ${fmt(t.semi || 0)} semi · ${fmt(t.rare || 0)} rare`;
   $('mdK3').textContent = fmt(a.ok || 0); $('mdK3s').textContent = `${fmt(a.partial || 0)} partly`;
-  $('mdK4').textContent = fmt((a.blocked || 0) + (a.paywall || 0) + (a.robots || 0) + (a.unreachable || 0));   // the parts below add up to it $('mdK4s').textContent = `${fmt(a.blocked || 0)} blocked · ${fmt(a.paywall || 0)} paywall? · ${fmt(a.robots || 0)} robots.txt · ${fmt(a.unreachable || 0)} down`;
+  $('mdK4').textContent = fmt((a.blocked || 0) + (a.paywall || 0) + (a.robots || 0) + (a.unreachable || 0)); $('mdK4s').textContent = `${fmt(a.blocked || 0)} blocked · ${fmt(a.paywall || 0)} paywall? · ${fmt(a.robots || 0)} robots.txt · ${fmt(a.unreachable || 0)} down`;
   const admin = ROLE === 'admin';
   $('mdBody').innerHTML = d.rows.length ? d.rows.map((r, i) => `<tr>
     <td><b>${esc(r.domain)}</b>${r.country === 'intl' ? ' <span class="badge b-neu" title="International (non-Indonesian) outlet">INTL</span>' : ''}${r.name ? `<small>${esc(r.name)}</small>` : ''}${r.subscribed ? ' <span class="badge b-ok" title="Read with the paid login">login</span>' : ''}</td>
@@ -3658,7 +3658,9 @@ document.querySelectorAll('.tp-pick').forEach(sel => sel.addEventListener('chang
   const t = TOPICS.find(x => x.id === sel.value); sel.value = ''; if (!t) return;
   if (sel.dataset.for === 'kw'){ keywords = []; kwAdd(t.keywords.join('\n')); }
   else { NW.items = []; NW.add(t.keywords.join('\n')); }
-  toast(`Topic ${t.name}: ${t.keywords.length} keyword(s)`); }));
+  const got = sel.dataset.for === 'kw' ? keywords.length : NW.items.length;
+  toast(got < t.keywords.length ? `Topic ${t.name}: the first ${got} of ${t.keywords.length} keywords (the box holds ${got})`
+    : `Topic ${t.name}: ${got} keyword(s)`); }));
 document.querySelectorAll('[data-tpsave]').forEach(b => b.onclick = async () => {
   const items = b.dataset.tpsave === 'kw' ? keywords : NW.items;
   if (!items.length) return toast('Add some keywords first', true);

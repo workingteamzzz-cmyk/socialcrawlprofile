@@ -380,7 +380,9 @@ def _refresh() -> None:
             except OSError:
                 pass
         else:
-            _CACHE["t"] = max(_CACHE["t"], time.time() - 280)        # busy: again in about 20 s
+            # busy, or the count was cut at its time limit (a big database): the old numbers stay; tried again in
+            # 15 minutes — not at once, which would keep a long read open almost all the time
+            _CACHE["t"] = max(_CACHE["t"], time.time() + 600)
     finally:
         with _DONE:
             _CACHE["busy"] = False

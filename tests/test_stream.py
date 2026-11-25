@@ -1018,3 +1018,21 @@ def test_a_read_of_the_stream_database_never_runs_too_long(tmp_path, monkeypatch
         st.rq(slow, max_s=0.3)
     assert time.time() - t < 5
     assert st.rq("SELECT 1 n")[0]["n"] == 1
+
+
+def test_a_long_count_cut_at_the_limit_is_not_started_again_at_once(tmp_path, monkeypatch):
+    """The background counts cut at the read limit keep their last numbers and wait 15 minutes — never one long
+    read after another (that kept the journal full)."""
+    import sqlite3
+    from crawler import paths, stream
+    monkeypatch.setattr(paths, "APP_DATA", str(tmp_path / "data"))
+    st = stream.Stream(str(tmp_path / "s"))
+    monkeypatch.setattr(st, "rq", lambda *a, **k: (_ for _ in ()).throw(sqlite3.OperationalError("interrupted")))
+    st.slow_counts()
+    deadline = time.time() + 5
+    while st._sc["busy"] and time.time() < deadline:
+        time.sleep(0.05)
+    assert st._sc["t"] > time.time() + 600
+    assert st.retry_failed() == 0                                   # a cut read: nothing retried, no error
+    monkeypatch.setattr(stream, "_restart_allowed", stream._restart_allowed)
+    assert stream._restart_allowed(str(tmp_path)) and not stream._restart_allowed(str(tmp_path))

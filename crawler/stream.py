@@ -1277,13 +1277,20 @@ class Stream:
             return 0
         now = time.time()
         q = ','.join('?' * len(self.TEMPORARY))
-        keys = [r["key"] for r in self.rq(
-            f"SELECT key FROM articles WHERE status='failed' AND discovered > ? AND fetched < ? AND "
-            f"COALESCE(tries, 0) < ? AND error IN ({q}) LIMIT 5000",
-            (now - days * 86400, now - after_h * 3600, max_tries, *self.TEMPORARY))]
-        keys += [r["key"] for r in self.rq(                   # headline-only clips: the full text, if given now
-            "SELECT key FROM articles WHERE status='success' AND fetched > ? AND fetched < ? AND error = ? AND "
-            "COALESCE(tries, 0) < ? LIMIT 2000", (now - days * 86400, now - 6 * 3600, self.HEADLINE_ONLY, max_tries))]
+
+        def some(sql, args):                       # a part cut at the read limit is simply left for next time
+            try:
+                return [r["key"] for r in self.rq(sql, args)]
+            except sqlite3.OperationalError as e:
+                if "interrupt" in str(e):
+                    return []
+                raise
+        keys = some(f"SELECT key FROM articles WHERE status='failed' AND discovered > ? AND fetched < ? AND "
+                    f"COALESCE(tries, 0) < ? AND error IN ({q}) LIMIT 5000",
+                    (now - days * 86400, now - after_h * 3600, max_tries, *self.TEMPORARY))
+        keys += some("SELECT key FROM articles WHERE status='success' AND fetched > ? AND fetched < ? AND error = ? "
+                     "AND COALESCE(tries, 0) < ? LIMIT 2000",   # headline-only clips: the full text, if given now
+                     (now - days * 86400, now - 6 * 3600, self.HEADLINE_ONLY, max_tries))
         if not keys:
             return 0
         with self.lock:
@@ -1414,7 +1421,7 @@ class Stream:
                         big_since = big_since or time.time()
                         self.last_error = (f"the {worst} journal is {left:.1f} GB and could not be emptied yet "
                                            "(a long read is using it) — tried again every minute")
-                        if time.time() - big_since > 3600 and _IN_WORKER:
+                        if time.time() - big_since > 3600 and _IN_WORKER and _restart_allowed(self.folder):
                             # an hour without success: a connection of this engine may hold an old read — the
                             # engine restarts (its connections close; the supervisor starts it again at once)
                             getattr(self, "_log", print)(f"⚠ {worst}: journal {left:.1f} GB for an hour — restarting the engine to free it")
@@ -1886,8 +1893,10 @@ class Stream:
                               "stored": one("SELECT COUNT(*) n FROM articles WHERE status='success'")}
                     c["t"] = time.time()
                     c["every"] = max(60, min(900, 30 * (c["t"] - t0)))   # costly counts: less often (max 15 min)
-                except Exception:  # noqa: BLE001  busy: try again shortly
-                    c["t"] = time.time() - 45
+                except Exception as e:  # noqa: BLE001
+                    # busy: again shortly; cut at the read limit (a big database): the last numbers stay, again in
+                    # 15 minutes — never one long count after another
+                    c["t"] = time.time() + (840 if "interrupt" in str(e) else -45)
                 finally:
                     c["busy"] = False
             th = threading.Thread(target=run, daemon=True, name="stream-counts")
@@ -2258,6 +2267,22 @@ def take_commands(s: "Stream") -> list:
 LOOP_HUNG_AFTER = 1800    # the worker's main loop has not come round for 30 minutes (after it did once) = hung
 WAL_LIMIT = 256 * 1024 * 1024   # bytes: an emptied journal (-wal file) is cut back to this
 READ_MAX_S = 120                # a read of the stream's database never runs longer (see Stream.rq)
+
+
+def _restart_allowed(folder: str, every: float = 6 * 3600) -> bool:
+    """The engine frees a stuck journal by restarting at most once in 6 hours (the read holding it may be in the web
+    process, which a restart of the engine does not end)."""
+    mark = os.path.join(folder, "journal_restart.at")
+    try:
+        if time.time() - os.path.getmtime(mark) < every:
+            return False
+    except OSError:
+        pass
+    try:
+        open(mark, "w").close()
+    except OSError:
+        pass
+    return True
 
 
 def checkpoint(path: str, timeout: float = 10.0) -> dict:

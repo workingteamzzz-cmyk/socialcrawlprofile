@@ -901,23 +901,34 @@ class Stream:
             need_fresh = self.qn - self.qn_old - self.qn_hot < 2000
             need_old = self.qn_old < 1500
         cut = self._fresh_cutoff()
+
+        def part(sql, args=()):
+            # each part on its own: one cut at the read limit (a huge waiting list) never leaves the readers
+            # without work — the others still fill the queue
+            try:
+                return self.rq(sql, args)
+            except sqlite3.OperationalError as e:
+                if "interrupt" not in str(e):
+                    raise
+                self.last_error = "queue: a refill read took too long (huge waiting list) — the others still fill it"
+                return []
         got: list = []
         if need_hot:
-            got += self.rq(f"SELECT {cols} FROM articles WHERE discovered > ? AND status='new' AND "
-                           f"source IN ('rss:hot', 'sitemap:hot'){sh} ORDER BY discovered DESC LIMIT 3000",
-                           (now - 6 * 3600,))
+            got += part(f"SELECT {cols} FROM articles WHERE discovered > ? AND status='new' AND "
+                        f"source IN ('rss:hot', 'sitemap:hot'){sh} ORDER BY discovered DESC LIMIT 3000",
+                        (now - 6 * 3600,))
         if need_fresh:
-            got += self.rq(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date >= ?{sh} "
-                           "ORDER BY feed_date DESC LIMIT 3000", (cut,))
-            got += self.rq(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date = '' AND "
-                           f"discovered > ? AND source NOT LIKE '%:old'{sh} ORDER BY discovered DESC LIMIT 1500",
-                           (now - 2 * 86400,))
+            got += part(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date >= ?{sh} "
+                        "ORDER BY feed_date DESC LIMIT 3000", (cut,))
+            got += part(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date = '' AND "
+                        f"discovered > ? AND source NOT LIKE '%:old'{sh} ORDER BY discovered DESC LIMIT 1500",
+                        (now - 2 * 86400,))
         old: list = []
         if need_old:
-            old += self.rq(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date > '' AND "
-                           f"feed_date < ?{sh} ORDER BY feed_date DESC LIMIT 1500", (cut,))
-            old += self.rq(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date = ''{sh} "
-                           "ORDER BY discovered DESC LIMIT 1500")                     # undated backlog
+            old += part(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date > '' AND "
+                        f"feed_date < ?{sh} ORDER BY feed_date DESC LIMIT 1500", (cut,))
+            old += part(f"SELECT {cols} FROM articles WHERE status='new' AND feed_date = ''{sh} "
+                        "ORDER BY discovered DESC LIMIT 1500")                     # undated backlog
         if not got and not old:
             return
         with self.lock:

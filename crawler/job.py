@@ -1366,33 +1366,40 @@ class Job:
 
 _ARCHIVE_Q: queue.Queue = queue.Queue()
 _ARCHIVE_T: dict = {}
+_ARCHIVE_L = threading.Lock()
 
 
 def _archive_writer() -> None:
     """One background writer for the runs' results: in chunks of 200 rows (the database is never held long), in
-    the order the runs ended."""
-    t = _ARCHIVE_T.get("t")
-    if t is not None and t.is_alive():
-        return
+    the order the runs ended. It ends after a minute without work — under a lock, so rows handed over at that very
+    moment are never left behind."""
+    with _ARCHIVE_L:
+        t = _ARCHIVE_T.get("t")
+        if t is not None and t.is_alive():
+            return
 
-    def run():
-        from . import archive
-        while True:
-            try:
-                kind, rows, tz, log = _ARCHIVE_Q.get(timeout=60)
-            except queue.Empty:
-                return
-            new = 0
-            try:
-                for i in range(0, len(rows), 200):
-                    new += archive.add_rows(kind, rows[i:i + 200], tz)
-                log(f"🗄 Reporting database: {new} new, {len(rows) - new} updated")
-            except Exception as e:  # noqa: BLE001
-                log(f"⚠ Reporting database not updated: {str(e)[:120]}")
-            finally:
-                _ARCHIVE_Q.task_done()
-    _ARCHIVE_T["t"] = threading.Thread(target=run, daemon=True, name="archive-writer")
-    _ARCHIVE_T["t"].start()
+        def run():
+            from . import archive
+            while True:
+                try:
+                    kind, rows, tz, log = _ARCHIVE_Q.get(timeout=60)
+                except queue.Empty:
+                    with _ARCHIVE_L:
+                        if _ARCHIVE_Q.empty():
+                            _ARCHIVE_T["t"] = None
+                            return
+                    continue
+                new = 0
+                try:
+                    for i in range(0, len(rows), 200):
+                        new += archive.add_rows(kind, rows[i:i + 200], tz)
+                    log(f"🗄 Reporting database: {new} new, {len(rows) - new} updated")
+                except Exception as e:  # noqa: BLE001
+                    log(f"⚠ Reporting database not updated: {str(e)[:120]}")
+                finally:
+                    _ARCHIVE_Q.task_done()
+        _ARCHIVE_T["t"] = threading.Thread(target=run, daemon=True, name="archive-writer")
+        _ARCHIVE_T["t"].start()
 
 
 def archive_pending() -> int:
